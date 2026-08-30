@@ -10,6 +10,12 @@
  *
  * The Layout receives entries-related props from App.tsx:
  * - onAddEntry: Callback to add new entries to the app state
+ * - entries: The full entries array. Layout doesn't render or transform
+ *   this itself - it only needs `entries.length` (via `showMockDataBanner`
+ *   below) to decide whether to show the "showing example data" badge
+ *   next to the '+' button, which only makes sense on the Constellation
+ *   route (checked via `useLocation()`) since that's the only page that
+ *   falls back to mock data when entries is empty (see Constellation.tsx).
  *
  * Local state managed here:
  * - isModalOpen: Controls visibility of the AddEntryForm modal
@@ -34,7 +40,7 @@
  */
 
 import { useState } from 'react';
-import { Link, Outlet } from 'react-router-dom';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import AddEntryForm from './AddEntryForm';
 import { Entry } from '../types/Entry';
 
@@ -42,16 +48,32 @@ import { Entry } from '../types/Entry';
  * Props interface for Layout component
  *
  * DESIGN NOTE:
- * We pass only the addEntry callback, not the full entries array.
- * This is because Layout doesn't need to read entries - it only
- * needs to create new ones. This minimizes unnecessary re-renders.
+ * Layout doesn't transform or render `entries` itself - it's here only
+ * so Layout can read `entries.length` for the mock-data navbar badge
+ * (see `showMockDataBanner` below). Everything else about entries
+ * (creating them) still flows one-way through `onAddEntry`.
  */
 interface LayoutProps {
   /** Callback to add a new entry to the app state (defined in App.tsx) */
   onAddEntry: (entry: Entry) => void;
+  /** The full entries array (defined in App.tsx) - see DESIGN NOTE above. */
+  entries: Entry[];
 }
 
-export default function Layout({ onAddEntry }: LayoutProps) {
+export default function Layout({ onAddEntry, entries }: LayoutProps) {
+  const location = useLocation();
+
+  /**
+   * Whether to show the "showing example data" badge next to the '+'
+   * button. Moved here from Constellation.tsx so it renders as part of
+   * the navbar's flex row instead of floating over the starfield (see
+   * Constellation.tsx's `usingMockData`, which still separately decides
+   * whether the star map itself falls back to mock entries - the two are
+   * the same underlying condition, just each component reading `entries`
+   * for its own purpose, not shared state).
+   */
+  const showMockDataBanner =
+    location.pathname === '/constellation' && entries.length === 0;
   /**
    * LOCAL STATE: Modal visibility
    *
@@ -97,8 +119,25 @@ export default function Layout({ onAddEntry }: LayoutProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Navigation Bar */}
-      <nav className="bg-white shadow-sm">
+      {/*
+       * Navigation Bar
+       * relative z-10: Constellation.tsx's StarMap now renders a `fixed`
+       * full-viewport canvas (z-0). CSS always paints positioned elements
+       * above non-positioned ones regardless of DOM order, so without an
+       * explicit position + z-index here, that canvas would render on
+       * top of this non-positioned navbar and cover it. z-10 keeps the
+       * navbar on top, same tier as Constellation's page header/FilterBar
+       * (also z-10); both stay below the sidebar overlay (z-30) and the
+       * AddEntryForm modal (z-50).
+       *
+       * bg-[var(--bg-color)]: same theme token as StarMap's canvas and
+       * the Constellation sidebar (see index.css :root), so the navbar
+       * matches rather than being a separate white bar - text-gray-500/
+       * hover:text-gray-700 (tuned for a white background) are adjusted
+       * to text-gray-400/hover:text-gray-200 below to stay legible
+       * against this now-dark background.
+       */}
+      <nav className="relative z-10 bg-[var(--bg-color)] shadow-sm">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 justify-between">
             {/* Left side: Logo and navigation links */}
@@ -111,33 +150,38 @@ export default function Layout({ onAddEntry }: LayoutProps) {
               <div className="ml-6 flex space-x-8">
                 <Link
                   to="/"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
                 >
                   Home
                 </Link>
                 <Link
                   to="/chart"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
                 >
                   Chart
                 </Link>
                 <Link
                   to="/constellation"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
                 >
                   Constellation
                 </Link>
                 <Link
                   to="/about"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
                 >
                   About
                 </Link>
               </div>
             </div>
 
-            {/* Right side: Add Entry button */}
-            <div className="flex items-center">
+            {/* Right side: mock-data badge (Constellation only) + Add Entry button */}
+            <div className="flex items-center gap-3">
+              {showMockDataBanner && (
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
+                  Showing example data - add an entry to see your own
+                </span>
+              )}
               {/**
                * ADD ENTRY BUTTON
                *

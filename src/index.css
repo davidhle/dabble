@@ -28,3 +28,30 @@ body {
   min-width: 320px;
   min-height: 100vh;
 }
+
+/*
+ * Scrollbar styling for the Constellation sidebar panel stack's own
+ * internal scroll (its `overflow-y-auto` container in Constellation.tsx)
+ * - scoped to this one class, so it only affects that sidebar's scroll
+ * and no other scrollable element in the app. The browser's default
+ * scrollbar track renders white/opaque, which clashes with the dark
+ * "night sky" theme (see --bg-color etc. above) the sidebar sits in - so
+ * only the TRACK (the channel behind the thumb) is set to transparent
+ * here, letting the sidebar's own background show through. The THUMB
+ * (the draggable grip) is left visible, given a subtle translucent light
+ * color rather than the browser default, since a transparent track alone
+ * would otherwise leave nothing to indicate scroll position.
+ */
+.constellation-sidebar-scroll {
+  /* Firefox: `scrollbar-color: <thumb-color> <track-color>`. */
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+
+.constellation-sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.constellation-sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.25);
+  border-radius: 9999px;
+}

@@ -191,9 +191,16 @@ function App() {
          * - Main content container
          *
          * The onAddEntry prop enables the Layout (and its AddEntryForm)
-         * to add entries to the state managed here.
+         * to add entries to the state managed here. `entries` itself is
+         * also passed down so Layout can show the "showing example data"
+         * navbar badge on the Constellation route (see Layout.tsx) -
+         * Layout needs to know entries.length even though it doesn't
+         * otherwise use the entries array itself.
          */}
-        <Route path="/" element={<Layout onAddEntry={addEntry} />}>
+        <Route
+          path="/"
+          element={<Layout onAddEntry={addEntry} entries={entries} />}
+        >
           {/**
            * Child routes render inside Layout's <Outlet />
            *

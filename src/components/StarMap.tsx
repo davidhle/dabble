@@ -9,6 +9,31 @@
  * which uses it to open an inline detail panel in a sidebar).
  *
  * ──────────────────────────────────────────────────────────────────────
+ * FULL-BLEED CANVAS: SHIFT THE ZOOM TARGET, NOT THE CANVAS SIZE
+ * ──────────────────────────────────────────────────────────────────────
+ * StarMap's root <div> is `fixed inset-0`: it always fills the entire
+ * viewport, full width and height, whether or not Constellation.tsx's
+ * sidebar overlay is currently showing. This is a change from an earlier
+ * version, where the container StarMap rendered into actually shrank
+ * (via a CSS flex layout) whenever the sidebar opened, and StarMap
+ * measured that shrinking container with a ResizeObserver to match.
+ *
+ * The sidebar is now a separate `fixed`, higher-z-index overlay drawn ON
+ * TOP of this canvas (see Constellation.tsx) rather than a layout
+ * sibling that pushes the canvas over - so the canvas's own `size` (and
+ * everything computed from it: category centers, star positions, the
+ * background rect) is always the *whole* window, never the narrower
+ * "not covered by the sidebar" region.
+ *
+ * The one place this distinction still matters is auto-centering a
+ * clicked star (see CLICK-TO-CENTER below): "centered" should mean
+ * centered in the region the user can actually *see* the canvas through
+ * - i.e. excluding whatever the sidebar overlay is covering - even
+ * though the canvas underneath that overlay is still there and still
+ * full-size. That's why `sidebarWidth` is threaded in as a prop and used
+ * only in that one calculation, not anywhere else in this file.
+ *
+ * ──────────────────────────────────────────────────────────────────────
  * HOW d3-zoom's PAN/ZOOM TRANSFORM WORKS
  * ──────────────────────────────────────────────────────────────────────
  * d3.zoom() is a *behavior*: a function you `.call()` on a D3 selection
@@ -109,7 +134,30 @@ interface StarMapProps {
    * opened, so the highlight can't drift out of sync with the sidebar.
    */
   openedEntryIds: string[];
+  /**
+   * activityTypes currently "active" (Constellation.tsx's sidebar filter
+   * toggles). Stars whose activityType is NOT in this list are dimmed to
+   * FILTERED_OUT_OPACITY rather than hidden or removed - filtering here
+   * is intentionally non-destructive: a filtered-out star is still
+   * present in the DOM, still clickable, and if it's also an "opened"
+   * star (see openedEntryIds above) its highlight ring still renders,
+   * just at the dimmed opacity along with the rest of the star. This
+   * mirrors Constellation.tsx's sidebar, which never closes a panel just
+   * because its category gets filtered out here.
+   */
+  filterCategories: ActivityType[];
+  /**
+   * The sidebar overlay's current rendered width in pixels (0 when it
+   * isn't rendered, i.e. `selectedEntries` is empty) - see the
+   * "FULL-BLEED CANVAS" comment above and the CLICK-TO-CENTER comment
+   * below for why this needs to be passed in explicitly now, rather than
+   * being implied by the canvas's own (previously shrinking) size.
+   */
+  sidebarWidth: number;
 }
+
+/** Opacity applied to a star whose category is filtered out. */
+const FILTERED_OUT_OPACITY = 0.15;
 
 /**
  * Neutral, bright highlight color for the "opened star" ring/glow.
@@ -165,6 +213,8 @@ export default function StarMap({
   entries,
   onStarClick,
   openedEntryIds,
+  filterCategories,
+  sidebarWidth,
 }: StarMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -178,9 +228,11 @@ export default function StarMap({
   > | null>(null);
 
   // ─── Responsive sizing ───
-  // StarMap fills whatever container it's placed in. We measure that
-  // container with a ResizeObserver and size the <svg> (and therefore the
-  // coordinate space stars are placed in) to match.
+  // The root <div> is `fixed inset-0` (see "FULL-BLEED CANVAS" above), so
+  // this always measures the full viewport - it no longer shrinks when
+  // the sidebar overlay opens. Still tracked via ResizeObserver (rather
+  // than reading window.innerWidth/Height directly) so window resizes
+  // continue to update it live, same as before.
   const [size, setSize] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
@@ -250,14 +302,27 @@ export default function StarMap({
    *
    * A `d3.ZoomTransform` is `{ x, y, k }` and maps a *world* coordinate
    * (star.x, star.y) to a *screen* coordinate via
-   * `screen = k * world + (x, y)`. We want the clicked star to land at the
-   * viewport's current center, at the *current* zoom level k (only the pan
+   * `screen = k * world + (x, y)`. We want the clicked star to land at
+   * some target screen point, at the *current* zoom level k (only the pan
    * changes, not the scale). Solving for the translate that satisfies
-   * `k * star + (x, y) = center` gives `(x, y) = center - k * star`, which
+   * `k * star + (x, y) = target` gives `(x, y) = target - k * star`, which
    * is exactly what composing
-   * `zoomIdentity.translate(center).scale(k).translate(-star)` produces
+   * `zoomIdentity.translate(target).scale(k).translate(-star)` produces
    * (d3's Transform methods compose left-to-right, each one folding into
    * the running x/y/k rather than overwriting it).
+   *
+   * WHY THE TARGET IS NOT SIMPLY (width / 2, height / 2) ANYMORE:
+   * Before the "FULL-BLEED CANVAS" change (see the top-of-file comment),
+   * the canvas's own `size` *was* the visible viz region - the container
+   * physically shrank when the sidebar opened - so its literal center
+   * was already the right target. Now `size` is always the full window,
+   * so (width / 2, height / 2) would center a star under the sidebar
+   * overlay half the time, not in the region the user can actually see
+   * the canvas through. The fix is to bias the target rightward by half
+   * the sidebar's width: the visible band runs from x = sidebarWidth to
+   * x = width, so its midpoint is `sidebarWidth + (width - sidebarWidth) / 2`.
+   * The y target is untouched (`height / 2`) since the sidebar overlay
+   * only covers the left edge, not the top or bottom.
    */
   const handleStarClick = (star: { entry: Entry; x: number; y: number }) => {
     onStarClick(star.entry);
@@ -266,17 +331,16 @@ export default function StarMap({
     const zoomBehavior = zoomBehaviorRef.current;
     if (!svgNode || !zoomBehavior) return;
 
-    // Use the *current* container size, not the original/full window size,
-    // so the center point tracks the shrunken viz area to the right of the
-    // sidebar (this is the same `size` state kept live by the
-    // ResizeObserver above).
     const { width, height } = size;
     if (width === 0 || height === 0) return;
+
+    const targetX = sidebarWidth + (width - sidebarWidth) / 2;
+    const targetY = height / 2;
 
     const currentTransform = d3.zoomTransform(svgNode);
 
     const centeredTransform = d3.zoomIdentity
-      .translate(width / 2, height / 2)
+      .translate(targetX, targetY)
       .scale(currentTransform.k) // preserve the user's current zoom level
       .translate(-star.x, -star.y);
 
@@ -350,9 +414,17 @@ export default function StarMap({
     () => new Set(openedEntryIds),
     [openedEntryIds]
   );
+  const activeCategorySet = useMemo(
+    () => new Set(filterCategories),
+    [filterCategories]
+  );
 
   return (
-    <div ref={containerRef} className="relative h-full w-full">
+    // `fixed inset-0` (not a layout child) - see "FULL-BLEED CANVAS"
+    // above. z-0 is the base layer: Layout.tsx's navbar, Constellation's
+    // header text, FilterBar, and the sidebar overlay all render above
+    // this with their own higher z-index.
+    <div ref={containerRef} className="fixed inset-0 z-0">
       <svg
         ref={svgRef}
         width={size.width}
@@ -415,8 +487,20 @@ export default function StarMap({
 
           {stars.map(({ entry, x, y, radius, color }) => {
             const isOpened = openedEntryIdSet.has(entry.id);
+            const isFilteredOut = !activeCategorySet.has(entry.activityType);
             return (
-              <g key={entry.id}>
+              // Opacity is set on the whole group (glow + star + ring)
+              // rather than per-circle, so a filtered-out star's "opened"
+              // highlight dims along with it instead of staying full
+              // brightness - see the filterCategories prop comment above.
+              // Filtered-out stars keep their onClick below: filtering is
+              // visual-only here, not an interaction block, so a user can
+              // still click a dimmed star to open its panel.
+              <g
+                key={entry.id}
+                style={{ opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1 }}
+                className="transition-opacity duration-200"
+              >
                 {isOpened && (
                   // Soft blurred halo, behind the star.
                   <circle
