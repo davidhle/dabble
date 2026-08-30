@@ -47,6 +47,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import Chart from './pages/Chart';
+import Constellation from './pages/Constellation';
 import About from './pages/About';
 import { Entry } from './types/Entry';
 
@@ -208,6 +209,10 @@ function App() {
            */}
           <Route index element={<Home />} />
           <Route path="chart" element={<Chart />} />
+          <Route
+            path="constellation"
+            element={<Constellation entries={entries} />}
+          />
           <Route path="about" element={<About />} />
         </Route>
       </Routes>

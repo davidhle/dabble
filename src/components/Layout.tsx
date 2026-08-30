@@ -122,6 +122,12 @@ export default function Layout({ onAddEntry }: LayoutProps) {
                   Chart
                 </Link>
                 <Link
+                  to="/constellation"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                >
+                  Constellation
+                </Link>
+                <Link
                   to="/about"
                   className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-500 hover:border-gray-300 hover:text-gray-700"
                 >

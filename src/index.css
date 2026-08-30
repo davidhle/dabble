@@ -6,6 +6,21 @@
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
+
+  /*
+   * THEME TOKENS - Constellation view ("night sky" dark theme)
+   * ────────────────────────────────────────────────────────────
+   * These are consumed via var(--token-name) by StarMap.tsx (the SVG
+   * canvas background) and Constellation.tsx/EntryPanel.tsx (the sidebar
+   * and its entry cards), rather than hardcoding the same hex values in
+   * each component. That's prep for a future dark/light mode toggle: to
+   * add one, redefine these under e.g. a `[data-theme="light"]` selector
+   * (or a `prefers-color-scheme` media query) and every consumer re-themes
+   * automatically - no component code needs to change, just these values.
+   */
+  --bg-color: #0b1023; /* StarMap canvas + sidebar page background */
+  --panel-bg-color: rgba(255, 255, 255, 0.06); /* entry panel surface: a subtle lift off --bg-color */
+  --panel-border-color: rgba(255, 255, 255, 0.12); /* entry panel border, tuned for the same surface */
 }
 
 body {
