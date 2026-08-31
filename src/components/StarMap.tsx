@@ -135,6 +135,26 @@ interface StarMapProps {
    */
   openedEntryIds: string[];
   /**
+   * The id of the single entry whose panel is currently expanded (not
+   * minimized) in Constellation.tsx's sidebar, or `null` if none is. This
+   * is what lets `handleStarClick` below tell an "expand a minimized
+   * panel" click apart from a "deselect an already-expanded panel" click
+   * on the same star - see the STAR CLICK OUTCOMES comment on
+   * `handleStarClick`. It's also the trigger for the CLICK-TO-CENTER
+   * effect below: centering runs off *this prop changing*, not off the
+   * click event itself, so it fires the same way whether the expand was
+   * caused by clicking the star directly or by clicking its minimized row
+   * in the sidebar.
+   */
+  expandedEntryId: string | null;
+  /**
+   * Called instead of `onStarClick` when the clicked star's entry is
+   * already opened AND already expanded - see STAR CLICK OUTCOMES below.
+   * Constellation.tsx wires this to the same removal path as a panel's
+   * × close button.
+   */
+  onStarDeselect: (entry: Entry) => void;
+  /**
    * activityTypes currently "active" (Constellation.tsx's sidebar filter
    * toggles). Stars whose activityType is NOT in this list are dimmed to
    * FILTERED_OUT_OPACITY rather than hidden or removed - filtering here
@@ -213,6 +233,8 @@ export default function StarMap({
   entries,
   onStarClick,
   openedEntryIds,
+  expandedEntryId,
+  onStarDeselect,
   filterCategories,
   sidebarWidth,
 }: StarMapProps) {
@@ -280,8 +302,62 @@ export default function StarMap({
 
   /**
    * ──────────────────────────────────────────────────────────────────────
-   * CLICK-TO-CENTER: PROGRAMMATIC PAN VIA d3-zoom's `.transform()`
+   * STAR CLICK OUTCOMES: OPEN NEW / EXPAND MINIMIZED / DESELECT EXPANDED
    * ──────────────────────────────────────────────────────────────────────
+   * Clicking a star means one of three different things depending on that
+   * entry's current state in the sidebar, distinguished using the
+   * `openedEntryIds` / `expandedEntryId` props:
+   *
+   *   1. Not opened at all -> open it: forwarded to `onStarClick`, which
+   *      Constellation.tsx uses to add a new (expanded) panel to the
+   *      stack.
+   *   2. Opened but minimized (in `openedEntryIds`, but its id isn't
+   *      `expandedEntryId`) -> expand it: also forwarded to `onStarClick`,
+   *      which Constellation.tsx's existing handler already treats the
+   *      same as case 1's "make this one the expanded panel" outcome.
+   *   3. Opened AND already expanded (`entry.id === expandedEntryId`) ->
+   *      deselect it: clicking a star that's already front-and-center is
+   *      read as "close this," not "reopen this," so it's forwarded to
+   *      `onStarDeselect` instead, which removes the panel entirely (same
+   *      as its × button) rather than re-expanding it.
+   *
+   * Cases 1 and 2 both result in this entry becoming (or staying) the
+   * expanded panel, so both should pan/center the canvas on it. Case 3 is
+   * a close, not an open, so it must NOT trigger that pan - see the
+   * CLICK-TO-CENTER effect below for why centering is wired to react to
+   * that shared "becomes expanded" outcome directly, rather than being
+   * called from here.
+   */
+  const handleStarClick = (entry: Entry) => {
+    const isAlreadyExpanded = entry.id === expandedEntryId;
+    if (isAlreadyExpanded) {
+      onStarDeselect(entry);
+      return;
+    }
+    onStarClick(entry);
+  };
+
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * CLICK-TO-CENTER: PROGRAMMATIC PAN VIA d3-zoom's `.transform()`, TIED
+   * TO THE EXPANDED-ENTRY STATE CHANGE
+   * ──────────────────────────────────────────────────────────────────────
+   * This used to run directly inside `handleStarClick` above, right after
+   * calling `onStarClick`. That worked for a direct star click, but meant
+   * expanding a panel by clicking its *minimized row in the sidebar*
+   * (Constellation.tsx's `handleExpandPanel`, which never goes through
+   * this file at all) never panned the canvas, even though the visible
+   * result - some entry becoming the expanded panel - is identical either
+   * way. Rather than duplicate the centering call at every place that can
+   * cause an expand, it's pulled out into this effect and keyed on
+   * `expandedEntryId` itself: whatever caused that prop to change to a
+   * new, non-null id - a direct star click (case 1/2 above) or a sidebar
+   * row click - this fires exactly the same way, once, in one place. A
+   * deselect (case 3 above) sets `expandedEntryId` to `null` (nothing
+   * becomes newly expanded), so the `!expandedEntryId` guard below means
+   * closing a panel never triggers this pan, matching the "don't recenter
+   * when closing" requirement.
+   *
    * Everywhere else in this file, the zoom transform is *read* - it's
    * whatever the 'zoom' event above last reported from a user drag/wheel
    * gesture. Here we go the other direction: we compute a target
@@ -302,16 +378,16 @@ export default function StarMap({
    *
    * A `d3.ZoomTransform` is `{ x, y, k }` and maps a *world* coordinate
    * (star.x, star.y) to a *screen* coordinate via
-   * `screen = k * world + (x, y)`. We want the clicked star to land at
-   * some target screen point, at the *current* zoom level k (only the pan
-   * changes, not the scale). Solving for the translate that satisfies
-   * `k * star + (x, y) = target` gives `(x, y) = target - k * star`, which
-   * is exactly what composing
+   * `screen = k * world + (x, y)`. We want the newly-expanded entry's star
+   * to land at some target screen point, at the *current* zoom level k
+   * (only the pan changes, not the scale). Solving for the translate that
+   * satisfies `k * star + (x, y) = target` gives
+   * `(x, y) = target - k * star`, which is exactly what composing
    * `zoomIdentity.translate(target).scale(k).translate(-star)` produces
    * (d3's Transform methods compose left-to-right, each one folding into
    * the running x/y/k rather than overwriting it).
    *
-   * WHY THE TARGET IS NOT SIMPLY (width / 2, height / 2) ANYMORE:
+   * WHY THE TARGET IS NOT SIMPLY (width / 2, height / 2):
    * Before the "FULL-BLEED CANVAS" change (see the top-of-file comment),
    * the canvas's own `size` *was* the visible viz region - the container
    * physically shrank when the sidebar opened - so its literal center
@@ -323,13 +399,22 @@ export default function StarMap({
    * x = width, so its midpoint is `sidebarWidth + (width - sidebarWidth) / 2`.
    * The y target is untouched (`height / 2`) since the sidebar overlay
    * only covers the left edge, not the top or bottom.
+   *
+   * This effect intentionally depends on `expandedEntryId` alone, not on
+   * `stars`/`size`/`sidebarWidth` too - those are read from whatever the
+   * latest render happened to close over, but the pan should only ever be
+   * *triggered* by the expanded entry actually changing, not by e.g. a
+   * window resize recomputing `stars` while the same entry stays expanded.
    */
-  const handleStarClick = (star: { entry: Entry; x: number; y: number }) => {
-    onStarClick(star.entry);
-
+  useEffect(() => {
     const svgNode = svgRef.current;
     const zoomBehavior = zoomBehaviorRef.current;
-    if (!svgNode || !zoomBehavior) return;
+    if (!svgNode || !zoomBehavior || !expandedEntryId) return;
+
+    const star = stars.find(
+      candidate => candidate.entry.id === expandedEntryId
+    );
+    if (!star) return;
 
     const { width, height } = size;
     if (width === 0 || height === 0) return;
@@ -348,7 +433,8 @@ export default function StarMap({
       .transition()
       .duration(650) // 500-750ms: smooth, not sluggish
       .call(zoomBehavior.transform, centeredTransform);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedEntryId]);
 
   // ─── Category centers (the "constellation anchors") ───
   const categoryCenters = useMemo(() => {
@@ -524,7 +610,7 @@ export default function StarMap({
                   strokeOpacity={0.35}
                   strokeWidth={4}
                   className="cursor-pointer"
-                  onClick={() => handleStarClick({ entry, x, y })}
+                  onClick={() => handleStarClick(entry)}
                 >
                   <title>{entry.title}</title>
                 </circle>

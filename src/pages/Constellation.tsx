@@ -282,6 +282,19 @@ export default function Constellation({ entries }: ConstellationProps) {
     [selectedEntries]
   );
 
+  // The single entry (if any) whose panel is currently expanded, or
+  // `null` if none is - passed to StarMap so it can tell "expand a
+  // minimized panel" clicks apart from "deselect an already-expanded
+  // panel" clicks on the same star, and so it can drive its
+  // click-to-center pan off this changing rather than off the click event
+  // itself - see StarMap.tsx's STAR CLICK OUTCOMES and CLICK-TO-CENTER
+  // comments. Derived, like `openedEntryIds` above, so it can't drift out
+  // of sync with `selectedEntries`.
+  const expandedEntryId = useMemo(
+    () => selectedEntries.find(selected => selected.expanded)?.entry.id ?? null,
+    [selectedEntries]
+  );
+
   // `selectedEntries` -> one bucket per activityType, for 'category' sort
   // mode. Buckets are populated by scanning `selectedEntries` in its
   // existing newest-first order, so each bucket comes out newest-first
@@ -456,6 +469,8 @@ export default function Constellation({ entries }: ConstellationProps) {
         entries={displayedEntries}
         onStarClick={handleStarClick}
         openedEntryIds={openedEntryIds}
+        expandedEntryId={expandedEntryId}
+        onStarDeselect={entry => handleClosePanel(entry.id)}
         filterCategories={filterCategories}
         sidebarWidth={sidebarWidth}
       />
