@@ -174,6 +174,16 @@ interface StarMapProps {
    * being implied by the canvas's own (previously shrinking) size.
    */
   sidebarWidth: number;
+  /**
+   * Bumped (incremented) by Constellation.tsx every time its Escape-key
+   * full reset fires - see the RESET-VIEW effect below. A counter rather
+   * than a boolean/timestamp so two resets in a row (however unlikely)
+   * each still produce a distinct value and therefore each still trigger
+   * the effect, the same reason a "signal" counter is used instead of a
+   * one-shot flag anywhere else React state needs to represent "an event
+   * just happened" rather than "a value changed."
+   */
+  resetViewSignal: number;
 }
 
 /** Opacity applied to a star whose category is filtered out. */
@@ -237,6 +247,7 @@ export default function StarMap({
   onStarDeselect,
   filterCategories,
   sidebarWidth,
+  resetViewSignal,
 }: StarMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -435,6 +446,39 @@ export default function StarMap({
       .call(zoomBehavior.transform, centeredTransform);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandedEntryId]);
+
+  /**
+   * ─── RESET-VIEW: PROGRAMMATIC PAN/ZOOM RESET, TIED TO `resetViewSignal` ───
+   * Mirrors CLICK-TO-CENTER above (same `zoomBehavior.transform` +
+   * transition mechanism), but drives the transform back to
+   * `d3.zoomIdentity` (no pan, no zoom) instead of centering a star -
+   * this is what "reset pan/zoom" means for Constellation.tsx's
+   * Escape-key full reset.
+   *
+   * `isFirstResetSignal` skips the very first run: `resetViewSignal`
+   * starts at 0 (a real, non-null number), so without this guard the
+   * effect would fire once on mount too - unlike the CLICK-TO-CENTER
+   * effect above, which is naturally skipped on mount by its
+   * `!expandedEntryId` guard (`expandedEntryId` starts `null`). A plain
+   * counter has no such "nothing happened yet" value to guard on, so the
+   * skip has to be tracked explicitly instead.
+   */
+  const isFirstResetSignal = useRef(true);
+  useEffect(() => {
+    if (isFirstResetSignal.current) {
+      isFirstResetSignal.current = false;
+      return;
+    }
+
+    const svgNode = svgRef.current;
+    const zoomBehavior = zoomBehaviorRef.current;
+    if (!svgNode || !zoomBehavior) return;
+
+    d3.select(svgNode)
+      .transition()
+      .duration(650)
+      .call(zoomBehavior.transform, d3.zoomIdentity);
+  }, [resetViewSignal]);
 
   // ─── Category centers (the "constellation anchors") ───
   const categoryCenters = useMemo(() => {

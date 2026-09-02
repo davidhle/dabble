@@ -155,6 +155,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import EntryPanel from '../components/EntryPanel';
 import FilterBar, { SortMode } from '../components/FilterBar';
+import ResetButton from '../components/ResetButton';
+import ResetToast from '../components/ResetToast';
 import StarMap from '../components/StarMap';
 import { ACTIVITY_TYPE_OPTIONS, ActivityType, Entry } from '../types/Entry';
 import { getActivityColor } from '../utils/colors';
@@ -218,7 +220,97 @@ export default function Constellation({ entries }: ConstellationProps) {
     ACTIVITY_TYPE_OPTIONS.map(option => option.value)
   );
 
+  // Bumped every time the Escape-key full reset (below) actually fires -
+  // passed to StarMap as `resetViewSignal` so it can drive its own
+  // pan/zoom transform back to identity. A counter, not a boolean, so
+  // the effect that reacts to it (StarMap's RESET-VIEW effect) still
+  // fires even if two resets happen back to back - see that effect's
+  // comment for why a boolean/one-shot flag can't represent that.
+  const [resetViewSignal, setResetViewSignal] = useState(0);
+
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * ESCAPE KEY: COLLAPSE THE EXPANDED PANEL, OR TWO-PRESS FULL RESET
+   * ──────────────────────────────────────────────────────────────────────
+   * Escape means one of two very different things depending on whether a
+   * panel is currently expanded:
+   *
+   *   - A panel IS expanded (`expandedEntryId` is set): Escape just
+   *     collapses it back to minimized, mirroring the "closes the
+   *     expanded panel" behavior - immediate, no confirmation, since it's
+   *     trivially undone by re-expanding the same panel.
+   *   - NO panel is expanded: Escape instead drives a destructive "full
+   *     reset" - every open panel, the category filter, the sort mode,
+   *     AND the star map's pan/zoom all get cleared/reset at once. That's
+   *     too easy to trigger by accident (Escape is an easy key to hit
+   *     reflexively) to fire on a single press, so it's gated behind a
+   *     TWO-PRESS CONFIRMATION instead of a blocking modal (a modal would
+   *     interrupt the star map itself, which this is meant to avoid):
+   *       1. First Escape press while nothing is armed: arm
+   *          `resetPending` (which renders <ResetToast> below) and start
+   *          a timer. This press does NOT reset anything by itself.
+   *       2. Second Escape press while `resetPending` is still true:
+   *          treated as confirmation - perform the actual reset and
+   *          disarm.
+   *     If the second press doesn't come before the timer fires, the
+   *     arming just silently expires (`resetPending` -> false, toast
+   *     disappears) rather than resetting. The other handlers below
+   *     (star click, filter toggle, expand/close panel, sort mode) each
+   *     also call `cancelResetPending()` as their first action, so any
+   *     OTHER interaction disarms a pending reset early too - without
+   *     that, a stray Escape days- or minutes-later, arriving after the
+   *     user has moved on to doing something else entirely, could land
+   *     on an still-armed `resetPending` left over from an unrelated
+   *     earlier press and reset the view out from under them
+   *     unexpectedly.
+   */
+  const [resetPending, setResetPending] = useState(false);
+  const resetPendingTimeoutRef = useRef<number | null>(null);
+
+  const cancelResetPending = () => {
+    if (resetPendingTimeoutRef.current !== null) {
+      window.clearTimeout(resetPendingTimeoutRef.current);
+      resetPendingTimeoutRef.current = null;
+    }
+    setResetPending(false);
+  };
+
+  // The actual full reset - clears the sidebar's panel stack, the
+  // category filter, the sort mode, and (via `resetViewSignal`) StarMap's
+  // pan/zoom. Shared by both triggers that can cause a full reset: the
+  // Escape key's two-press confirmation flow below, and <ResetButton>'s
+  // onClick (rendered further down) - the button skips `resetPending`
+  // entirely and calls this directly, since a deliberate click on an
+  // always-visible, clearly-labeled button doesn't need the same
+  // accidental-press safeguard a bare keypress does - see
+  // ResetButton.tsx's header comment for the full reasoning.
+  const resetAll = () => {
+    if (resetPendingTimeoutRef.current !== null) {
+      window.clearTimeout(resetPendingTimeoutRef.current);
+      resetPendingTimeoutRef.current = null;
+    }
+    setSelectedEntries([]);
+    setFilterCategories(ACTIVITY_TYPE_OPTIONS.map(option => option.value));
+    setSortMode('date');
+    setResetViewSignal(signal => signal + 1);
+    setResetPending(false);
+  };
+
+  // Clears any in-flight timer on unmount only (not on every
+  // resetPending/expandedEntryId change - the effect above re-attaching
+  // its listener isn't a reason to drop a timer that's still legitimately
+  // pending), so a late timeout callback can never fire against an
+  // unmounted component.
+  useEffect(() => {
+    return () => {
+      if (resetPendingTimeoutRef.current !== null) {
+        window.clearTimeout(resetPendingTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const handleStarClick = (entry: Entry) => {
+    cancelResetPending();
     setSelectedEntries(prev => {
       const alreadyOpen = prev.some(selected => selected.entry.id === entry.id);
 
@@ -248,6 +340,7 @@ export default function Constellation({ entries }: ConstellationProps) {
   // "expand this one, collapse the rest, don't reorder" rule as re-clicking
   // an already-open star.
   const handleExpandPanel = (entryId: string) => {
+    cancelResetPending();
     setSelectedEntries(prev =>
       prev.map(selected => ({
         ...selected,
@@ -257,12 +350,14 @@ export default function Constellation({ entries }: ConstellationProps) {
   };
 
   const handleClosePanel = (entryId: string) => {
+    cancelResetPending();
     setSelectedEntries(prev =>
       prev.filter(selected => selected.entry.id !== entryId)
     );
   };
 
   const handleToggleFilterCategory = (category: ActivityType) => {
+    cancelResetPending();
     setFilterCategories(prev =>
       prev.includes(category)
         ? prev.filter(active => active !== category)
@@ -271,7 +366,13 @@ export default function Constellation({ entries }: ConstellationProps) {
   };
 
   const handleResetFilters = () => {
+    cancelResetPending();
     setFilterCategories(ACTIVITY_TYPE_OPTIONS.map(option => option.value));
+  };
+
+  const handleSortModeChange = (mode: SortMode) => {
+    cancelResetPending();
+    setSortMode(mode);
   };
 
   // Every entry currently represented by a sidebar panel (expanded or
@@ -294,6 +395,43 @@ export default function Constellation({ entries }: ConstellationProps) {
     () => selectedEntries.find(selected => selected.expanded)?.entry.id ?? null,
     [selectedEntries]
   );
+
+  // The actual Escape-key listener - see the "ESCAPE KEY" comment above
+  // (near `resetPending`) for the two-press confirmation pattern this
+  // implements. Declared here (rather than up next to `resetPending`)
+  // because it closes over `expandedEntryId`, which isn't defined until
+  // just above this point.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+
+      if (expandedEntryId) {
+        // Unchanged "closes expanded panel" behavior - just collapse it,
+        // no confirmation flow involved.
+        setSelectedEntries(prev =>
+          prev.map(selected => ({ ...selected, expanded: false }))
+        );
+        return;
+      }
+
+      if (!resetPending) {
+        // First press: arm, don't reset yet.
+        setResetPending(true);
+        resetPendingTimeoutRef.current = window.setTimeout(() => {
+          resetPendingTimeoutRef.current = null;
+          setResetPending(false);
+        }, 3500);
+        return;
+      }
+
+      // Second press while armed: this is the confirmation - do the
+      // actual full reset.
+      resetAll();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [expandedEntryId, resetPending]);
 
   // `selectedEntries` -> one bucket per activityType, for 'category' sort
   // mode. Buckets are populated by scanning `selectedEntries` in its
@@ -425,8 +563,26 @@ export default function Constellation({ entries }: ConstellationProps) {
        * "TRANSPARENT CONTAINER, CONTRASTED CONTENT" comments at the top
        * of this file for why FilterBar lives in here (ordinary flow, no
        * background) instead of as an independently `fixed` element.
+       *
+       * w-fit: without this, a plain block div stretches to its parent's
+       * full width (`main`'s max-w-7xl content box) by default, even
+       * though its actual content - the title, subtitle, and the
+       * `w-[33vw]` FilterBar - is narrower than that. Since this div sits
+       * above StarMap's starfield (z-10, transparent, no background of
+       * its own - see "TRANSPARENT CONTAINER, CONTRASTED CONTENT" above),
+       * that extra empty box-model width to the right of the visible
+       * text/buttons would still catch pointer events, silently blocking
+       * clicks on any star that happens to render underneath it. `w-fit`
+       * shrinks the div's own box down to its widest child (in practice,
+       * FilterBar's `w-[33vw]`) instead, so there's no invisible
+       * click-blocking area left over - only the CONTAINER's width
+       * behavior changes here; the children below still stack and
+       * left-align exactly as before via `space-y-4`, and this has no
+       * effect on the sidebar panel stack, sort toggle, or their own
+       * independent `w-[33vw]` width-matching (see the top-of-file
+       * layout comment) - none of that is sized off this wrapper.
        */}
-      <div ref={headerRef} className="relative z-10 space-y-4">
+      <div ref={headerRef} className="relative z-10 w-fit space-y-4">
         {/*
          * The "showing example data" badge used to render here, next to
          * the title - it now lives in Layout.tsx's navbar instead, next
@@ -452,7 +608,7 @@ export default function Constellation({ entries }: ConstellationProps) {
 
         <FilterBar
           sortMode={sortMode}
-          onSortModeChange={setSortMode}
+          onSortModeChange={handleSortModeChange}
           filterCategories={filterCategories}
           onToggleFilterCategory={handleToggleFilterCategory}
           onResetFilters={handleResetFilters}
@@ -473,7 +629,20 @@ export default function Constellation({ entries }: ConstellationProps) {
         onStarDeselect={entry => handleClosePanel(entry.id)}
         filterCategories={filterCategories}
         sidebarWidth={sidebarWidth}
+        resetViewSignal={resetViewSignal}
       />
+
+      <ResetToast visible={resetPending} />
+
+      {/*
+       * Always rendered - unlike the sidebar overlay above, this isn't
+       * gated on `hasSelection`/`expandedEntryId`: it's a distinct,
+       * unambiguous action (reset EVERYTHING) from a panel's own ×
+       * close button (which only removes that one panel), so it stays
+       * visible/clickable whether a panel is expanded, minimized, or
+       * nothing is open at all.
+       */}
+      <ResetButton onClick={resetAll} />
 
       {/*
        * Sidebar overlay - only rendered (and therefore only taking up
