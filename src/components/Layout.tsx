@@ -118,7 +118,15 @@ export default function Layout({ onAddEntry, entries }: LayoutProps) {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    // bg-[var(--bg-color)]: this outer shell (not just the <nav> below,
+    // which already used this token) used to be a plain light bg-gray-50 -
+    // that would still show through behind/around Home.tsx/Chart.tsx/
+    // About.tsx's content (the padding around `main` below, and any
+    // shorter-than-viewport page) even after the navbar and those pages'
+    // own content went dark, since none of them set a background of their
+    // own. Same theme token as everything else - see index.css :root -
+    // so the whole shell now matches uniformly.
+    <div className="min-h-screen bg-[var(--bg-color)]">
       {/*
        * Navigation Bar
        * relative z-10: Constellation.tsx's StarMap now renders a `fixed`

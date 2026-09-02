@@ -49,12 +49,12 @@ export default function D3Chart({
       .attr('transform', `translate(0,${innerHeight})`)
       .call(d3.axisBottom(x))
       .selectAll('text')
-      .attr('class', 'fill-gray-600 text-xs');
+      .attr('class', 'fill-[var(--text-muted-color)] text-xs');
 
     g.append('g')
       .call(d3.axisLeft(y).ticks(5))
       .selectAll('text')
-      .attr('class', 'fill-gray-600 text-xs');
+      .attr('class', 'fill-[var(--text-muted-color)] text-xs');
 
     g.selectAll('.bar')
       .data(data)
@@ -74,11 +74,18 @@ export default function D3Chart({
   }, [data, width, height]);
 
   return (
+    // text-[var(--text-muted-color)]: d3's axis generator draws the
+    // domain/tick lines with stroke="currentColor" (only the tick LABEL
+    // text gets an explicit class above) - Tailwind's text-color utility
+    // sets the CSS `color` property, which is exactly what `currentColor`
+    // resolves to here, so this is what keeps the axis lines themselves
+    // (not just their text) visible against the dark --panel-bg-color
+    // card this now renders on instead of a plain white one.
     <svg
       ref={svgRef}
       width={width}
       height={height}
-      className="overflow-visible"
+      className="overflow-visible text-[var(--text-muted-color)]"
     />
   );
 }
