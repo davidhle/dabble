@@ -23,11 +23,21 @@
  * - name: human-readable label shown in the UI.
  * - color: hex color used to tint stars, panels, and legends for entries
  *   in this category.
+ * - domain: optional broader grouping (e.g. 'Movement', 'Climbing').
+ *   StarMap does NOT currently use this for automatic positioning - each
+ *   category gets its own independent center point on the constellation
+ *   canvas regardless of domain (a domain-based clustering layout was
+ *   tried and reverted). The field is kept in the data model for a
+ *   possible future feature letting a user manually drag/reposition a
+ *   domain's or category's region of the sky. Deliberately separate from
+ *   `color`, which is assigned independently per category (see
+ *   utils/categories.ts) and has no notion of domain at all.
  */
 export interface Category {
   id: string;
   name: string;
   color: string;
+  domain?: string;
 }
 
 /**
@@ -59,11 +69,11 @@ export interface Category {
  * to keep it broad forever.
  */
 export const DEFAULT_CATEGORIES: Category[] = [
-  { id: 'LanguageLearning', name: 'Language Learning', color: '#facc15' }, // gold
-  { id: 'ShuffleDance', name: 'Shuffle Dance', color: '#34d399' }, // emerald
-  { id: 'HouseDance', name: 'House Dance', color: '#fb923c' }, // orange
-  { id: 'CWalk', name: 'C-Walk', color: '#60a5fa' }, // blue
-  { id: 'IndoorBouldering', name: 'Indoor Bouldering', color: '#f87171' }, // red
-  { id: 'OutdoorBouldering', name: 'Outdoor Bouldering', color: '#c084fc' }, // purple
-  { id: 'FlyingPole', name: 'Flying Pole', color: '#f472b6' }, // pink (formerly Dance's color)
+  { id: 'LanguageLearning', name: 'Language Learning', color: '#facc15', domain: 'Language' }, // gold
+  { id: 'ShuffleDance', name: 'Shuffle Dance', color: '#34d399', domain: 'Movement' }, // emerald
+  { id: 'HouseDance', name: 'House Dance', color: '#fb923c', domain: 'Movement' }, // orange
+  { id: 'CWalk', name: 'C-Walk', color: '#60a5fa', domain: 'Movement' }, // blue
+  { id: 'IndoorBouldering', name: 'Indoor Bouldering', color: '#f87171', domain: 'Climbing' }, // red
+  { id: 'OutdoorBouldering', name: 'Outdoor Bouldering', color: '#c084fc', domain: 'Climbing' }, // purple
+  { id: 'FlyingPole', name: 'Flying Pole', color: '#f472b6', domain: 'Movement' }, // pink (formerly Dance's color)
 ];

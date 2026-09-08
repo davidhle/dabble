@@ -73,9 +73,12 @@
  *   1. Give each category a fixed "center point" by placing it on a
  *      circle (an orbit) around the middle of the canvas, one evenly
  *      spaced angular sector per category (360° / number of categories).
- *      This is `categoryCenters` below - it only depends on canvas size,
- *      not on the entries themselves, so a category's region of the sky
- *      stays put even as entries are added/removed.
+ *      This is `categoryCenters` below - it only depends on canvas size
+ *      and the category list, not on the entries themselves, so a
+ *      category's region of the sky stays put even as entries are
+ *      added/removed. (Category also carries an optional `domain` field -
+ *      see types/Category.ts - but it isn't used for positioning here; see
+ *      the NOTE ON `domain` comment above `categoryCenters` below.)
  *   2. For each entry, look up its category's center and offset it by a
  *      small random (but *deterministic*) polar-coordinate jitter: a
  *      random angle (0-360°) and a random radius within the cluster's
@@ -196,6 +199,16 @@ interface StarMapProps {
 
 /** Opacity applied to a star whose category is filtered out. */
 const FILTERED_OUT_OPACITY = 0.15;
+
+/**
+ * Extra clearance (px, in world/SVG units - unaffected by zoom scale)
+ * between where a category's stars can reach (`clusterRadius`, see the
+ * `stars` useMemo) and where its label sits. Added on top of
+ * `clusterRadius` rather than used as a fixed label position, so the label
+ * always clears the *outer edge* of the star jitter disc, not just its
+ * center - see LABEL POSITIONING below.
+ */
+const LABEL_CLEARANCE = 16;
 
 /**
  * Neutral, bright highlight color for the "opened star" ring/glow.
@@ -489,12 +502,50 @@ export default function StarMap({
       .call(zoomBehavior.transform, d3.zoomIdentity);
   }, [resetViewSignal]);
 
+  // ─── Star jitter radius ───
+  // How far an individual entry can land from its category's center point
+  // (see `randomPointInDisc` below) - hoisted out of the `stars` useMemo so
+  // the label-avoidance logic (see `categoryCenters` below) can size its
+  // padding off the *same* radius stars actually scatter within, instead
+  // of a second, potentially-inconsistent guess at how big a cluster gets.
+  const clusterRadius = useMemo(
+    () => Math.min(size.width, size.height) * 0.14,
+    [size]
+  );
+
   // ─── Category centers (the "constellation anchors") ───
+  //
+  // Each category gets its own fixed center point, independent of every
+  // other category, spread evenly around an orbit of the canvas center -
+  // one evenly spaced angular sector per category (360° / number of
+  // categories). `categoryCenters` only depends on canvas size and the
+  // category list, not on the entries themselves, so a category's region
+  // of the sky stays put even as entries are added/removed.
+  //
+  // NOTE ON `domain`: Category carries an optional `domain` field (see
+  // types/Category.ts) that is deliberately NOT used here. An earlier
+  // version of this computation grouped categories sharing a `domain` into
+  // their own sub-cluster (a domain-level "macro" position with each
+  // category sub-positioned around it), but that made a category's spot in
+  // the sky depend on which other categories happened to share its domain
+  // - reverted back to this simpler one-center-per-category layout, which
+  // keeps every category's cluster equally distinct regardless of domain.
+  // `domain` stays on the data model for a possible future feature -
+  // letting a user manually drag/reposition a domain's or category's
+  // region of the sky - it's just not read by the automatic layout below.
   const categoryCenters = useMemo(() => {
     const { width, height } = size;
     // Keyed by string (rather than ActivityType) since Entry.activityType
     // is now a plain string referencing a dynamic category id/name.
-    const centers = {} as Record<string, { x: number; y: number }>;
+    // `angle` is stashed alongside each center so label placement (see the
+    // LABEL POSITIONING render logic below) can push a label further out
+    // along the same direction the category was placed in, rather than
+    // guessing a fixed direction that might run straight into a sibling
+    // category's cluster.
+    const centers = {} as Record<
+      string,
+      { x: number; y: number; angle: number }
+    >;
     if (width === 0 || height === 0) return centers;
 
     const centerX = width / 2;
@@ -503,6 +554,7 @@ export default function StarMap({
     // center. Scaled to the smaller dimension so it fits any aspect ratio.
     const orbitRadius = Math.min(width, height) * 0.32;
     const categoryCount = categories.length;
+    if (categoryCount === 0) return centers;
 
     categories.forEach((category, index) => {
       // Evenly spaced angular sectors around the circle, one per category.
@@ -510,6 +562,7 @@ export default function StarMap({
       centers[category.id] = {
         x: centerX + Math.cos(angle) * orbitRadius,
         y: centerY + Math.sin(angle) * orbitRadius,
+        angle,
       };
     });
 
@@ -523,8 +576,6 @@ export default function StarMap({
   const stars = useMemo(() => {
     const { width, height } = size;
     if (width === 0 || height === 0) return [];
-
-    const clusterRadius = Math.min(width, height) * 0.14;
 
     return entries.map(entry => {
       const center = categoryCenters[entry.activityType] ?? {
@@ -545,7 +596,7 @@ export default function StarMap({
         color: getActivityColor(entry.activityType),
       };
     });
-  }, [entries, categoryCenters, size]);
+  }, [entries, categoryCenters, size, clusterRadius]);
 
   const isReady = size.width > 0 && size.height > 0;
 
@@ -611,15 +662,39 @@ export default function StarMap({
          * together (cluster labels + stars) lives inside it.
          */}
         <g ref={zoomLayerRef}>
+          {/*
+           * ────────────────────────────────────────────────────────────
+           * LABEL POSITIONING: OUTSIDE THE CLUSTER, NOT AT ITS CENTER
+           * ────────────────────────────────────────────────────────────
+           * A category's stars are jittered up to `clusterRadius` away
+           * from `center` (see the `stars` useMemo above) - so a label
+           * drawn AT `center`, like the old single-point version did, sits
+           * in the densest part of that disc and gets buried under stars
+           * as entries are added. Instead, each label is pushed out along
+           * `center.angle` - the same direction categoryCenters placed
+           * this category in relative to the canvas center - by
+           * `clusterRadius + LABEL_CLEARANCE`. That guarantees the label
+           * always lands just outside the star disc's outer edge, with a
+           * fixed minimum gap to the nearest possible star, regardless of
+           * how many entries that category ends up with (the jitter disc's
+           * radius is fixed; only its density grows). Pushing along each
+           * category's own placement angle (rather than a single fixed
+           * direction, e.g. always "up") also naturally fans sibling
+           * labels apart from one another, the same way it fans their star
+           * clusters apart.
+           */}
           {isReady &&
             categories.map(category => {
               const center = categoryCenters[category.id];
               if (!center) return null;
+              const labelDistance = clusterRadius + LABEL_CLEARANCE;
+              const labelX = center.x + Math.cos(center.angle) * labelDistance;
+              const labelY = center.y + Math.sin(center.angle) * labelDistance;
               return (
                 <text
                   key={category.id}
-                  x={center.x}
-                  y={center.y}
+                  x={labelX}
+                  y={labelY}
                   textAnchor="middle"
                   className="pointer-events-none select-none fill-white/30 text-xs uppercase tracking-widest"
                 >
