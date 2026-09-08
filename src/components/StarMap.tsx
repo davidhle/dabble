@@ -70,7 +70,7 @@
  * Real constellations aren't randomly scattered - stars are grouped into
  * recognizable regions of the sky. We fake that effect cheaply:
  *
- *   1. Give each ActivityType a fixed "center point" by placing it on a
+ *   1. Give each category a fixed "center point" by placing it on a
  *      circle (an orbit) around the middle of the canvas, one evenly
  *      spaced angular sector per category (360° / number of categories).
  *      This is `categoryCenters` below - it only depends on canvas size,
@@ -115,7 +115,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { ACTIVITY_TYPE_OPTIONS, ActivityType, Entry } from '../types/Entry';
+import { Entry } from '../types/Entry';
+import { Category } from '../types/Category';
 // Activity -> color mapping lives in utils/colors.ts, not here, so that
 // EntryPanel's sidebar accent bar (and anything else that needs an
 // activity's color) always matches a star's color in this view - see the
@@ -124,6 +125,13 @@ import { getActivityColor } from '../utils/colors';
 
 interface StarMapProps {
   entries: Entry[];
+  /**
+   * The dynamic category list - one "constellation anchor" is laid out per
+   * category here (see categoryCenters below), rather than per fixed
+   * ActivityType. Passed down from Constellation.tsx (which owns loading
+   * it) so it isn't independently reloaded here.
+   */
+  categories: Category[];
   /** Called with the clicked entry when a star is clicked. */
   onStarClick: (entry: Entry) => void;
   /**
@@ -165,7 +173,7 @@ interface StarMapProps {
    * mirrors Constellation.tsx's sidebar, which never closes a panel just
    * because its category gets filtered out here.
    */
-  filterCategories: ActivityType[];
+  filterCategories: string[];
   /**
    * The sidebar overlay's current rendered width in pixels (0 when it
    * isn't rendered, i.e. `selectedEntries` is empty) - see the
@@ -241,6 +249,7 @@ function randomPointInDisc(random: () => number, radius: number) {
 
 export default function StarMap({
   entries,
+  categories,
   onStarClick,
   openedEntryIds,
   expandedEntryId,
@@ -483,7 +492,9 @@ export default function StarMap({
   // ─── Category centers (the "constellation anchors") ───
   const categoryCenters = useMemo(() => {
     const { width, height } = size;
-    const centers = {} as Record<ActivityType, { x: number; y: number }>;
+    // Keyed by string (rather than ActivityType) since Entry.activityType
+    // is now a plain string referencing a dynamic category id/name.
+    const centers = {} as Record<string, { x: number; y: number }>;
     if (width === 0 || height === 0) return centers;
 
     const centerX = width / 2;
@@ -491,19 +502,19 @@ export default function StarMap({
     // Orbit radius: how far each category's anchor sits from the canvas
     // center. Scaled to the smaller dimension so it fits any aspect ratio.
     const orbitRadius = Math.min(width, height) * 0.32;
-    const categoryCount = ACTIVITY_TYPE_OPTIONS.length;
+    const categoryCount = categories.length;
 
-    ACTIVITY_TYPE_OPTIONS.forEach((option, index) => {
+    categories.forEach((category, index) => {
       // Evenly spaced angular sectors around the circle, one per category.
       const angle = (index / categoryCount) * Math.PI * 2 - Math.PI / 2;
-      centers[option.value] = {
+      centers[category.id] = {
         x: centerX + Math.cos(angle) * orbitRadius,
         y: centerY + Math.sin(angle) * orbitRadius,
       };
     });
 
     return centers;
-  }, [size]);
+  }, [size, categories]);
 
   // ─── Star positions ───
   // Each entry's final (x, y) = its category's fixed center + a small,
@@ -544,8 +555,10 @@ export default function StarMap({
     () => new Set(openedEntryIds),
     [openedEntryIds]
   );
+  // Set<string> (rather than Set<ActivityType>) since Entry.activityType
+  // is now a plain string referencing a dynamic category id/name.
   const activeCategorySet = useMemo(
-    () => new Set(filterCategories),
+    () => new Set<string>(filterCategories),
     [filterCategories]
   );
 
@@ -599,18 +612,18 @@ export default function StarMap({
          */}
         <g ref={zoomLayerRef}>
           {isReady &&
-            ACTIVITY_TYPE_OPTIONS.map(option => {
-              const center = categoryCenters[option.value];
+            categories.map(category => {
+              const center = categoryCenters[category.id];
               if (!center) return null;
               return (
                 <text
-                  key={option.value}
+                  key={category.id}
                   x={center.x}
                   y={center.y}
                   textAnchor="middle"
                   className="pointer-events-none select-none fill-white/30 text-xs uppercase tracking-widest"
                 >
-                  {option.label}
+                  {category.name}
                 </text>
               );
             })}

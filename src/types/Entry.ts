@@ -16,43 +16,6 @@
  */
 
 /**
- * ActivityType Enum
- *
- * Defines the primary categories of activities that can be tracked.
- * The 'Other' type allows for flexibility when predefined categories
- * don't fit the user's activity.
- *
- * EXTENSIBILITY NOTE:
- * When adding new activity types:
- * 1. Add the new value to this enum
- * 2. Update the ACTIVITY_TYPE_OPTIONS array below
- * 3. Consider adding appropriate default tags for the new type
- */
-export enum ActivityType {
-  Dance = 'Dance',
-  Climbing = 'Climbing',
-  LanguageLearning = 'LanguageLearning',
-  Other = 'Other',
-}
-
-/**
- * Helper array for rendering ActivityType options in forms/dropdowns.
- * Provides human-readable labels separate from enum values.
- *
- * PATTERN NOTE:
- * We maintain this separately from the enum to allow for:
- * - Custom display labels (e.g., "Language Learning" vs "LanguageLearning")
- * - Ordering control in UI dropdowns
- * - Easy addition of metadata like icons or descriptions
- */
-export const ACTIVITY_TYPE_OPTIONS: { value: ActivityType; label: string }[] = [
-  { value: ActivityType.Dance, label: 'Dance' },
-  { value: ActivityType.Climbing, label: 'Climbing' },
-  { value: ActivityType.LanguageLearning, label: 'Language Learning' },
-  { value: ActivityType.Other, label: 'Other' },
-];
-
-/**
  * MediaType Enum
  *
  * Defines the types of media that can be attached to an entry.
@@ -126,15 +89,22 @@ export interface Entry {
   /**
    * Primary category of the activity.
    * Used for filtering, grouping, and analysis.
+   *
+   * DYNAMIC CATEGORIES:
+   * This is a plain string referencing a category id from the dynamic,
+   * localStorage-backed category list (see types/Category.ts and
+   * utils/categories.ts) rather than a fixed enum, so new categories can
+   * be created at runtime (see AddEntryForm.tsx's "+ Add new category"
+   * flow) without a code change. There used to also be a separate
+   * `customActivityType` field for a one-off "Other, please specify"
+   * name - that's gone now, since creating a real category (with its own
+   * id, name, and color) replaces the need for a free-text escape hatch.
+   * DEFAULT_CATEGORIES' ids match the values the old fixed ActivityType
+   * enum used to have, so entries created before categories became
+   * dynamic still resolve to the same category (and color) with no data
+   * migration required.
    */
-  activityType: ActivityType;
-
-  /**
-   * Custom activity type name when activityType is 'Other'.
-   * Allows users to define their own categories.
-   * Optional - only used when activityType === ActivityType.Other
-   */
-  customActivityType?: string;
+  activityType: string;
 
   /**
    * Brief title/summary of the activity.
@@ -200,10 +170,10 @@ export interface Entry {
  *
  * USAGE:
  * const entry = createEntry({
- *   activityType: ActivityType.Dance,
- *   title: "Salsa class",
- *   description: "Learned new turn pattern",
- *   tags: ["salsa", "beginner"],
+ *   activityType: "ShuffleDance", // a category id from utils/categories.ts
+ *   title: "Running man practice",
+ *   description: "Learned a new footwork combo",
+ *   tags: ["shuffle", "beginner"],
  *   notes: "Getting better at leading!"
  * });
  *
@@ -242,37 +212,35 @@ export const COMMON_MOODS = [
 ];
 
 /**
- * Suggested tags by activity type.
+ * Suggested tags by activity category.
  * Provides contextual suggestions in the form UI.
  *
- * EXTENSIBILITY:
- * Add new activity types here when extending ActivityType enum.
+ * DYNAMIC CATEGORIES:
+ * Keyed by category id (a plain string) rather than the old ActivityType
+ * enum, so this only needs to cover the built-in DEFAULT_CATEGORIES ids
+ * here. A category the user creates at runtime simply has no entry in
+ * this map - AddEntryForm.tsx already falls back to an empty suggestion
+ * list (`SUGGESTED_TAGS[activityType] || []`) for that case, so a missing
+ * key is expected, not an error.
  */
-export const SUGGESTED_TAGS: Record<ActivityType, string[]> = {
-  [ActivityType.Dance]: [
-    'shuffle',
-    'house',
-    'pole',
-    'practice',
-    'social',
-    'class',
-    'battle',
-  ],
-  [ActivityType.Climbing]: [
+export const SUGGESTED_TAGS: Record<string, string[]> = {
+  ShuffleDance: ['running-man', 'practice', 'social', 'battle'],
+  HouseDance: ['groove', 'jacking', 'practice', 'class'],
+  CWalk: ['footwork', 'tutorial', 'practice'],
+  IndoorBouldering: [
     'bouldering',
-    'top-rope',
-    'lead',
-    'outdoor',
     'indoor',
+    'kilter',
     'V0',
     'V1',
     'V2',
     'V3',
     'V4',
     'V5+',
-    'kilter'
   ],
-  [ActivityType.LanguageLearning]: [
+  OutdoorBouldering: ['bouldering', 'outdoor', 'top-rope', 'lead', 'highball'],
+  FlyingPole: ['spins', 'invert', 'conditioning', 'practice'],
+  LanguageLearning: [
     'spanish',
     'french',
     'vietnamese',
@@ -284,5 +252,4 @@ export const SUGGESTED_TAGS: Record<ActivityType, string[]> = {
     'reading',
     'writing',
   ],
-  [ActivityType.Other]: ['hobby', 'learning', 'practice', 'project', 'creative'],
 };

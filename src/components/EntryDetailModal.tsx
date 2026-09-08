@@ -15,7 +15,8 @@
  * adapted from, and in case a future overlay-style detail view is needed.
  */
 
-import { ACTIVITY_TYPE_OPTIONS, Entry } from '../types/Entry';
+import { Entry } from '../types/Entry';
+import { getCategoryName } from '../utils/categories';
 
 interface EntryDetailModalProps {
   /** The entry to display. When null, the modal renders nothing. */
@@ -30,16 +31,9 @@ export default function EntryDetailModal({
 }: EntryDetailModalProps) {
   if (!entry) return null;
 
-  const activityLabel =
-    ACTIVITY_TYPE_OPTIONS.find(option => option.value === entry.activityType)
-      ?.label ?? entry.activityType;
-
-  // "Other" entries store their real category name separately, so prefer
-  // that over the generic "Other" label when it's available.
-  const displayActivityType =
-    entry.customActivityType && entry.customActivityType.trim().length > 0
-      ? entry.customActivityType
-      : activityLabel;
+  // Looked up from the dynamic category list rather than a fixed option
+  // list, so a user-created category's name displays correctly here too.
+  const displayActivityType = getCategoryName(entry.activityType);
 
   const formattedDate = new Date(entry.timestamp).toLocaleDateString(
     undefined,

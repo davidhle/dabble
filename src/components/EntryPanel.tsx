@@ -30,8 +30,9 @@
  * inevitably would once either one is edited without remembering the other.
  */
 
-import { ACTIVITY_TYPE_OPTIONS, Entry } from '../types/Entry';
+import { Entry } from '../types/Entry';
 import { getActivityColor } from '../utils/colors';
+import { getCategoryName } from '../utils/categories';
 
 interface EntryPanelProps {
   entry: Entry;
@@ -88,16 +89,11 @@ export default function EntryPanel({
   onExpand,
   onClose,
 }: EntryPanelProps) {
-  const activityLabel =
-    ACTIVITY_TYPE_OPTIONS.find(option => option.value === entry.activityType)
-      ?.label ?? entry.activityType;
-
-  // "Other" entries store their real category name separately, so prefer
-  // that over the generic "Other" label when it's available.
-  const displayActivityType =
-    entry.customActivityType && entry.customActivityType.trim().length > 0
-      ? entry.customActivityType
-      : activityLabel;
+  // Looked up from the dynamic category list rather than a fixed option
+  // list, so a user-created category's name displays correctly here too -
+  // see the DYNAMIC CATEGORIES comment in AddEntryForm.tsx for how those
+  // get created.
+  const displayActivityType = getCategoryName(entry.activityType);
 
   // Same color this entry's star is tinted with in StarMap - see the
   // theming comment above for why this is looked up rather than hardcoded.

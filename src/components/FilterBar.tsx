@@ -41,16 +41,17 @@
  * pattern the rest of the page uses (see EntryPanel.tsx, StarMap.tsx).
  */
 
-import { ACTIVITY_TYPE_OPTIONS, ActivityType } from '../types/Entry';
-import { getActivityColor } from '../utils/colors';
+import { Category } from '../types/Category';
 
 export type SortMode = 'date' | 'category';
 
 interface FilterBarProps {
   sortMode: SortMode;
   onSortModeChange: (mode: SortMode) => void;
-  filterCategories: ActivityType[];
-  onToggleFilterCategory: (category: ActivityType) => void;
+  /** The dynamic category list to render filter toggles for - see Constellation.tsx. */
+  categories: Category[];
+  filterCategories: string[];
+  onToggleFilterCategory: (category: string) => void;
   onResetFilters: () => void;
   /** Whether the sidebar has at least one panel open - see the header comment above. */
   hasSelection: boolean;
@@ -59,6 +60,7 @@ interface FilterBarProps {
 export default function FilterBar({
   sortMode,
   onSortModeChange,
+  categories,
   filterCategories,
   onToggleFilterCategory,
   onResetFilters,
@@ -81,14 +83,13 @@ export default function FilterBar({
        * of `hasSelection` - unlike the sort toggle below.
        */}
       <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5">
-        {ACTIVITY_TYPE_OPTIONS.map(option => {
-          const isActive = filterCategories.includes(option.value);
-          const color = getActivityColor(option.value);
+        {categories.map(category => {
+          const isActive = filterCategories.includes(category.id);
           return (
             <button
-              key={option.value}
+              key={category.id}
               type="button"
-              onClick={() => onToggleFilterCategory(option.value)}
+              onClick={() => onToggleFilterCategory(category.id)}
               aria-pressed={isActive}
               className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                 isActive ? 'text-gray-900' : 'text-gray-200'
@@ -99,11 +100,13 @@ export default function FilterBar({
                 // "TRANSPARENT CONTAINER, CONTRASTED CONTENT" comment
                 // above: this button needs to read clearly with nothing
                 // opaque behind it but the starfield.
-                backgroundColor: isActive ? color : 'rgba(255, 255, 255, 0.08)',
-                borderColor: color,
+                backgroundColor: isActive
+                  ? category.color
+                  : 'rgba(255, 255, 255, 0.08)',
+                borderColor: category.color,
               }}
             >
-              {option.label}
+              {category.name}
             </button>
           );
         })}
