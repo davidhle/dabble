@@ -6,10 +6,70 @@
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
+
+  /*
+   * THEME TOKENS - shared dark ("night sky") theme
+   * ────────────────────────────────────────────────────────────
+   * Originally defined for just the Constellation view (StarMap.tsx's
+   * canvas background, Constellation.tsx's sidebar, EntryPanel.tsx's entry
+   * cards), now consumed via var(--token-name) the same way by the rest of
+   * the app's shell and pages too - Layout.tsx's navbar AND outer page
+   * shell, Home.tsx, Chart.tsx (and D3Chart.tsx), About.tsx - instead of
+   * each hardcoding its own (previously light-mode) colors. That's prep
+   * for a future dark/light mode toggle: to add one, redefine these under
+   * e.g. a `[data-theme="light"]` selector (or a `prefers-color-scheme`
+   * media query) and every consumer re-themes automatically - no
+   * component code needs to change, just these values.
+   *
+   * Full list of tokens defined so far - add new ones here, not scattered
+   * across individual component files, so this stays the one place to
+   * find/extend them when the toggle itself gets built:
+   *   --bg-color           page/canvas background - Layout.tsx's outer
+   *                        shell + navbar, StarMap.tsx's canvas,
+   *                        Constellation's sidebar page background
+   *   --text-color         primary text (headings) on --bg-color
+   *   --text-muted-color   secondary/muted body text on --bg-color
+   *   --panel-bg-color     card/panel surface: a subtle lift off
+   *                        --bg-color - EntryPanel.tsx's entry cards, and
+   *                        now the Home.tsx/Chart.tsx card surfaces too
+   *   --panel-border-color card/panel border, tuned for --panel-bg-color
+   */
+  --bg-color: #0b1023;
+  --text-color: #f1f5f9; /* near-white: headings/primary text on --bg-color */
+  --text-muted-color: #94a3b8; /* slate-400: secondary/body text on --bg-color */
+  --panel-bg-color: rgba(255, 255, 255, 0.06);
+  --panel-border-color: rgba(255, 255, 255, 0.12);
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+}
+
+/*
+ * Scrollbar styling for the Constellation sidebar panel stack's own
+ * internal scroll (its `overflow-y-auto` container in Constellation.tsx)
+ * - scoped to this one class, so it only affects that sidebar's scroll
+ * and no other scrollable element in the app. The browser's default
+ * scrollbar track renders white/opaque, which clashes with the dark
+ * "night sky" theme (see --bg-color etc. above) the sidebar sits in - so
+ * only the TRACK (the channel behind the thumb) is set to transparent
+ * here, letting the sidebar's own background show through. The THUMB
+ * (the draggable grip) is left visible, given a subtle translucent light
+ * color rather than the browser default, since a transparent track alone
+ * would otherwise leave nothing to indicate scroll position.
+ */
+.constellation-sidebar-scroll {
+  /* Firefox: `scrollbar-color: <thumb-color> <track-color>`. */
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+
+.constellation-sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.constellation-sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.25);
+  border-radius: 9999px;
 }

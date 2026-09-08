@@ -1,17 +1,19 @@
 export default function About() {
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-gray-900">About This Project</h1>
+      <h1 className="text-3xl font-bold text-[var(--text-color)]">
+        About This Project
+      </h1>
       <div className="prose max-w-none">
-        <p className="text-lg text-gray-600">
+        <p className="text-lg text-[var(--text-muted-color)]">
           This project demonstrates a modern React application setup with
           TypeScript, featuring data visualization capabilities and a clean,
           maintainable architecture.
         </p>
-        <h2 className="mt-8 text-2xl font-semibold text-gray-800">
+        <h2 className="mt-8 text-2xl font-semibold text-[var(--text-color)]">
           Tech Stack
         </h2>
-        <ul className="mt-4 space-y-2 text-gray-600">
+        <ul className="mt-4 space-y-2 text-[var(--text-muted-color)]">
           <li className="flex items-center">
             <span className="mr-2 h-2 w-2 rounded-full bg-indigo-500"></span>
             React 18 with TypeScript
