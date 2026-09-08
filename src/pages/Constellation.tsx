@@ -158,8 +158,8 @@ import FilterBar, { SortMode } from '../components/FilterBar';
 import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
 import StarMap from '../components/StarMap';
-import { ACTIVITY_TYPE_OPTIONS, ActivityType, Entry } from '../types/Entry';
-import { getActivityColor } from '../utils/colors';
+import { Entry } from '../types/Entry';
+import { loadCategories } from '../utils/categories';
 import { generateMockEntries } from '../utils/mockEntries';
 
 interface ConstellationProps {
@@ -199,11 +199,30 @@ function insertSortedByTimestampDesc(
 export default function Constellation({ entries }: ConstellationProps) {
   const usingMockData = entries.length === 0;
 
-  // Only generate mock entries once, not on every render, and only when
-  // they're actually needed.
-  const mockEntries = useMemo(() => generateMockEntries(), []);
+  // Only generate mock entries when they're actually needed (i.e. the user
+  // has no real entries yet) - not on every render, and not at all once
+  // real entries exist. This matters more now than it used to:
+  // generateMockEntries() creates its own dynamic categories via
+  // addCategory (see mockEntries.ts), a real localStorage write, so a user
+  // who already has their own entries/categories should never have that
+  // side effect run behind their back just because this page mounted.
+  const mockEntries = useMemo(
+    () => (usingMockData ? generateMockEntries() : []),
+    [usingMockData]
+  );
 
   const displayedEntries = usingMockData ? mockEntries : entries;
+
+  // The dynamic category list - recomputed whenever the displayed entries
+  // change, since that's exactly when a new category could have appeared
+  // (mock data generation above, or a fresh "+ Add new category" in
+  // AddEntryForm, which always creates its new entry in the same action).
+  // Passed down to FilterBar and StarMap rather than having each of them
+  // independently reload it.
+  const categories = useMemo(
+    () => loadCategories(),
+    [displayedEntries]
+  );
 
   // The sidebar's panel stack - see the panel-stack comment above for the
   // sort-order and expand/collapse rules this state follows.
@@ -213,12 +232,27 @@ export default function Constellation({ entries }: ConstellationProps) {
   // "SORT MODE" comment above for why this never removes/hides a panel.
   const [sortMode, setSortMode] = useState<SortMode>('date');
 
-  // Which activityTypes are currently active (visible at normal opacity)
+  // Which category ids are currently active (visible at normal opacity)
   // in StarMap - see the "CATEGORY FILTER" comment above. Starts with
   // every category active, i.e. nothing filtered out.
-  const [filterCategories, setFilterCategories] = useState<ActivityType[]>(() =>
-    ACTIVITY_TYPE_OPTIONS.map(option => option.value)
+  const [filterCategories, setFilterCategories] = useState<string[]>(() =>
+    loadCategories().map(category => category.id)
   );
+
+  // Keeps a newly-appeared category (mock data generation, or a fresh
+  // "+ Add new category" in AddEntryForm) active by default, without
+  // clobbering any categories the user has already toggled off. Runs off
+  // `categories` rather than `displayedEntries` directly so it only fires
+  // when the category list itself actually grows.
+  useEffect(() => {
+    setFilterCategories(prev => {
+      const known = new Set(prev);
+      const newIds = categories
+        .map(category => category.id)
+        .filter(id => !known.has(id));
+      return newIds.length > 0 ? [...prev, ...newIds] : prev;
+    });
+  }, [categories]);
 
   // Bumped every time the Escape-key full reset (below) actually fires -
   // passed to StarMap as `resetViewSignal` so it can drive its own
@@ -290,7 +324,7 @@ export default function Constellation({ entries }: ConstellationProps) {
       resetPendingTimeoutRef.current = null;
     }
     setSelectedEntries([]);
-    setFilterCategories(ACTIVITY_TYPE_OPTIONS.map(option => option.value));
+    setFilterCategories(categories.map(category => category.id));
     setSortMode('date');
     setResetViewSignal(signal => signal + 1);
     setResetPending(false);
@@ -356,7 +390,7 @@ export default function Constellation({ entries }: ConstellationProps) {
     );
   };
 
-  const handleToggleFilterCategory = (category: ActivityType) => {
+  const handleToggleFilterCategory = (category: string) => {
     cancelResetPending();
     setFilterCategories(prev =>
       prev.includes(category)
@@ -367,7 +401,7 @@ export default function Constellation({ entries }: ConstellationProps) {
 
   const handleResetFilters = () => {
     cancelResetPending();
-    setFilterCategories(ACTIVITY_TYPE_OPTIONS.map(option => option.value));
+    setFilterCategories(categories.map(category => category.id));
   };
 
   const handleSortModeChange = (mode: SortMode) => {
@@ -451,13 +485,14 @@ export default function Constellation({ entries }: ConstellationProps) {
       }
     }
 
-    return ACTIVITY_TYPE_OPTIONS.map(option => ({
-      option,
-      entries: buckets.get(option.value) ?? [],
-    }))
+    return categories
+      .map(category => ({
+        category,
+        entries: buckets.get(category.id) ?? [],
+      }))
       .filter(group => group.entries.length > 0)
-      .sort((a, b) => a.option.label.localeCompare(b.option.label));
-  }, [selectedEntries]);
+      .sort((a, b) => a.category.name.localeCompare(b.category.name));
+  }, [selectedEntries, categories]);
 
   const hasSelection = selectedEntries.length > 0;
 
@@ -609,6 +644,7 @@ export default function Constellation({ entries }: ConstellationProps) {
         <FilterBar
           sortMode={sortMode}
           onSortModeChange={handleSortModeChange}
+          categories={categories}
           filterCategories={filterCategories}
           onToggleFilterCategory={handleToggleFilterCategory}
           onResetFilters={handleResetFilters}
@@ -623,6 +659,7 @@ export default function Constellation({ entries }: ConstellationProps) {
        */}
       <StarMap
         entries={displayedEntries}
+        categories={categories}
         onStarClick={handleStarClick}
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}
@@ -733,13 +770,13 @@ export default function Constellation({ entries }: ConstellationProps) {
               ))}
             </>
           ) : (
-            categoryGroups.map(({ option, entries: groupEntries }) => (
-              <div key={option.value} className="flex flex-col gap-3">
+            categoryGroups.map(({ category, entries: groupEntries }) => (
+              <div key={category.id} className="flex flex-col gap-3">
                 <div
                   className="flex-shrink-0 rounded px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-gray-900"
-                  style={{ backgroundColor: getActivityColor(option.value) }}
+                  style={{ backgroundColor: category.color }}
                 >
-                  {option.label}
+                  {category.name}
                 </div>
                 {groupEntries.map(({ entry, expanded }) => (
                   <EntryPanel

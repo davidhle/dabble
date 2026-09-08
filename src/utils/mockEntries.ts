@@ -4,96 +4,104 @@
  * The app currently keeps `entries` in React state only (see App.tsx),
  * so a fresh page load always starts with an empty array and there's
  * nothing for StarMap to render. This file provides a small, varied
- * set of entries (spread across every ActivityType, with different
+ * set of entries (spread across several categories, with different
  * tags/notes/dates) purely so the Constellation page has something
  * "starry" to show while testing the visualization.
  *
  * Constellation.tsx falls back to this data only when the real
  * `entries` array (lifted in App.tsx) is empty - as soon as the user
  * adds their own entries via the '+' button, those take over.
+ *
+ * DYNAMIC CATEGORIES:
+ * Categories used to be a fixed ActivityType enum, so this file just
+ * picked enum values off the shelf (ActivityType.Dance, etc). Categories
+ * are now a plain, localStorage-backed list (see utils/categories.ts),
+ * but Shuffle Dance, House Dance, C-Walk, Indoor Bouldering, Outdoor
+ * Bouldering, Flying Pole, and Language Learning are all part of
+ * DEFAULT_CATEGORIES (see types/Category.ts) - the seed list every fresh
+ * browser already starts with - so this file can just reference their
+ * fixed ids directly below, the same way it referenced fixed enum values
+ * before. No addCategory calls needed here: unlike a genuinely
+ * user-invented category (created via AddEntryForm's "+ Add new
+ * category" flow), these are already guaranteed to exist.
  */
 
-import { ActivityType, createEntry, Entry } from '../types/Entry';
+import { createEntry, Entry } from '../types/Entry';
 
 export function generateMockEntries(): Entry[] {
   return [
-    // ─── Dance ───
+    // ─── Shuffle Dance ───
     createEntry({
-      activityType: ActivityType.Dance,
-      title: 'Salsa social night',
-      description: 'Dropped into the open social at the studio downtown.',
-      tags: ['salsa', 'social'],
-      mediaLinks: [],
-      notes: 'Finally landed the cross-body lead without stepping on anyone.',
-      timestamp: '2026-08-20T19:30:00.000Z',
-    }),
-    createEntry({
-      activityType: ActivityType.Dance,
-      title: 'Shuffle practice in the garage',
-      description: 'Ran through running man and T-step combos.',
-      tags: ['shuffle', 'practice'],
+      activityType: 'ShuffleDance',
+      title: 'Running man drills in the garage',
+      description: 'Ran through running man and T-step combos for an hour.',
+      tags: ['running-man', 'practice'],
       mediaLinks: [],
       notes: 'Legs are toast but the timing is finally clicking.',
       timestamp: '2026-08-12T21:00:00.000Z',
     }),
     createEntry({
-      activityType: ActivityType.Dance,
+      activityType: 'ShuffleDance',
+      title: 'Shuffle meetup at the rec center',
+      description: 'First time shuffling with a group instead of solo practice.',
+      tags: ['social', 'running-man'],
+      mediaLinks: [],
+      notes: 'Way easier to hold rhythm when the music is loud and shared.',
+      timestamp: '2026-06-10T20:00:00.000Z',
+    }),
+
+    // ─── House Dance ───
+    createEntry({
+      activityType: 'HouseDance',
       title: 'House class - intro to grooves',
       description: 'First house dance class, focused on the basic groove.',
-      tags: ['house', 'class'],
+      tags: ['groove', 'class'],
       mediaLinks: [],
       notes: 'Much more about weight shifts than I expected.',
       timestamp: '2026-07-28T18:00:00.000Z',
     }),
     createEntry({
-      activityType: ActivityType.Dance,
-      title: 'Pole conditioning session',
-      description: 'Worked on grip strength and basic spins.',
-      tags: ['pole', 'practice'],
+      activityType: 'HouseDance',
+      title: 'Jacking practice to a new playlist',
+      description: 'Worked on the jack isolation drills for 30 minutes.',
+      tags: ['jacking', 'practice'],
       mediaLinks: [],
-      notes: 'Forearms are going to hate me tomorrow.',
-      timestamp: '2026-07-15T17:00:00.000Z',
-    }),
-    createEntry({
-      activityType: ActivityType.Dance,
-      title: 'Battle night spectating',
-      description: 'Watched the local breaking battle, took notes on footwork.',
-      tags: ['battle', 'practice'],
-      mediaLinks: [],
-      notes: 'Want to try entering the beginner bracket next season.',
-      timestamp: '2026-06-30T20:00:00.000Z',
+      notes: 'Core is sore in a way it has not been from anything else.',
+      timestamp: '2026-06-02T19:00:00.000Z',
     }),
 
-    // ─── Climbing ───
+    // ─── C-Walk ───
     createEntry({
-      activityType: ActivityType.Climbing,
+      activityType: 'CWalk',
+      title: 'Learning the basic crosswalk step',
+      description: 'Followed a tutorial breaking down the foot-crossing pattern.',
+      tags: ['tutorial', 'footwork'],
+      mediaLinks: [],
+      notes: 'Balance is the hard part, not the speed.',
+      timestamp: '2026-08-03T17:30:00.000Z',
+    }),
+    createEntry({
+      activityType: 'CWalk',
+      title: 'Filmed a practice clip',
+      description: 'Recorded myself running through the combo to check form.',
+      tags: ['footwork', 'practice'],
+      mediaLinks: [],
+      notes: 'Looks way less smooth on camera than it feels live.',
+      timestamp: '2026-06-22T18:45:00.000Z',
+    }),
+
+    // ─── Indoor Bouldering ───
+    createEntry({
+      activityType: 'IndoorBouldering',
       title: 'Bouldering session - V3 project',
       description: 'Worked the overhung V3 in the back cave.',
-      tags: ['bouldering', 'V3', 'indoor'],
+      tags: ['V3', 'overhang'],
       mediaLinks: [],
       notes: 'Sent it on the fourth try, the heel hook was the key.',
       timestamp: '2026-08-24T16:00:00.000Z',
     }),
     createEntry({
-      activityType: ActivityType.Climbing,
-      title: 'Outdoor top-rope day',
-      description: 'Drove out to the crag with a couple friends.',
-      tags: ['top-rope', 'outdoor'],
-      mediaLinks: [],
-      notes: 'Real rock feels so different from plastic holds.',
-      timestamp: '2026-08-09T14:00:00.000Z',
-    }),
-    createEntry({
-      activityType: ActivityType.Climbing,
-      title: 'Lead climbing certification',
-      description: 'Took the gym lead belay/climb certification class.',
-      tags: ['lead', 'indoor'],
-      mediaLinks: [],
-      notes: 'Clipping above my head while pumped is scarier than expected.',
-      timestamp: '2026-07-22T10:30:00.000Z',
-    }),
-    createEntry({
-      activityType: ActivityType.Climbing,
+      activityType: 'IndoorBouldering',
       title: 'Kilter board session',
       description: 'Ran through a few benchmark kilter problems.',
       tags: ['kilter', 'V2'],
@@ -101,19 +109,50 @@ export function generateMockEntries(): Entry[] {
       notes: 'Steep boards expose every weakness in my core.',
       timestamp: '2026-07-05T19:00:00.000Z',
     }),
+
+    // ─── Outdoor Bouldering ───
     createEntry({
-      activityType: ActivityType.Climbing,
-      title: 'V4 attempt - the crimpy one',
-      description: 'Multiple burns on the new V4 setter problem.',
-      tags: ['bouldering', 'V4', 'indoor'],
+      activityType: 'OutdoorBouldering',
+      title: 'Crag day at the boulder field',
+      description: 'Drove out with a couple friends and a crash pad.',
+      tags: ['outdoor', 'crash-pad'],
       mediaLinks: [],
-      notes: 'Did not send, but got past the crux move for the first time.',
-      timestamp: '2026-06-18T18:30:00.000Z',
+      notes: 'Real rock feels so different from plastic holds.',
+      timestamp: '2026-08-09T14:00:00.000Z',
+    }),
+    createEntry({
+      activityType: 'OutdoorBouldering',
+      title: 'Sent an outdoor V2 highball',
+      description: 'Topped out a tall-for-its-grade problem with a spotter.',
+      tags: ['outdoor', 'highball'],
+      mediaLinks: [],
+      notes: 'The height made a V2 feel a lot scarier than it should.',
+      timestamp: '2026-06-28T15:00:00.000Z',
+    }),
+
+    // ─── Flying Pole ───
+    createEntry({
+      activityType: 'FlyingPole',
+      title: 'Pole conditioning session',
+      description: 'Worked on grip strength and basic spins.',
+      tags: ['conditioning', 'spins'],
+      mediaLinks: [],
+      notes: 'Forearms are going to hate me tomorrow.',
+      timestamp: '2026-08-14T18:00:00.000Z',
+    }),
+    createEntry({
+      activityType: 'FlyingPole',
+      title: 'First invert attempt',
+      description: 'Tried climbing into a basic invert with a crash mat down.',
+      tags: ['invert', 'practice'],
+      mediaLinks: [],
+      notes: 'Got upside down for about a second before bailing - progress.',
+      timestamp: '2026-06-15T19:30:00.000Z',
     }),
 
     // ─── Language Learning ───
     createEntry({
-      activityType: ActivityType.LanguageLearning,
+      activityType: 'LanguageLearning',
       title: 'Spanish conversation exchange',
       description: 'Met up with a language partner for an hour of Spanish.',
       tags: ['spanish', 'speaking'],
@@ -122,53 +161,13 @@ export function generateMockEntries(): Entry[] {
       timestamp: '2026-08-22T12:00:00.000Z',
     }),
     createEntry({
-      activityType: ActivityType.LanguageLearning,
-      title: 'French vocabulary drills',
-      description: 'Ran through 100 flashcards on food and cooking words.',
-      tags: ['french', 'vocabulary'],
-      mediaLinks: [],
-      notes: 'Retention feels better when I cook while reviewing.',
-      timestamp: '2026-08-05T09:00:00.000Z',
-    }),
-    createEntry({
-      activityType: ActivityType.LanguageLearning,
+      activityType: 'LanguageLearning',
       title: 'Vietnamese listening practice',
       description: 'Watched a Vietnamese cooking show with subtitles off.',
       tags: ['vietnamese', 'listening'],
       mediaLinks: [],
       notes: 'Caught about 40% of it, tones are getting easier to hear.',
       timestamp: '2026-07-19T20:00:00.000Z',
-    }),
-    createEntry({
-      activityType: ActivityType.LanguageLearning,
-      title: 'German grammar review',
-      description: 'Went over case endings for der/die/das.',
-      tags: ['german', 'grammar'],
-      mediaLinks: [],
-      notes: 'Dative case is finally starting to feel automatic.',
-      timestamp: '2026-06-25T08:30:00.000Z',
-    }),
-
-    // ─── Other ───
-    createEntry({
-      activityType: ActivityType.Other,
-      customActivityType: 'Photography',
-      title: 'Golden hour walk with the camera',
-      description: 'Shot a roll of film around the park.',
-      tags: ['creative', 'hobby'],
-      mediaLinks: [],
-      notes: 'Light was incredible around 7:15pm, need to go back same time.',
-      timestamp: '2026-08-16T19:15:00.000Z',
-    }),
-    createEntry({
-      activityType: ActivityType.Other,
-      customActivityType: 'Woodworking',
-      title: 'Started a small shelf project',
-      description: 'Cut and sanded the boards for a floating shelf.',
-      tags: ['project', 'creative'],
-      mediaLinks: [],
-      notes: 'Measured twice, cut once - actually worked out this time.',
-      timestamp: '2026-07-01T15:00:00.000Z',
     }),
   ];
 }

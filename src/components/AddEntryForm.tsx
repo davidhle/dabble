@@ -6,21 +6,36 @@
  * STEP NAVIGATION FLOW:
  * 1. Step 1 ("Activity Details") collects core activity info: type, title, tags,
  *    date, location, duration, and description.
- * 2. The "Next" button is visually disabled AND non-functional until the two
- *    required fields (Activity Type and Title) are filled. This gives the user
- *    immediate feedback about what's needed before they can proceed.
+ * 2. The "Next" button is visually disabled AND non-functional until the
+ *    required field (Title) is filled. This gives the user immediate
+ *    feedback about what's needed before they can proceed.
  * 3. Step 2 ("Reflections & Media") collects optional reflections: mood, notes,
  *    media links (YouTube/Vimeo), and has a placeholder for photo uploads.
  * 4. The "Back" button returns to Step 1 without losing any entered data.
  * 5. "Add Entry" on Step 2 submits the complete form.
  *
+ * DYNAMIC CATEGORIES:
+ * The Activity Type dropdown used to be a fixed list (ACTIVITY_TYPE_OPTIONS,
+ * backed by the ActivityType enum), with a hardcoded "Other" option that
+ * revealed a free-text "customActivityType" field for anything that didn't
+ * fit the fixed list. That whole "Other + custom name" escape hatch has
+ * been replaced with a real category creation flow: the dropdown is now
+ * populated from the dynamic, localStorage-backed category list (see
+ * utils/categories.ts), with a trailing "+ Add new category" option. Picking
+ * it reveals an inline sub-form (name input + auto-assigned color swatch
+ * preview); confirming it creates a brand new first-class category via
+ * addCategory - with its own id, name, and color - and immediately selects
+ * it, rather than just stashing a one-off string on the entry. This means
+ * a category the user types once is available (and consistently colored)
+ * for every future entry, not just the one being created right now.
+ *
  * VALIDATION LOGIC:
- * - Activity Type is required (defaults to Dance, so always has a value unless
- *   "Other" is selected without specifying a custom type).
+ * - Activity Type always has a value (defaults to the first category in the
+ *   list), so it no longer needs its own required-field check - creating a
+ *   category is a separate, self-contained action from filling out this
+ *   validation-checked field.
  * - Title is required and must be non-empty.
- * - The Next button checks both conditions before allowing step progression.
- * - On final submit, validation runs again to catch edge cases (e.g. "Other"
- *   activity type without a custom name).
+ * - On final submit, validation runs again to catch edge cases.
  *
  * STATE MANAGEMENT PATTERNS:
  * - All form state persists across steps (no data loss when navigating back/forward)
@@ -34,15 +49,22 @@
  */
 
 import { useState, useEffect } from 'react';
+import { Entry, MediaLink, COMMON_MOODS, SUGGESTED_TAGS, createEntry } from '../types/Entry';
+import { Category, DEFAULT_CATEGORIES } from '../types/Category';
 import {
-  Entry,
-  ActivityType,
-  MediaLink,
-  ACTIVITY_TYPE_OPTIONS,
-  COMMON_MOODS,
-  SUGGESTED_TAGS,
-  createEntry,
-} from '../types/Entry';
+  loadCategories,
+  addCategory,
+  previewNextCategoryColor,
+} from '../utils/categories';
+
+/**
+ * Sentinel <option> value for the trailing "+ Add new category" dropdown
+ * entry. Chosen to be extremely unlikely to collide with a real category
+ * id (a crypto.randomUUID() or a DEFAULT_CATEGORIES id like "FlyingPole").
+ * Never actually stored as an entry's activityType - selecting it only
+ * opens the inline sub-form below; see handleActivityTypeChange.
+ */
+const ADD_NEW_CATEGORY_VALUE = '__add_new_category__';
 
 interface AddEntryFormProps {
   isOpen: boolean;
@@ -52,8 +74,6 @@ interface AddEntryFormProps {
 
 interface FormErrors {
   title?: string;
-  activityType?: string;
-  customActivityType?: string;
 }
 
 export default function AddEntryForm({
@@ -66,10 +86,26 @@ export default function AddEntryForm({
   const [currentStep, setCurrentStep] = useState(1);
 
   // ─── Step 1 Fields: Activity Details ───
-  const [activityType, setActivityType] = useState<ActivityType>(
-    ActivityType.Dance
+  // The dynamic category list itself - loaded fresh whenever the modal
+  // opens (see the isOpen effect below) so a category created in a
+  // previous session, or via mock data generation, is reflected here.
+  const [categories, setCategories] = useState<Category[]>(() =>
+    loadCategories()
   );
-  const [customActivityType, setCustomActivityType] = useState('');
+  const [activityType, setActivityType] = useState<string>(
+    DEFAULT_CATEGORIES[0].id
+  );
+
+  // ─── "+ Add new category" inline sub-form state ───
+  // Shown instead of (not alongside) the old "Other" custom-name field -
+  // see the DYNAMIC CATEGORIES comment at the top of this file.
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  // Computed once when the sub-form opens (not on every keystroke) since
+  // the color a new category will get depends only on which colors
+  // existing categories already use, not on the name being typed.
+  const [newCategoryColorPreview, setNewCategoryColorPreview] = useState('');
+
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState<string[]>([]);
@@ -109,6 +145,13 @@ export default function AddEntryForm({
         .toISOString()
         .slice(0, 16);
       setTimestamp(localDatetime);
+
+      // Refresh the category list on every open (not just once on mount)
+      // so a category created in an earlier session - or by mock data
+      // generation - shows up without needing a page reload.
+      const freshCategories = loadCategories();
+      setCategories(freshCategories);
+      setActivityType(freshCategories[0]?.id ?? DEFAULT_CATEGORIES[0].id);
     }
   }, [isOpen]);
 
@@ -116,12 +159,10 @@ export default function AddEntryForm({
 
   /**
    * Determines if the user can proceed from Step 1 to Step 2.
-   * Both Activity Type and Title must be filled.
-   * For "Other" activity type, the custom type name is also required.
+   * Activity Type always has a value (see DYNAMIC CATEGORIES comment
+   * above), so only Title needs to be checked here.
    */
-  const canProceedToStep2 =
-    title.trim().length > 0 &&
-    (activityType !== ActivityType.Other || customActivityType.trim().length > 0);
+  const canProceedToStep2 = title.trim().length > 0;
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -130,12 +171,51 @@ export default function AddEntryForm({
       newErrors.title = 'Title is required';
     }
 
-    if (activityType === ActivityType.Other && !customActivityType.trim()) {
-      newErrors.customActivityType = 'Please specify the activity type';
-    }
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  /**
+   * Handles a selection on the Activity Type dropdown.
+   *
+   * The trailing "+ Add new category" option is a sentinel, not a real
+   * category - selecting it opens the inline sub-form (below) and
+   * computes what color the new category would get, but does NOT change
+   * `activityType` itself. Since the <select>'s `value` stays bound to
+   * the unchanged `activityType`, the dropdown visually snaps back to
+   * whatever was selected before, which is the desired effect: the "+"
+   * option is an action, not a persistent selection.
+   */
+  const handleActivityTypeChange = (value: string) => {
+    if (value === ADD_NEW_CATEGORY_VALUE) {
+      setNewCategoryColorPreview(previewNextCategoryColor());
+      setIsAddingCategory(true);
+      return;
+    }
+    setActivityType(value);
+  };
+
+  /**
+   * Confirms the inline "add new category" sub-form: persists a real
+   * category via addCategory (assigning it the previewed color), then
+   * immediately selects it as this entry's activityType and closes the
+   * sub-form. A blank/whitespace-only name is ignored rather than
+   * creating an empty category.
+   */
+  const handleCreateCategory = () => {
+    const trimmedName = newCategoryName.trim();
+    if (!trimmedName) return;
+
+    const newCategory = addCategory(trimmedName);
+    setCategories(loadCategories());
+    setActivityType(newCategory.id);
+    setIsAddingCategory(false);
+    setNewCategoryName('');
+  };
+
+  const handleCancelAddCategory = () => {
+    setIsAddingCategory(false);
+    setNewCategoryName('');
   };
 
   /**
@@ -168,8 +248,6 @@ export default function AddEntryForm({
 
     const entry = createEntry({
       activityType,
-      customActivityType:
-        activityType === ActivityType.Other ? customActivityType : undefined,
       title: title.trim(),
       description: description.trim(),
       tags,
@@ -190,8 +268,9 @@ export default function AddEntryForm({
   const resetForm = () => {
     setCurrentStep(1);
     setSlideDirection('forward');
-    setActivityType(ActivityType.Dance);
-    setCustomActivityType('');
+    setActivityType(categories[0]?.id ?? DEFAULT_CATEGORIES[0].id);
+    setIsAddingCategory(false);
+    setNewCategoryName('');
     setTitle('');
     setDescription('');
     setTags([]);
@@ -391,47 +470,88 @@ export default function AddEntryForm({
                         id="activityType"
                         value={activityType}
                         onChange={(e) =>
-                          setActivityType(e.target.value as ActivityType)
+                          handleActivityTypeChange(e.target.value)
                         }
                         className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       >
-                        {ACTIVITY_TYPE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
+                        {categories.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
                           </option>
                         ))}
+                        {/*
+                         * Trailing sentinel option - visually set apart
+                         * (italic + a leading "+") from the real
+                         * categories above it. See handleActivityTypeChange
+                         * for why picking this doesn't set `activityType`.
+                         */}
+                        <option
+                          value={ADD_NEW_CATEGORY_VALUE}
+                          style={{ fontStyle: 'italic' }}
+                        >
+                          + Add new category
+                        </option>
                       </select>
                     </div>
 
-                    {/* Custom Activity Type (shown when "Other" is selected) */}
-                    {activityType === ActivityType.Other && (
-                      <div>
+                    {/*
+                     * Inline "add new category" sub-form - replaces the old
+                     * "Other, please specify a custom name" field. Shown
+                     * only while the user is actively naming a new
+                     * category; confirming or cancelling closes it again.
+                     */}
+                    {isAddingCategory && (
+                      <div className="rounded-md border border-indigo-200 bg-indigo-50 p-3">
                         <label
-                          htmlFor="customActivityType"
+                          htmlFor="newCategoryName"
                           className="block text-sm font-medium text-gray-700"
                         >
-                          Specify Activity Type{' '}
-                          <span className="text-red-500">*</span>
+                          New category name
                         </label>
-                        <input
-                          type="text"
-                          id="customActivityType"
-                          value={customActivityType}
-                          onChange={(e) =>
-                            setCustomActivityType(e.target.value)
-                          }
-                          placeholder="e.g., Photography, Cooking, Music"
-                          className={`mt-1 block w-full rounded-md border px-3 py-2 shadow-sm focus:outline-none focus:ring-1 ${
-                            errors.customActivityType
-                              ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
-                              : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
-                          }`}
-                        />
-                        {errors.customActivityType && (
-                          <p className="mt-1 text-sm text-red-600">
-                            {errors.customActivityType}
-                          </p>
-                        )}
+                        <div className="mt-1 flex items-center gap-2">
+                          {/* Color swatch preview - the color this category
+                              will be assigned, shown before it's created. */}
+                          <span
+                            className="h-6 w-6 flex-shrink-0 rounded-full border border-black/10"
+                            style={{ backgroundColor: newCategoryColorPreview }}
+                            aria-hidden="true"
+                          />
+                          <input
+                            type="text"
+                            id="newCategoryName"
+                            autoFocus
+                            value={newCategoryName}
+                            onChange={(e) => setNewCategoryName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleCreateCategory();
+                              } else if (e.key === 'Escape') {
+                                e.preventDefault();
+                                handleCancelAddCategory();
+                              }
+                            }}
+                            placeholder="e.g., Pottery, Skateboarding"
+                            className="block flex-1 rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          />
+                        </div>
+                        <div className="mt-2 flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={handleCancelAddCategory}
+                            className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCreateCategory}
+                            disabled={!newCategoryName.trim()}
+                            className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Create
+                          </button>
+                        </div>
                       </div>
                     )}
 
