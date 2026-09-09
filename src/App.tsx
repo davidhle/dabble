@@ -43,7 +43,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import Home from './pages/Home';
 import Chart from './pages/Chart';
@@ -160,7 +160,7 @@ function App() {
    *
    * The component tree structure:
    *
-   * BrowserRouter (enables client-side routing)
+   * HashRouter (enables client-side routing)
    *   └── Routes (route matching container)
    *         └── Route path="/" (matches all routes starting with /)
    *               └── Layout (navbar + outlet, receives onAddEntry)
@@ -180,7 +180,14 @@ function App() {
    * 3. Use a state management library
    */
   return (
-    <BrowserRouter>
+    // HashRouter (URLs like /dabble/#/constellation) instead of BrowserRouter
+    // is a deliberate trade-off for static GitHub Pages hosting: Pages has no
+    // server-side rewrite rule, so a direct load or refresh of a BrowserRouter
+    // path like /dabble/constellation would 404. The hash portion of the URL
+    // never reaches the server, so GitHub Pages just serves index.html and
+    // React Router handles the rest client-side. Given the deployment
+    // timeline, this was chosen over adding a 404.html redirect workaround.
+    <HashRouter>
       <Routes>
         {/**
          * Parent route with Layout
@@ -223,7 +230,7 @@ function App() {
           <Route path="about" element={<About />} />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 
