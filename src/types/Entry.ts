@@ -162,6 +162,16 @@ export interface Entry {
    * - Suggest activities based on desired mood
    */
   mood?: string[];
+
+  /**
+   * Human-readable, imprecise date label (e.g. "October - November 2021"),
+   * shown in place of `timestamp`'s exact formatted date wherever an entry's
+   * date is displayed. Optional - only set for entries whose real date is
+   * only known approximately (e.g. old data backfilled from memory), where
+   * `timestamp` still holds a best-guess exact date for sorting/positioning
+   * but isn't precise enough to show to the user as-is.
+   */
+  dateDisplay?: string;
 }
 
 /**

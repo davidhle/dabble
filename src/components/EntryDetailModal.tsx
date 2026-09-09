@@ -35,15 +35,18 @@ export default function EntryDetailModal({
   // list, so a user-created category's name displays correctly here too.
   const displayActivityType = getCategoryName(entry.activityType);
 
-  const formattedDate = new Date(entry.timestamp).toLocaleDateString(
-    undefined,
-    {
+  // Prefer the imprecise, human-written dateDisplay (e.g. "October -
+  // November 2021") when present - see the dateDisplay field comment in
+  // types/Entry.ts - falling back to the exact formatted timestamp for
+  // entries where the real date is actually known.
+  const formattedDate =
+    entry.dateDisplay ??
+    new Date(entry.timestamp).toLocaleDateString(undefined, {
       weekday: 'short',
       year: 'numeric',
       month: 'short',
       day: 'numeric',
-    }
-  );
+    });
 
   return (
     <div

@@ -50,13 +50,15 @@ import Chart from './pages/Chart';
 import Constellation from './pages/Constellation';
 import About from './pages/About';
 import { Entry } from './types/Entry';
+import { loadEntries, saveEntries } from './utils/entriesStorage';
 
 function App() {
   /**
    * ENTRIES STATE
    *
    * This is the primary application state - an array of Entry objects.
-   * Initialized as an empty array.
+   * Initialized lazily from localStorage (see PERSISTENCE below) rather
+   * than an empty array, so a returning user's entries survive a refresh.
    *
    * STATE IMMUTABILITY:
    * We always create new arrays when updating (via spread or concat)
@@ -65,14 +67,28 @@ function App() {
    * - Makes state changes predictable and traceable
    * - Enables potential future optimizations (memoization)
    *
-   * PERSISTENCE NOTE:
-   * Currently entries are stored only in memory and lost on refresh.
-   * To persist entries, you could:
-   * - Save to localStorage in useEffect
-   * - Initialize from localStorage in useState
-   * - Sync with a backend API
+   * PERSISTENCE:
+   * Entries are persisted to localStorage under 'dabble-entries' (see
+   * utils/entriesStorage.ts) - initialized here via useState's lazy
+   * initializer form (a function, not a call) so loadEntries() only runs
+   * once on mount rather than on every render, and saved back via the
+   * dedicated useEffect below whenever `entries` changes. This is also the
+   * storage utils/seedRealData.ts's one-time seed script reads/writes -
+   * see that file for why real data needed a way to reach the app before
+   * a full import UI existed.
    */
-  const [entries, setEntries] = useState<Entry[]>([]);
+  const [entries, setEntries] = useState<Entry[]>(() => loadEntries());
+
+  /**
+   * EFFECT: Persist entries to localStorage whenever they change
+   *
+   * Separate from the logging effect below (different concern: this one
+   * has an actual side effect other code depends on, not just debugging
+   * output) even though both key off the same `entries` dependency.
+   */
+  useEffect(() => {
+    saveEntries(entries);
+  }, [entries]);
 
   /**
    * EFFECT: Log entries whenever they change
