@@ -17,6 +17,7 @@
 
 import { Entry } from '../types/Entry';
 import { getCategoryName } from '../utils/categories';
+import { linkify } from '../utils/linkify';
 
 interface EntryDetailModalProps {
   /** The entry to display. When null, the modal renders nothing. */
@@ -115,7 +116,9 @@ export default function EntryDetailModal({
                 Notes
               </p>
               <p className="mt-1.5 whitespace-pre-wrap text-sm text-gray-700">
-                {entry.notes || 'No notes for this entry.'}
+                {entry.notes
+                  ? linkify(entry.notes)
+                  : 'No notes for this entry.'}
               </p>
             </div>
           </div>

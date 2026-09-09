@@ -14,7 +14,7 @@
    * canvas background, Constellation.tsx's sidebar, EntryPanel.tsx's entry
    * cards), now consumed via var(--token-name) the same way by the rest of
    * the app's shell and pages too - Layout.tsx's navbar AND outer page
-   * shell, Home.tsx, Chart.tsx (and D3Chart.tsx), About.tsx - instead of
+   * shell, Home.tsx, Chart.tsx (and LinearTimeline.tsx), About.tsx - instead of
    * each hardcoding its own (previously light-mode) colors. That's prep
    * for a future dark/light mode toggle: to add one, redefine these under
    * e.g. a `[data-theme="light"]` selector (or a `prefers-color-scheme`

@@ -33,6 +33,7 @@
 import { Entry } from '../types/Entry';
 import { getActivityColor } from '../utils/colors';
 import { getCategoryName } from '../utils/categories';
+import { linkify } from '../utils/linkify';
 
 interface EntryPanelProps {
   entry: Entry;
@@ -202,7 +203,9 @@ export default function EntryPanel({
             Description
           </p>
           <p className="mt-1.5 whitespace-pre-wrap text-sm text-gray-300">
-            {entry.description || 'No description for this entry.'}
+            {entry.description
+              ? linkify(entry.description)
+              : 'No description for this entry.'}
           </p>
         </div>
 
@@ -211,7 +214,7 @@ export default function EntryPanel({
             Notes
           </p>
           <p className="mt-1.5 whitespace-pre-wrap text-sm text-gray-300">
-            {entry.notes || 'No notes for this entry.'}
+            {entry.notes ? linkify(entry.notes) : 'No notes for this entry.'}
           </p>
         </div>
       </div>

@@ -51,6 +51,7 @@ import Constellation from './pages/Constellation';
 import About from './pages/About';
 import { Entry } from './types/Entry';
 import { loadEntries, saveEntries } from './utils/entriesStorage';
+import { initializeDefaultDataForFirstVisit } from './utils/initializeFirstVisit';
 
 function App() {
   /**
@@ -72,12 +73,24 @@ function App() {
    * utils/entriesStorage.ts) - initialized here via useState's lazy
    * initializer form (a function, not a call) so loadEntries() only runs
    * once on mount rather than on every render, and saved back via the
-   * dedicated useEffect below whenever `entries` changes. This is also the
-   * storage utils/seedRealData.ts's one-time seed script reads/writes -
-   * see that file for why real data needed a way to reach the app before
-   * a full import UI existed.
+   * dedicated useEffect below whenever `entries` changes.
+   *
+   * FIRST-VISIT DEFAULT:
+   * initializeDefaultDataForFirstVisit() runs first, inside this same
+   * lazy initializer - see utils/initializeFirstVisit.ts for the full
+   * first-visit-default-vs-localStorage-source-of-truth explanation. In
+   * short: on a visitor's first-ever load (no 'dabble-entries' key yet)
+   * it persists a bundled real dataset (and matching categories) into
+   * localStorage before loadEntries() below ever reads it; on every
+   * subsequent load it's a no-op and loadEntries() just returns whatever
+   * is actually stored - the visitor's own data, or a deliberately empty
+   * array from an explicit reset (see the "Start Your Own Constellation"
+   * button in About.tsx).
    */
-  const [entries, setEntries] = useState<Entry[]>(() => loadEntries());
+  const [entries, setEntries] = useState<Entry[]>(() => {
+    initializeDefaultDataForFirstVisit();
+    return loadEntries();
+  });
 
   /**
    * EFFECT: Persist entries to localStorage whenever they change
@@ -160,7 +173,7 @@ function App() {
    * }, []);
    */
   const addEntry = (entry: Entry) => {
-    setEntries((prevEntries) => {
+    setEntries(prevEntries => {
       const newEntries = [...prevEntries, entry];
 
       // Additional logging at the point of update
@@ -214,16 +227,9 @@ function App() {
          * - Main content container
          *
          * The onAddEntry prop enables the Layout (and its AddEntryForm)
-         * to add entries to the state managed here. `entries` itself is
-         * also passed down so Layout can show the "showing example data"
-         * navbar badge on the Constellation route (see Layout.tsx) -
-         * Layout needs to know entries.length even though it doesn't
-         * otherwise use the entries array itself.
+         * to add entries to the state managed here.
          */}
-        <Route
-          path="/"
-          element={<Layout onAddEntry={addEntry} entries={entries} />}
-        >
+        <Route path="/" element={<Layout onAddEntry={addEntry} />}>
           {/**
            * Child routes render inside Layout's <Outlet />
            *
@@ -238,7 +244,7 @@ function App() {
            * Or use Outlet context in Layout to pass data.
            */}
           <Route index element={<Home />} />
-          <Route path="chart" element={<Chart />} />
+          <Route path="chart" element={<Chart entries={entries} />} />
           <Route
             path="constellation"
             element={<Constellation entries={entries} />}

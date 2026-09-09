@@ -43,37 +43,44 @@ export interface Category {
 /**
  * DEFAULT_CATEGORIES
  *
- * Seed data for the dynamic category list. The original seed list here
- * mirrored the old ActivityType enum (Dance, Climbing, Language Learning,
- * Other) for compatibility with entries created before categories became
- * dynamic. Those generic buckets have since been replaced by the more
- * specific practice categories users actually created via the "+ Add new
- * category" flow (see AddEntryForm.tsx) - Dance split into Shuffle Dance /
- * House Dance / Flying Pole, Climbing split into Indoor/Outdoor
- * Bouldering, and Other has no replacement (a real category is always
- * created instead of falling back to a generic bucket now).
+ * This is now the BUNDLED FIRST-VISIT DEFAULT - see the
+ * "FIRST-VISIT DEFAULT vs LOCALSTORAGE AS SOURCE OF TRUTH" comment in
+ * utils/initializeFirstVisit.ts, which persists this exact list (plus the
+ * matching bundled entries in src/data/defaultEntries.ts) into
+ * localStorage the very first time a visitor loads the app with no
+ * existing data. From that point on it's just loadCategories()'s
+ * in-memory fallback for the rare case localStorage is unreadable, since
+ * real usage always has a persisted list by then.
  *
- * There's no real user data to preserve across this change (only
- * example/dummy data - see utils/mockEntries.ts), so the old Dance,
- * Climbing, and Other entries were simply dropped rather than migrated.
- * Their `color` values are still reused here for the categories that
- * replace them (e.g. Flying Pole keeps Dance's old pink), purely for
- * visual continuity with what mock data generation had already assigned
- * them - not for any compatibility requirement.
+ * HISTORY: this list used to carry seven placeholder categories (Language
+ * Learning, Shuffle Dance, House Dance, C-Walk, Indoor/Outdoor
+ * Bouldering, Flying Pole) mirroring the old fixed ActivityType enum, back
+ * when the app only had mock/example data (see the now-removed
+ * utils/mockEntries.ts) and no real entries existed for any of them. Now
+ * that real data exists for exactly three of those seven (see
+ * src/data/seedEntries.json), the other four placeholders - which have no
+ * real entries - are deliberately dropped rather than carried forward.
+ * They aren't gone forever: a visitor can always recreate any of them via
+ * AddEntryForm's "+ Add new category" flow once real data for them
+ * exists.
  *
- * LANGUAGE LEARNING NOTE:
- * Kept as-is (a single broad category) rather than split up like Dance
- * and Climbing were. Spanish, French, etc. could each become their own
- * category the same way Shuffle Dance and House Dance did, but that split
- * hasn't been made yet - left as a possible future change, not a decision
- * to keep it broad forever.
+ * The three ids/colors kept below are UNCHANGED from that original list
+ * (not reassigned or re-picked), so anything already relying on
+ * 'ShuffleDance'/'HouseDance'/'CWalk' as fixed ids continues to resolve
+ * exactly as before.
  */
 export const DEFAULT_CATEGORIES: Category[] = [
-  { id: 'LanguageLearning', name: 'Language Learning', color: '#facc15', domain: 'Language' }, // gold
-  { id: 'ShuffleDance', name: 'Shuffle Dance', color: '#34d399', domain: 'Movement' }, // emerald
-  { id: 'HouseDance', name: 'House Dance', color: '#fb923c', domain: 'Movement' }, // orange
+  {
+    id: 'ShuffleDance',
+    name: 'Shuffle Dance',
+    color: '#34d399',
+    domain: 'Movement',
+  }, // emerald
+  {
+    id: 'HouseDance',
+    name: 'House Dance',
+    color: '#fb923c',
+    domain: 'Movement',
+  }, // orange
   { id: 'CWalk', name: 'C-Walk', color: '#60a5fa', domain: 'Movement' }, // blue
-  { id: 'IndoorBouldering', name: 'Indoor Bouldering', color: '#f87171', domain: 'Climbing' }, // red
-  { id: 'OutdoorBouldering', name: 'Outdoor Bouldering', color: '#c084fc', domain: 'Climbing' }, // purple
-  { id: 'FlyingPole', name: 'Flying Pole', color: '#f472b6', domain: 'Movement' }, // pink (formerly Dance's color)
 ];

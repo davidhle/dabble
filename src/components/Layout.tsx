@@ -8,14 +8,8 @@
  *
  * STATE MANAGEMENT ARCHITECTURE:
  *
- * The Layout receives entries-related props from App.tsx:
+ * The Layout receives one entries-related prop from App.tsx:
  * - onAddEntry: Callback to add new entries to the app state
- * - entries: The full entries array. Layout doesn't render or transform
- *   this itself - it only needs `entries.length` (via `showMockDataBanner`
- *   below) to decide whether to show the "showing example data" badge
- *   next to the '+' button, which only makes sense on the Constellation
- *   route (checked via `useLocation()`) since that's the only page that
- *   falls back to mock data when entries is empty (see Constellation.tsx).
  *
  * Local state managed here:
  * - isModalOpen: Controls visibility of the AddEntryForm modal
@@ -40,40 +34,17 @@
  */
 
 import { useState } from 'react';
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet } from 'react-router-dom';
 import AddEntryForm from './AddEntryForm';
 import { Entry } from '../types/Entry';
 
-/**
- * Props interface for Layout component
- *
- * DESIGN NOTE:
- * Layout doesn't transform or render `entries` itself - it's here only
- * so Layout can read `entries.length` for the mock-data navbar badge
- * (see `showMockDataBanner` below). Everything else about entries
- * (creating them) still flows one-way through `onAddEntry`.
- */
+/** Props interface for Layout component */
 interface LayoutProps {
   /** Callback to add a new entry to the app state (defined in App.tsx) */
   onAddEntry: (entry: Entry) => void;
-  /** The full entries array (defined in App.tsx) - see DESIGN NOTE above. */
-  entries: Entry[];
 }
 
-export default function Layout({ onAddEntry, entries }: LayoutProps) {
-  const location = useLocation();
-
-  /**
-   * Whether to show the "showing example data" badge next to the '+'
-   * button. Moved here from Constellation.tsx so it renders as part of
-   * the navbar's flex row instead of floating over the starfield (see
-   * Constellation.tsx's `usingMockData`, which still separately decides
-   * whether the star map itself falls back to mock entries - the two are
-   * the same underlying condition, just each component reading `entries`
-   * for its own purpose, not shared state).
-   */
-  const showMockDataBanner =
-    location.pathname === '/constellation' && entries.length === 0;
+export default function Layout({ onAddEntry }: LayoutProps) {
   /**
    * LOCAL STATE: Modal visibility
    *
@@ -166,7 +137,7 @@ export default function Layout({ onAddEntry, entries }: LayoutProps) {
                   to="/chart"
                   className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
                 >
-                  Chart
+                  Timeline
                 </Link>
                 <Link
                   to="/constellation"
@@ -183,13 +154,8 @@ export default function Layout({ onAddEntry, entries }: LayoutProps) {
               </div>
             </div>
 
-            {/* Right side: mock-data badge (Constellation only) + Add Entry button */}
+            {/* Right side: Add Entry button */}
             <div className="flex items-center gap-3">
-              {showMockDataBanner && (
-                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
-                  Showing example data - add an entry to see your own
-                </span>
-              )}
               {/**
                * ADD ENTRY BUTTON
                *

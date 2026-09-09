@@ -125,6 +125,10 @@ import { Category } from '../types/Category';
 // activity's color) always matches a star's color in this view - see the
 // comment in colors.ts for why that mapping isn't duplicated per-component.
 import { getActivityColor } from '../utils/colors';
+// Shared with LinearTimeline.tsx's own hover tooltip - see
+// EntryTooltip.tsx's header comment for why this is a shared pattern
+// across both visualization views rather than duplicated per-component.
+import EntryTooltip from './EntryTooltip';
 
 interface StarMapProps {
   entries: Entry[];
@@ -613,6 +617,21 @@ export default function StarMap({
     [filterCategories]
   );
 
+  // ─── Hover tooltip ───
+  // Same shape and same viewport-clientX/clientY-based tracking
+  // LinearTimeline.tsx uses for its own hover state - see the "Hover
+  // tooltip" comment there. This is entirely independent of
+  // `openedEntryIds`/`expandedEntryId` (the click-to-open-panel highlight
+  // ring below) and of `handleStarClick` - hovering never opens or closes
+  // a panel, and opening/closing a panel doesn't touch this state, so the
+  // tooltip layers on top of the existing click/highlight behavior rather
+  // than interacting with it at all.
+  const [hovered, setHovered] = useState<{
+    entry: Entry;
+    x: number;
+    y: number;
+  } | null>(null);
+
   return (
     // `fixed inset-0` (not a layout child) - see "FULL-BLEED CANVAS"
     // above. z-0 is the base layer: Layout.tsx's navbar, Constellation's
@@ -743,9 +762,27 @@ export default function StarMap({
                   strokeWidth={4}
                   className="cursor-pointer"
                   onClick={() => handleStarClick(entry)}
-                >
-                  <title>{entry.title}</title>
-                </circle>
+                  // Same hover handlers (and the EDIT: no more native
+                  // <title> element - see the "Hover tooltip" comment
+                  // above) as LinearTimeline.tsx's points: track the
+                  // hovered entry + cursor position in state, cleared on
+                  // mouse leave, and let <EntryTooltip> below render from
+                  // it. The old <title>{entry.title}</title> child (the
+                  // browser's own delayed tooltip) is removed - it would
+                  // now just duplicate this richer tooltip's title/date,
+                  // popping up a second, plainer one on top of it.
+                  onMouseEnter={event =>
+                    setHovered({ entry, x: event.clientX, y: event.clientY })
+                  }
+                  onMouseMove={event =>
+                    setHovered(current =>
+                      current && current.entry.id === entry.id
+                        ? { ...current, x: event.clientX, y: event.clientY }
+                        : current
+                    )
+                  }
+                  onMouseLeave={() => setHovered(null)}
+                />
                 {isOpened && (
                   // Crisp thin ring on top, for a defined edge against the glow.
                   <circle
@@ -763,6 +800,16 @@ export default function StarMap({
           })}
         </g>
       </svg>
+
+      {/*
+       * Rendered outside the <svg> - EntryTooltip positions itself via
+       * `fixed` + viewport clientX/clientY (see its header comment), so it
+       * doesn't need to live inside the zoomed/panned SVG coordinate
+       * space, only above it (z-50, same as LinearTimeline.tsx's).
+       */}
+      {hovered && (
+        <EntryTooltip entry={hovered.entry} x={hovered.x} y={hovered.y} />
+      )}
     </div>
   );
 }

@@ -5,11 +5,15 @@
  * "star map" via StarMap.tsx. See StarMap.tsx for the pan/zoom,
  * clustering, and click handling implementation details.
  *
- * App.tsx currently keeps entries only in memory, so a fresh session has
- * an empty array. Rather than let the page render an empty void, we fall
- * back to a small set of mock entries (src/utils/mockEntries.ts) purely
- * so there's something to look at and click on while testing - real
- * entries added via the '+' button take over immediately once they exist.
+ * This used to fall back to a small set of mock entries
+ * (utils/mockEntries.ts) whenever `entries` was empty, purely so there was
+ * something to look at while testing before real data existed. That mock
+ * generator has been removed entirely now that a real bundled dataset
+ * exists as the actual first-visit default (see
+ * utils/initializeFirstVisit.ts) - an empty `entries` array here now only
+ * means a visitor deliberately reset to a blank slate (see the "Start
+ * Your Own Constellation" button in About.tsx), and just renders an empty
+ * star map rather than falling back to anything.
  *
  * ──────────────────────────────────────────────────────────────────────
  * FULL-BLEED CANVAS + FLOATING OVERLAY SIDEBAR
@@ -160,7 +164,6 @@ import ResetToast from '../components/ResetToast';
 import StarMap from '../components/StarMap';
 import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
-import { generateMockEntries } from '../utils/mockEntries';
 
 interface ConstellationProps {
   entries: Entry[];
@@ -197,32 +200,12 @@ function insertSortedByTimestampDesc(
 }
 
 export default function Constellation({ entries }: ConstellationProps) {
-  const usingMockData = entries.length === 0;
-
-  // Only generate mock entries when they're actually needed (i.e. the user
-  // has no real entries yet) - not on every render, and not at all once
-  // real entries exist. This matters more now than it used to:
-  // generateMockEntries() creates its own dynamic categories via
-  // addCategory (see mockEntries.ts), a real localStorage write, so a user
-  // who already has their own entries/categories should never have that
-  // side effect run behind their back just because this page mounted.
-  const mockEntries = useMemo(
-    () => (usingMockData ? generateMockEntries() : []),
-    [usingMockData]
-  );
-
-  const displayedEntries = usingMockData ? mockEntries : entries;
-
-  // The dynamic category list - recomputed whenever the displayed entries
-  // change, since that's exactly when a new category could have appeared
-  // (mock data generation above, or a fresh "+ Add new category" in
-  // AddEntryForm, which always creates its new entry in the same action).
-  // Passed down to FilterBar and StarMap rather than having each of them
-  // independently reload it.
-  const categories = useMemo(
-    () => loadCategories(),
-    [displayedEntries]
-  );
+  // The dynamic category list - recomputed whenever entries change, since
+  // that's exactly when a new category could have appeared (a fresh "+
+  // Add new category" in AddEntryForm always creates its new entry in the
+  // same action). Passed down to FilterBar and StarMap rather than having
+  // each of them independently reload it.
+  const categories = useMemo(() => loadCategories(), [entries]);
 
   // The sidebar's panel stack - see the panel-stack comment above for the
   // sort-order and expand/collapse rules this state follows.
@@ -239,11 +222,11 @@ export default function Constellation({ entries }: ConstellationProps) {
     loadCategories().map(category => category.id)
   );
 
-  // Keeps a newly-appeared category (mock data generation, or a fresh
-  // "+ Add new category" in AddEntryForm) active by default, without
-  // clobbering any categories the user has already toggled off. Runs off
-  // `categories` rather than `displayedEntries` directly so it only fires
-  // when the category list itself actually grows.
+  // Keeps a newly-appeared category (a fresh "+ Add new category" in
+  // AddEntryForm) active by default, without clobbering any categories
+  // the user has already toggled off. Runs off `categories` rather than
+  // `entries` directly so it only fires when the category list itself
+  // actually grows.
   useEffect(() => {
     setFilterCategories(prev => {
       const known = new Set(prev);
@@ -618,15 +601,6 @@ export default function Constellation({ entries }: ConstellationProps) {
        * layout comment) - none of that is sized off this wrapper.
        */}
       <div ref={headerRef} className="relative z-10 w-fit space-y-4">
-        {/*
-         * The "showing example data" badge used to render here, next to
-         * the title - it now lives in Layout.tsx's navbar instead, next
-         * to the '+' button, so it's part of the top nav row rather than
-         * floating over the starfield near wherever a highlighted star
-         * happens to be. `usingMockData` above is still needed here
-         * regardless, to decide whether StarMap falls back to mock
-         * entries - see this file's top comment.
-         */}
         <h1
           className="text-3xl font-bold text-white"
           style={{ textShadow: READABLE_TEXT_SHADOW }}
@@ -658,7 +632,7 @@ export default function Constellation({ entries }: ConstellationProps) {
        * positions itself via `fixed inset-0`.
        */}
       <StarMap
-        entries={displayedEntries}
+        entries={entries}
         categories={categories}
         onStarClick={handleStarClick}
         openedEntryIds={openedEntryIds}

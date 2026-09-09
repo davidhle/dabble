@@ -6,9 +6,10 @@
  * state from loadEntries() and persists back via saveEntries() on every
  * change (previously entries lived in memory only and were lost on
  * refresh). Extracted into its own file rather than inlined in App.tsx so
- * utils/seedRealData.ts's one-time seed script can read/write the exact
- * same storage through the same helpers, instead of duplicating the key
- * name and parsing logic.
+ * other code that needs to read/write the exact same storage - the
+ * first-visit bootstrap (utils/initializeFirstVisit.ts) and the "Start
+ * Your Own Constellation" reset (pages/About.tsx) - can go through the
+ * same helpers instead of duplicating the key name and parsing logic.
  */
 
 import { Entry } from '../types/Entry';
