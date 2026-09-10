@@ -53,6 +53,7 @@ import About from './pages/About';
 import { Entry } from './types/Entry';
 import { loadEntries, saveEntries } from './utils/entriesStorage';
 import { initializeDefaultDataForFirstVisit } from './utils/initializeFirstVisit';
+import { TimeRangeProvider } from './context/TimeRangeContext';
 
 function App() {
   /**
@@ -190,13 +191,15 @@ function App() {
    *
    * The component tree structure:
    *
-   * HashRouter (enables client-side routing)
-   *   └── Routes (route matching container)
-   *         └── Route path="/" (matches all routes starting with /)
-   *               └── Layout (navbar + outlet, receives onAddEntry)
-   *                     ├── Route index (/) → Home
-   *                     ├── Route /chart → Timeline
-   *                     └── Route /about → About
+   * TimeRangeProvider (shared time-range filter - see its own top-of-file
+   *   comment for why it wraps the router rather than living inside a page)
+   *   └── HashRouter (enables client-side routing)
+   *         └── Routes (route matching container)
+   *               └── Route path="/" (matches all routes starting with /)
+   *                     └── Layout (navbar + outlet, receives onAddEntry)
+   *                           ├── Route index (/) → Home
+   *                           ├── Route /chart → Timeline
+   *                           └── Route /about → About
    *
    * PASSING PROPS TO LAYOUT:
    * We pass onAddEntry to Layout via the element prop.
@@ -206,55 +209,67 @@ function App() {
    * FUTURE CONSIDERATIONS:
    * If more components need access to entries, we could:
    * 1. Pass entries to Layout and use Outlet context
-   * 2. Create an EntriesContext provider here
+   * 2. Create an EntriesContext provider here (TimeRangeProvider below is
+   *    exactly this pattern already, just scoped to the time-range slice
+   *    of state rather than `entries` itself - see its own comment)
    * 3. Use a state management library
    */
   return (
-    // HashRouter (URLs like /dabble/#/constellation) instead of BrowserRouter
-    // is a deliberate trade-off for static GitHub Pages hosting: Pages has no
-    // server-side rewrite rule, so a direct load or refresh of a BrowserRouter
-    // path like /dabble/constellation would 404. The hash portion of the URL
-    // never reaches the server, so GitHub Pages just serves index.html and
-    // React Router handles the rest client-side. Given the deployment
-    // timeline, this was chosen over adding a 404.html redirect workaround.
-    <HashRouter>
-      <Routes>
-        {/**
-         * Parent route with Layout
-         *
-         * The Layout component wraps all child routes, providing:
-         * - Consistent navbar across all pages
-         * - AddEntry modal accessible from any page
-         * - Main content container
-         *
-         * The onAddEntry prop enables the Layout (and its AddEntryForm)
-         * to add entries to the state managed here.
-         */}
-        <Route path="/" element={<Layout onAddEntry={addEntry} />}>
+    // TimeRangeProvider wraps EVERYTHING that follows, including
+    // HashRouter itself - see TimeRangeContext.tsx's top-of-file "WHY THIS
+    // LIVES ABOVE THE ROUTER" comment for why: a provider that's a PARENT
+    // of the router never unmounts when routes change (only the router's
+    // own children do), so `selectedRange` survives navigating between
+    // Constellation/Timeline/Spiral instead of resetting every time.
+    // Passed the same `entries` state this component already owns - see
+    // TimeRangeContext.tsx for how `fullRange` is computed from it.
+    <TimeRangeProvider entries={entries}>
+      {/* HashRouter (URLs like /dabble/#/constellation) instead of BrowserRouter
+        is a deliberate trade-off for static GitHub Pages hosting: Pages has no
+        server-side rewrite rule, so a direct load or refresh of a BrowserRouter
+        path like /dabble/constellation would 404. The hash portion of the URL
+        never reaches the server, so GitHub Pages just serves index.html and
+        React Router handles the rest client-side. Given the deployment
+        timeline, this was chosen over adding a 404.html redirect workaround. */}
+      <HashRouter>
+        <Routes>
           {/**
-           * Child routes render inside Layout's <Outlet />
+           * Parent route with Layout
            *
-           * These components could receive entries as props if needed.
-           * Currently they don't need entries, but here's how you'd do it:
+           * The Layout component wraps all child routes, providing:
+           * - Consistent navbar across all pages
+           * - AddEntry modal accessible from any page
+           * - Main content container
            *
-           * <Route
-           *   index
-           *   element={<Home entries={entries} />}
-           * />
-           *
-           * Or use Outlet context in Layout to pass data.
+           * The onAddEntry prop enables the Layout (and its AddEntryForm)
+           * to add entries to the state managed here.
            */}
-          <Route index element={<Home />} />
-          <Route path="chart" element={<Timeline entries={entries} />} />
-          <Route path="spiral" element={<Spiral entries={entries} />} />
-          <Route
-            path="constellation"
-            element={<Constellation entries={entries} />}
-          />
-          <Route path="about" element={<About />} />
-        </Route>
-      </Routes>
-    </HashRouter>
+          <Route path="/" element={<Layout onAddEntry={addEntry} />}>
+            {/**
+             * Child routes render inside Layout's <Outlet />
+             *
+             * These components could receive entries as props if needed.
+             * Currently they don't need entries, but here's how you'd do it:
+             *
+             * <Route
+             *   index
+             *   element={<Home entries={entries} />}
+             * />
+             *
+             * Or use Outlet context in Layout to pass data.
+             */}
+            <Route index element={<Home />} />
+            <Route path="chart" element={<Timeline entries={entries} />} />
+            <Route path="spiral" element={<Spiral entries={entries} />} />
+            <Route
+              path="constellation"
+              element={<Constellation entries={entries} />}
+            />
+            <Route path="about" element={<About />} />
+          </Route>
+        </Routes>
+      </HashRouter>
+    </TimeRangeProvider>
   );
 }
 

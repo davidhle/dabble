@@ -59,6 +59,14 @@
  * StarMap's stars and cluster labels stay in lockstep under its own
  * group-transform approach.
  *
+ * Pan/zoom is also now bounded, not unconstrained: `baseXScale`'s domain
+ * comes from `domainRange` (TimeRangeContext's `selectedRange`, via
+ * Timeline.tsx) rather than the full dataset's own min/max - see the
+ * DOMAIN COMES FROM domainRange and PAN/ZOOM CONSTRAINED TO domainRange
+ * comments further down for why, and for how `translateExtent` keeps a
+ * user from panning/zooming past the edges of whatever window they've
+ * selected.
+ *
  * This "bake the transform into every position" approach (rather than
  * StarMap's "transform one group") is also why the AUTO-RECENTER effect
  * below has to compute a *new zoom transform* from scratch instead of
@@ -154,6 +162,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
+import { DateRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
 // Shared with StarMap.tsx's own hover tooltip - see EntryTooltip.tsx's
 // header comment for why this was pulled out into one component instead
@@ -214,6 +223,20 @@ interface LinearTimelineProps {
    * for the bug this fixes.
    */
   topOffset: number;
+  /**
+   * The visible axis window - Timeline.tsx's TimeRangeContext
+   * `selectedRange`. `baseXScale`'s domain is built from THIS now,
+   * instead of `entries`' own min/max timestamp the way it used to be -
+   * see the DOMAIN COMES FROM domainRange comment below for why, and
+   * PAN/ZOOM CONSTRAINED TO domainRange for how this also bounds
+   * d3-zoom's `translateExtent`. `entries` itself is expected to already
+   * be filtered to (roughly) this same window by Timeline.tsx - see its
+   * own comment - but `domainRange` is threaded through separately
+   * rather than re-derived from the (already-filtered) `entries` prop,
+   * so the axis still shows the FULL selected window even when the
+   * entries that happen to fall inside it cluster away from one edge.
+   */
+  domainRange: DateRange;
 }
 
 /** Opacity applied to a point/range whose category is filtered out - same value as StarMap.tsx's FILTERED_OUT_OPACITY. */
@@ -229,6 +252,13 @@ const OPENED_HIGHLIGHT_COLOR = '#ffffff';
 
 /** Plot margins - room for the axis (bottom) and so edge points aren't clipped. */
 const MARGIN = { top: 24, right: 24, bottom: 40, left: 24 };
+
+/**
+ * Gap (px) between the sidebar overlay's right edge and where the canvas's
+ * drawing origin starts, when a panel is open - see the CANVAS ORIGIN
+ * SHIFT comment below.
+ */
+const SIDEBAR_GUTTER = 10;
 
 /** Hint passed to d3's axis tick generator - see the AXIS EFFECT comment above. */
 const TICK_COUNT = 7;
@@ -330,6 +360,7 @@ export default function LinearTimeline({
   expandedEntryId,
   sidebarWidth,
   topOffset,
+  domainRange,
 }: LinearTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -373,7 +404,58 @@ export default function LinearTimeline({
     return () => observer.disconnect();
   }, []);
 
-  const innerWidth = Math.max(0, size.width - MARGIN.left - MARGIN.right);
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * CANVAS ORIGIN SHIFT: A DIRECT SHIFT, NOT A PAN - AND WHY, UNLIKE
+   * StarMap
+   * ──────────────────────────────────────────────────────────────────────
+   * StarMap.tsx keeps stars at fixed "world" coordinates spanning the
+   * ENTIRE canvas regardless of the sidebar, and instead PANS (via a
+   * d3-zoom transform on its zoom layer `<g>`) so a clicked star ends up
+   * visually centered in whatever region the sidebar isn't covering - the
+   * star field itself never "moves" in world-space, only the VIEW into it
+   * does. That works well for StarMap because its layout has no inherent
+   * left-to-right meaning - a cluster's *position* on screen is already
+   * somewhat arbitrary (see StarMap's own CLUSTERING comment), so panning
+   * the view is indistinguishable from moving the content.
+   *
+   * A time axis is different: x position IS the data (see the D3 scaleTime
+   * comment at the top of this file) - "where on screen does this render"
+   * and "what date does this represent" are the same question, mediated
+   * only by `baseXScale`. Rather than draw the FULL axis somewhere off to
+   * the left (behind the sidebar) and rely on panning to bring the
+   * relevant part into view - which is what StarMap-style recentering
+   * would mean here - `contentOriginX` instead moves the scale's own
+   * pixel RANGE to start `SIDEBAR_GUTTER`px past the sidebar's right edge
+   * in the first place. The whole axis (not just whichever entry happens
+   * to be expanded) is never drawn under the sidebar to begin with,
+   * rather than being drawn there and then panned out from under it - a
+   * direct, structural fix rather than a runtime workaround, which fits a
+   * single linear axis (one meaningful x-origin) better than it would fit
+   * StarMap's free-form 2D field (where "the origin" isn't a single
+   * meaningful place to begin with).
+   *
+   * `innerWidth` (and therefore `baseXScale`'s pixel range) shrinks to
+   * match: the full `domainRange` window still maps across exactly the
+   * REMAINING visible width - `size.width` minus this shifted origin
+   * minus `MARGIN.right` - rather than the origin moving right while the
+   * range width stays the same, which would just push content off the
+   * right edge instead of fitting it into the smaller visible area.
+   * `sidebarWidth === 0` (no panel open) falls back to the plain
+   * `MARGIN.left` origin this always used, unchanged.
+   *
+   * This ALSO simplifies AUTO-RECENTER below: since g-local coordinate
+   * space (everything drawn inside `<g transform="translate(contentOriginX, ...)">`)
+   * now excludes the sidebar's band by construction, centering an entry
+   * within the visible area is just `innerWidth / 2` - no need to
+   * separately account for `sidebarWidth` in that math anymore, unlike
+   * StarMap's own centering target (`sidebarWidth + (width - sidebarWidth) / 2`),
+   * which still has to exclude the sidebar's band itself since StarMap's
+   * own coordinate space is NOT shifted the way this one now is.
+   */
+  const contentOriginX =
+    sidebarWidth > 0 ? sidebarWidth + SIDEBAR_GUTTER : MARGIN.left;
+  const innerWidth = Math.max(0, size.width - contentOriginX - MARGIN.right);
 
   // Set for O(1) membership checks per point/range, rebuilt only when the
   // prop itself changes - same pattern as StarMap.tsx's activeCategorySet.
@@ -389,41 +471,43 @@ export default function LinearTimeline({
     [openedEntryIds]
   );
 
-  // ─── Base time scale ───
-  // Maps the full date range of `entries` onto [0, innerWidth] - see the
-  // "D3 scaleTime + axisBottom PATTERN" comment above. Falls back to a
-  // single-day domain when there are no entries (or no room to draw) so
-  // scaleTime never sees an `undefined` bound; that fallback scale is
-  // never actually rendered, since the EMPTY STATE branch below returns
-  // before any of it is used.
-  //
-  // Includes each range entry's endTimestamp alongside every entry's
-  // plain timestamp (mirroring SpiralTimeline.tsx's own domain
-  // calculation) rather than extent-ing over timestamps alone - a range
-  // entry whose end reaches past every other entry's timestamp would
-  // otherwise get a domain that ends before its own end, pushing cxEnd
-  // past innerWidth instead of landing inside the visible plot.
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * DOMAIN COMES FROM domainRange, NOT `entries`
+   * ──────────────────────────────────────────────────────────────────────
+   * This used to derive its domain from `entries`' own min/max timestamp
+   * (via d3.extent) - the axis showed exactly whatever window the
+   * *visible* entries happened to span, nothing more or less. Now that
+   * Timeline.tsx pre-filters `entries` down to whatever
+   * TimeRangeContext's `selectedRange` is (see that prop's own comment),
+   * doing the same "extent over the entries I was handed" would show a
+   * SMALLER window than what the user actually selected whenever the
+   * surviving entries happen to cluster away from one or both edges of
+   * `domainRange` - e.g. selecting all of 2023 but every remaining entry
+   * happens to fall in June would shrink the axis down to just June,
+   * silently contradicting the range the user asked to see. Building the
+   * domain from `domainRange` directly instead keeps the axis showing
+   * the FULL selected window regardless of how the entries inside it are
+   * actually distributed - the same reason TimeRangeSelector.tsx's own
+   * brush track always shows `fullRange`, not `selectedRange`.
+   *
+   * The single-instant padding fallback stays as a defensive guard (in
+   * case `domainRange.start === domainRange.end`, e.g. a maximally
+   * narrowed brush) even though TimeRangeContext's own `computeFullRange`
+   * already pads a degenerate range the same way, so this scale can never
+   * end up with a literal zero-width domain regardless of what produced
+   * `domainRange`.
+   */
   const baseXScale = useMemo(() => {
-    const dates = entries.flatMap(entry =>
-      entry.endTimestamp
-        ? [new Date(entry.timestamp), new Date(entry.endTimestamp)]
-        : [new Date(entry.timestamp)]
-    );
-    const [minDate, maxDate] = d3.extent(dates);
-    const domain: [Date, Date] =
-      minDate && maxDate ? [minDate, maxDate] : [new Date(), new Date()];
+    const domain: [Date, Date] = [domainRange.start, domainRange.end];
 
-    // A single-instant domain (one entry, or every entry on the same
-    // timestamp) would otherwise map everything to the same x - pad it
-    // out to a full day so a lone point still sits visibly inside the
-    // plot instead of pinned to the left edge.
     if (domain[0].getTime() === domain[1].getTime()) {
       domain[0] = d3.timeDay.offset(domain[0], -1);
       domain[1] = d3.timeDay.offset(domain[1], 1);
     }
 
     return d3.scaleTime().domain(domain).range([0, innerWidth]);
-  }, [entries, innerWidth]);
+  }, [domainRange, innerWidth]);
 
   // ─── Zoom transform ───
   // Holds only the *transform* d3-zoom last reported (translate + scale),
@@ -463,6 +547,82 @@ export default function LinearTimeline({
       zoomBehaviorRef.current = null;
     };
   }, []);
+
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * PAN/ZOOM CONSTRAINED TO domainRange
+   * ──────────────────────────────────────────────────────────────────────
+   * d3-zoom's `translateExtent` bounds how far the user can PAN (zoom
+   * SCALE stays governed separately by `.scaleExtent(ZOOM_SCALE_EXTENT)`
+   * above) - it's specified in the same "world" pixel coordinate space
+   * `baseXScale`'s own RANGE already uses: `[0, innerWidth]`. Since
+   * `baseXScale`'s DOMAIN is now `domainRange` itself (see the comment on
+   * `baseXScale` above) rather than the full dataset's own min/max,
+   * constraining translateExtent to this exact pixel box is what keeps
+   * the user from panning/zooming past the selected window's edges - they
+   * can still zoom in and pan freely WITHIN `domainRange`, just can't
+   * reveal empty space beyond it the way panning with no extent set at
+   * all (the previous behavior) allowed.
+   *
+   * Deliberately does NOT depend on `domainRange` itself: these bounds
+   * are pixel bounds - `[0, innerWidth]` × `[0, size.height]` - the same
+   * regardless of which calendar dates currently map to them, only the
+   * container's own size changes them. Updating `translateExtent` on an
+   * already-attached behavior (via `zoomBehavior.translateExtent(...)`,
+   * not recreating the whole behavior) doesn't reset the user's current
+   * pan/zoom position, unlike the effect below.
+   *
+   * `innerWidth` itself already accounts for the sidebar now too - see
+   * the CANVAS ORIGIN SHIFT comment on `innerWidth`'s own definition -
+   * so this effect needs no separate `sidebarWidth` handling of its own;
+   * it just reacts to `innerWidth` changing, whatever the reason.
+   */
+  useEffect(() => {
+    const zoomBehavior = zoomBehaviorRef.current;
+    if (!zoomBehavior) return;
+
+    zoomBehavior.translateExtent([
+      [0, 0],
+      [innerWidth, size.height],
+    ]);
+  }, [innerWidth, size.height]);
+
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * RESET PAN/ZOOM WHEN domainRange CHANGES
+   * ──────────────────────────────────────────────────────────────────────
+   * Selecting a different window on TimeRangeSelector.tsx's brush changes
+   * what `baseXScale`'s domain even MEANS - the same `zoomTransform`
+   * `{k, x}` values, reapplied via `rescaleX` to a brand new domain,
+   * would show some scaled/offset slice of the NEW window that has no
+   * relation to whatever the user was previously panned/zoomed to. Driving
+   * the reset THROUGH `zoomBehavior.transform` (not just resetting the
+   * `zoomTransform` React state directly) matters for the same reason
+   * StarMap.tsx's RESET-VIEW effect does it that way: d3-zoom tracks its
+   * OWN current transform on the `<svg>` DOM node, independent of React
+   * state, so only driving the change through the behavior itself keeps
+   * that internal node-level state in sync too - otherwise the NEXT
+   * drag/scroll gesture would continue from the stale pre-reset transform
+   * instead of the identity one this just set.
+   *
+   * `isFirstDomainRange` skips the very first run (mount) - `zoomTransform`
+   * already starts at `d3.zoomIdentity`, so there's nothing to reset yet;
+   * same "skip the first signal" guard StarMap.tsx's own RESET-VIEW effect
+   * uses for its `resetViewSignal` prop.
+   */
+  const isFirstDomainRange = useRef(true);
+  useEffect(() => {
+    if (isFirstDomainRange.current) {
+      isFirstDomainRange.current = false;
+      return;
+    }
+
+    const svgNode = svgRef.current;
+    const zoomBehavior = zoomBehaviorRef.current;
+    if (!svgNode || !zoomBehavior) return;
+
+    d3.select(svgNode).call(zoomBehavior.transform, d3.zoomIdentity);
+  }, [domainRange]);
 
   // ─── AXIS EFFECT ───
   // Re-runs the axisBottom generator against the current (possibly
@@ -681,21 +841,50 @@ export default function LinearTimeline({
    * fighting whatever y a user's own two-finger/trackpad pan gesture may
    * have already set.
    *
-   * WHY THE TARGET IS `sidebarWidth + (width - sidebarWidth) / 2`, NOT
-   * `width / 2`: same reasoning as StarMap's CLICK-TO-CENTER - `size` is
-   * always the full viewport (see FULL-BLEED CANVAS above), not just the
-   * region actually visible past the sidebar overlay, so the visible
-   * band's own midpoint has to exclude `sidebarWidth` the same way
-   * StarMap's target does. `- MARGIN.left` converts that SCREEN-space
-   * target into the `<g transform="translate(MARGIN.left, ...)">`'s own
-   * LOCAL coordinate space, which is what `cx`/`baseXScale` are already
-   * expressed in.
+   * WHY THE TARGET IS JUST `innerWidth / 2` NOW, UNLIKE StarMap's OWN
+   * `sidebarWidth + (width - sidebarWidth) / 2`:
+   * See the CANVAS ORIGIN SHIFT comment above `innerWidth` - g-local
+   * coordinate space (everything positioned relative to
+   * `<g transform="translate(contentOriginX, ...)">`) already EXCLUDES
+   * the sidebar's band by construction now, so its own midpoint is
+   * already the midpoint of exactly the visible-past-the-sidebar region -
+   * there's nothing left to separately subtract. StarMap still needs its
+   * own more involved formula because ITS coordinate space is NOT shifted
+   * the same way (see that comment for why a direct origin shift doesn't
+   * fit StarMap's free-form layout the way it fits this linear one); this
+   * effect's job is now purely "bring the clicked entry to the middle of
+   * whatever's currently visible," with the sidebar-avoidance itself
+   * already handled structurally before this even runs.
    *
    * For a range entry (has `endTimestamp`), the midpoint of its start and
    * end is used as the "world" x to center on, rather than just its
    * start - centering on the capsule's start would visually push most of
    * a long-duration entry off to one side of the target instead of
    * centering the entry itself.
+   *
+   * `sidebarWidth` IS STILL A DEPENDENCY, EVEN THOUGH THE FORMULA NO
+   * LONGER MENTIONS IT DIRECTLY: it still drives `innerWidth` (via
+   * `contentOriginX`), which `targetX` is computed from - and the same
+   * first-click staleness this dependency was originally added to fix
+   * still applies: `hasSelection` (and therefore whether SidebarPanelStack
+   * is even mounted, and therefore `contentOriginX`/`innerWidth`) flips in
+   * the SAME render `expandedEntryId` changes on the very first entry
+   * ever opened, while `sidebarWidth` itself is still 0 from BEFORE the
+   * sidebar existed to measure - a real width only lands in a SEPARATE,
+   * slightly later commit (Timeline.tsx's own ResizeObserver effect has
+   * to run first). Without `sidebarWidth` in these deps, this effect
+   * would already have centered against the UN-shifted, full-canvas
+   * `innerWidth` before the real one ever arrives, and never get a chance
+   * to correct itself, since `expandedEntryId` alone doesn't change again
+   * just because `sidebarWidth` (and therefore `contentOriginX`) did.
+   * With it included, this effect re-fires once the real width lands,
+   * recentering again against the now-correctly-shifted `innerWidth` -
+   * d3's `.transition()` simply redirects the still-in-flight first
+   * animation toward the corrected target rather than restarting it, so
+   * this reads as one smooth pan converging on the right spot rather than
+   * a visible double jump. This also means resizing the window WHILE a
+   * panel is open correctly re-centers as the sidebar's rendered width
+   * (and therefore the shifted origin) changes with it.
    */
   useEffect(() => {
     const svgNode = svgRef.current;
@@ -705,8 +894,7 @@ export default function LinearTimeline({
     const target = entries.find(entry => entry.id === expandedEntryId);
     if (!target) return;
 
-    const { width } = size;
-    if (width === 0) return;
+    if (innerWidth === 0) return;
 
     const worldDate = target.endTimestamp
       ? new Date(
@@ -717,7 +905,7 @@ export default function LinearTimeline({
       : new Date(target.timestamp);
     const worldX = baseXScale(worldDate);
 
-    const targetX = sidebarWidth + (width - sidebarWidth) / 2 - MARGIN.left;
+    const targetX = innerWidth / 2;
 
     const currentTransform = d3.zoomTransform(svgNode);
 
@@ -730,8 +918,17 @@ export default function LinearTimeline({
       .transition()
       .duration(650) // 500-750ms: smooth, not sluggish - same duration as StarMap's
       .call(zoomBehavior.transform, centeredTransform);
+    // `entries`/`size`/`baseXScale`/`innerWidth`/`contentOriginX` are
+    // deliberately still excluded - see StarMap's own CLICK-TO-CENTER
+    // comment for why an effect like this should only re-run for the
+    // specific things that should actually TRIGGER a recenter (the
+    // expanded entry changing, or the sidebar's width changing - which
+    // `innerWidth`/`contentOriginX` are themselves only ever a function
+    // of, alongside `size.width`, which is deliberately excluded on its
+    // own too), not every render that happens to touch one of the values
+    // it reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedEntryId]);
+  }, [expandedEntryId, sidebarWidth]);
 
   const isReady = size.width > 0 && size.height > 0;
 
@@ -748,9 +945,16 @@ export default function LinearTimeline({
         // "there's nothing to show yet." `topOffset`-aware `top` (rather
         // than a flat `top-24`) so this never collides with the header
         // stack either, same reasoning as VERTICAL CENTERING above.
+        // `left` is `contentOriginX`-aware for the same reason: a panel
+        // CAN be open with zero VISIBLE (time-filtered) entries - e.g. the
+        // brush narrowed to a window with nothing in it while a panel for
+        // an out-of-window entry stays open (panels don't auto-close on
+        // filtering - see useEntrySelection.ts's CATEGORY FILTER comment
+        // for the same independence) - so this message needs to avoid the
+        // sidebar exactly like the real content does.
         <div
-          className="absolute left-6 max-w-sm rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-sm text-indigo-300"
-          style={{ top: topOffset + 24 }}
+          className="absolute max-w-sm rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-sm text-indigo-300"
+          style={{ top: topOffset + 24, left: contentOriginX + 6 }}
           role="status"
         >
           No entries yet. Click the + button (top right) to add your first one,
@@ -781,7 +985,15 @@ export default function LinearTimeline({
               <feGaussianBlur stdDeviation="3" />
             </filter>
           </defs>
-          <g transform={`translate(${MARGIN.left},${contentOffsetY})`}>
+          {/*
+           * `contentOriginX`, not `MARGIN.left` - see the CANVAS ORIGIN
+           * SHIFT comment above. This is the one place the shift actually
+           * takes effect: every point/range/axis position computed below
+           * is already relative to THIS origin, so shifting it here is
+           * what moves the whole rendered timeline past the sidebar,
+           * rather than drawing it at a fixed spot and panning the view.
+           */}
+          <g transform={`translate(${contentOriginX},${contentOffsetY})`}>
             {isReady &&
               // Range entries (endTimestamp set): a short horizontal
               // capsule from start to end x, instead of a single point -

@@ -66,6 +66,36 @@
  *     header, unlike StarMap's starfield which has no equivalent
  *     vertical exclusion. See LinearTimeline.tsx's VERTICAL CENTERING
  *     comment for why this page-specific need doesn't apply to StarMap.
+ *
+ * STAGE 3: TimeRangeContext - a HARD time filter, unlike filterCategories
+ * ──────────────────────────────────────────────────────────────────────
+ * This page is also the first (only, so far - see TimeRangeContext.tsx's
+ * own top-of-file comment on why it's provided app-wide regardless)
+ * consumer of TimeRangeContext's `selectedRange`, via
+ * TimeRangeSelector.tsx's d3-brush control rendered below LinearTimeline.
+ *
+ * Deliberately a HARD filter - `timeFilteredEntries` below excludes
+ * anything outside `selectedRange` entirely, rather than the
+ * dim-don't-remove treatment `filterCategories` gets (see
+ * useEntrySelection.ts's CATEGORY FILTER comment for that one's own
+ * reasoning). The two aren't the same kind of question: a category
+ * toggle asks "of everything that happened, which KINDS do I want to
+ * see" - the events not shown still genuinely happened in the visible
+ * window, so dimming (rather than hiding) keeps that context legible.
+ * `selectedRange` instead asks "which SLICE OF TIME am I looking at right
+ * now" - an entry outside that slice isn't a dimmed-down version of
+ * what's being viewed, it's simply not part of the window at all, the
+ * same way scrolling a calendar to March stops showing February's days
+ * rather than rendering them grayed out.
+ *
+ * `isEntryWithinRange` (utils/entryDateRange.ts) is what decides
+ * membership - see its own comment for the overlap-vs-containment
+ * distinction for range entries. `timeFilteredEntries` (not `entries`) is
+ * what actually reaches LinearTimeline; `categories`/`useEntrySelection`
+ * below deliberately keep reading the full, UNfiltered `entries` - the
+ * category list and the sidebar's open panels represent the user's whole
+ * dataset and their own deliberate choices, neither of which should
+ * change just because the visible time window did.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -74,10 +104,13 @@ import LinearTimeline from '../components/LinearTimeline';
 import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
 import SidebarPanelStack from '../components/SidebarPanelStack';
+import TimeRangeSelector from '../components/TimeRangeSelector';
 import VizPageHeader from '../components/VizPageHeader';
 import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
+import { isEntryWithinRange } from '../utils/entryDateRange';
 import { useEntrySelection } from '../hooks/useEntrySelection';
+import { useTimeRange } from '../context/TimeRangeContext';
 
 interface TimelineProps {
   entries: Entry[];
@@ -85,8 +118,22 @@ interface TimelineProps {
 
 export default function Timeline({ entries }: TimelineProps) {
   // The dynamic category list - see Constellation.tsx's identical
-  // `categories` useMemo for why this is recomputed off `entries`.
+  // `categories` useMemo for why this is recomputed off `entries`. Reads
+  // the full `entries`, not `timeFilteredEntries` below - see the
+  // STAGE 3 comment above for why the category list shouldn't shrink
+  // just because the visible time window did.
   const categories = useMemo(() => loadCategories(), [entries]);
+
+  // See the STAGE 3 comment above: `selectedRange` is the shared,
+  // cross-page time filter; `timeFilteredEntries` is `entries` hard-cut
+  // down to only what's `isEntryWithinRange` of it - this (not `entries`)
+  // is what actually reaches LinearTimeline and its AUTO-RECENTER/
+  // click-highlight machinery below.
+  const { selectedRange, resetToFullRange } = useTimeRange();
+  const timeFilteredEntries = useMemo(
+    () => entries.filter(entry => isEntryWithinRange(entry, selectedRange)),
+    [entries, selectedRange]
+  );
 
   const {
     selectedEntries,
@@ -104,7 +151,24 @@ export default function Timeline({ entries }: TimelineProps) {
     hasSelection,
     resetPending,
     resetAll,
-  } = useEntrySelection({ categories });
+  } = useEntrySelection({
+    categories,
+    // RESET INCLUDES THE BRUSH: the hook's own `resetAll` (fired by the
+    // bottom-right ResetButton, or Escape's second press - see
+    // useEntrySelection.ts's ESCAPE KEY comment) already clears the panel
+    // stack/category filter/sort mode; `onFullReset` is its hook for
+    // whatever ELSE a page wants a full reset to also cover -
+    // Constellation.tsx uses it to reset StarMap's pan/zoom, and this page
+    // uses the exact same hook to put TimeRangeSelector's brush back to
+    // `fullRange` too, via TimeRangeContext's `resetToFullRange` (not
+    // `setSelectedRange` - see that function's own comment for why the
+    // distinction matters for a FULL reset specifically). Since
+    // TimeRangeSelector's own SYNC EFFECT already reacts to
+    // `selectedRange` changing from outside a drag, the brush's handles
+    // visually snap back to the full track automatically - nothing else
+    // needs to be wired up for "the brush visually resets too."
+    onFullReset: resetToFullRange,
+  });
 
   // Where the header stack (title/subtitle + FilterBar) actually sits in
   // the viewport, so SidebarPanelStack below can start just past its
@@ -180,14 +244,29 @@ export default function Timeline({ entries }: TimelineProps) {
       </div>
 
       <LinearTimeline
-        entries={entries}
+        entries={timeFilteredEntries}
         filterCategories={filterCategories}
         onEntryClick={handleEntryClick}
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}
         sidebarWidth={sidebarWidth}
         topOffset={headerLayout.top}
+        domainRange={selectedRange}
       />
+
+      {/*
+       * Rendered after LinearTimeline in source order - see the STAGE 3
+       * comment above. Self-positioning `fixed bottom-*` chrome (see its
+       * own comment), so its place here in the JSX tree doesn't determine
+       * where it actually lands on screen. Passed the full, unfiltered
+       * `entries` (not `timeFilteredEntries`) for its density ticks - see
+       * TimeRangeSelector.tsx's own prop comment for why. Also passed the
+       * same `sidebarWidth` LinearTimeline gets, so it can center itself
+       * within the same sidebar-excluded visible region LinearTimeline's
+       * own content now starts past - see both files' own comments on
+       * their respective (different) sidebar-aware layout mechanisms.
+       */}
+      <TimeRangeSelector entries={entries} sidebarWidth={sidebarWidth} />
 
       <ResetToast visible={resetPending} />
       <ResetButton onClick={resetAll} />
