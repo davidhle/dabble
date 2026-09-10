@@ -14,11 +14,17 @@
  * state is set - see the "Hover tooltip" comments in LinearTimeline.tsx
  * and StarMap.tsx.
  *
- * DATE FORMAT: prefers the human-written `dateDisplay` when present,
- * falling back to the formatted exact timestamp - the same rule
- * EntryPanel.tsx/EntryDetailModal.tsx use wherever an entry's date is
- * shown, so a date reads consistently no matter which part of the app
- * shows it.
+ * DATE FORMAT: uses the shared formatEntryDate() utility (formatEntryDate.ts)
+ * - the SAME function EntryPanel.tsx/EntryDetailModal.tsx call - rather than
+ * a separate copy of the dateDisplay/single-date logic. This used to be its
+ * own inline computation here that predated formatEntryDate() and never got
+ * updated to know about date ranges (entries with `endTimestamp` - see its
+ * field comment in types/Entry.ts), so a range entry's tooltip silently
+ * showed just its start date as a single point instead of the full range
+ * (e.g. "Mar 17, 2023" instead of "Mar 17 - Mar 19, 2023"). Calling the
+ * shared function here too closes that gap and guarantees the tooltip can
+ * never drift out of sync with the panel/modal again, no matter what
+ * date-formatting rule changes in the future.
  *
  * EDGE-AWARE POSITIONING: `x`/`y` are just the raw cursor/star position,
  * not a final on-screen box origin - if placed at a flat `x + OFFSET`,
@@ -36,6 +42,7 @@
 
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Entry } from '../types/Entry';
+import { formatEntryDate } from '../utils/formatEntryDate';
 
 interface EntryTooltipProps {
   entry: Entry;
@@ -92,13 +99,7 @@ export default function EntryTooltip({ entry, x, y }: EntryTooltipProps) {
     setPosition({ left, top });
   }, [x, y]);
 
-  const formattedDate =
-    entry.dateDisplay ??
-    new Date(entry.timestamp).toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+  const formattedDate = formatEntryDate(entry);
 
   return (
     // pointer-events-none: a hover tooltip should never itself be
@@ -109,7 +110,14 @@ export default function EntryTooltip({ entry, x, y }: EntryTooltipProps) {
     // pan/zoom transform or scroll position.
     <div
       ref={tooltipRef}
-      className="pointer-events-none fixed z-50 rounded-md border border-[var(--panel-border-color)] bg-[var(--panel-bg-color)] px-3 py-2 text-xs text-[var(--text-color)] shadow-lg"
+      // bg-[var(--panel-bg-color-solid)]: this tooltip floats directly
+      // over whatever's being hovered (a dense star field, or other
+      // timeline points) - the regular --panel-bg-color's subtle ~6%
+      // tint left that content clearly legible right through the
+      // tooltip, undermining its own job of showing a clean title/date.
+      // See --panel-bg-color-solid's comment in index.css for the ~92%
+      // opacity value chosen and why it's deliberately short of 100%.
+      className="pointer-events-none fixed z-50 rounded-md border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] px-3 py-2 text-xs text-[var(--text-color)] shadow-lg"
       style={{ left: position.left, top: position.top }}
     >
       <div className="font-medium">{entry.title}</div>

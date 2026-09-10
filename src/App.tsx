@@ -46,7 +46,8 @@ import { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import Home from './pages/Home';
-import Chart from './pages/Chart';
+import Timeline from './pages/Timeline';
+import Spiral from './pages/Spiral';
 import Constellation from './pages/Constellation';
 import About from './pages/About';
 import { Entry } from './types/Entry';
@@ -194,7 +195,7 @@ function App() {
    *         └── Route path="/" (matches all routes starting with /)
    *               └── Layout (navbar + outlet, receives onAddEntry)
    *                     ├── Route index (/) → Home
-   *                     ├── Route /chart → Chart
+   *                     ├── Route /chart → Timeline
    *                     └── Route /about → About
    *
    * PASSING PROPS TO LAYOUT:
@@ -244,7 +245,8 @@ function App() {
            * Or use Outlet context in Layout to pass data.
            */}
           <Route index element={<Home />} />
-          <Route path="chart" element={<Chart entries={entries} />} />
+          <Route path="chart" element={<Timeline entries={entries} />} />
+          <Route path="spiral" element={<Spiral entries={entries} />} />
           <Route
             path="constellation"
             element={<Constellation entries={entries} />}

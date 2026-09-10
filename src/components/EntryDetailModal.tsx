@@ -2,22 +2,37 @@
  * EntryDetailModal.tsx - Read-Only Entry Detail Popup
  *
  * A lightweight modal that shows a single entry's details: title, date,
- * activity type, tags, and notes.
+ * activity type, tags, mood, notes, and media links.
  *
  * This mirrors the overlay pattern already used by AddEntryForm.tsx
  * (fixed inset backdrop + centered card, click-outside-to-close, click
  * inside the card doesn't propagate to the backdrop) so modals across
  * the app behave consistently.
  *
- * Not currently used by StarMap.tsx - clicking a star there now adds the
- * entry to Constellation.tsx's sidebar (see EntryPanel.tsx) instead of
- * opening this modal. Kept around as the base this file's content was
- * adapted from, and in case a future overlay-style detail view is needed.
+ * Not currently used by StarMap.tsx or LinearTimeline.tsx - clicking an
+ * entry in either view now adds it to a SidebarPanelStack.tsx panel (see
+ * useEntrySelection.ts's `handleEntryClick`) instead of opening this
+ * modal. Still used as-is by SpiralTimeline.tsx, which has no equivalent
+ * multi-panel sidebar need (a single point/arc click just needs "the one
+ * entry you clicked," not several kept open side by side).
+ *
+ * MOOD / MEDIA LINKS: this used to render Tags and Notes only - `mood`
+ * and `mediaLinks` were both being saved onto the entry correctly (see
+ * AddEntryForm.tsx) but had nowhere to display here, the same gap
+ * EntryPanel.tsx had (see its own comment on the same fix). Fixed the
+ * same way - a Mood section (same chip pattern as Tags, just its own
+ * color) and a Media Links section (labeled clickable link-outs via
+ * utils/mediaLinks.ts's getMediaLinkLabel) - just kept in this file's own
+ * existing LIGHT color palette rather than EntryPanel's dark one, since
+ * this modal hasn't been migrated to the app's dark theme (unlike
+ * AddEntryForm.tsx - see its own THEMING comment).
  */
 
 import { Entry } from '../types/Entry';
 import { getCategoryName } from '../utils/categories';
-import { linkify } from '../utils/linkify';
+import { linkify, LINK_CLASSNAME } from '../utils/linkify';
+import { getMediaLinkLabel } from '../utils/mediaLinks';
+import { formatEntryDate } from '../utils/formatEntryDate';
 
 interface EntryDetailModalProps {
   /** The entry to display. When null, the modal renders nothing. */
@@ -36,18 +51,10 @@ export default function EntryDetailModal({
   // list, so a user-created category's name displays correctly here too.
   const displayActivityType = getCategoryName(entry.activityType);
 
-  // Prefer the imprecise, human-written dateDisplay (e.g. "October -
-  // November 2021") when present - see the dateDisplay field comment in
-  // types/Entry.ts - falling back to the exact formatted timestamp for
-  // entries where the real date is actually known.
-  const formattedDate =
-    entry.dateDisplay ??
-    new Date(entry.timestamp).toLocaleDateString(undefined, {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+  // See formatEntryDate for the dateDisplay / date-range / single-date
+  // precedence - shows a range like "Jun 30 – Jul 2, 2023" when the entry
+  // has an endTimestamp (see types/Entry.ts).
+  const formattedDate = formatEntryDate(entry);
 
   return (
     <div
@@ -111,6 +118,33 @@ export default function EntryDetailModal({
               </div>
             )}
 
+            {/*
+             * Mood - see the MOOD / MEDIA LINKS comment at the top of this
+             * file. Renders nothing at all (not an empty "Mood" label)
+             * when `entry.mood` is undefined or empty. Teal rather than
+             * Tags' indigo - a color no category from
+             * utils/categories.ts's NEW_CATEGORY_COLOR_PALETTE cycles
+             * through, so a mood chip can't be mistaken for one, same
+             * reasoning as EntryPanel.tsx's own Mood section.
+             */}
+            {entry.mood && entry.mood.length > 0 && (
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+                  Mood
+                </p>
+                <div className="mt-1.5 flex flex-wrap gap-2">
+                  {entry.mood.map(mood => (
+                    <span
+                      key={mood}
+                      className="inline-flex items-center rounded-full bg-teal-100 px-3 py-1 text-sm font-medium text-teal-700"
+                    >
+                      {mood}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
                 Notes
@@ -121,6 +155,35 @@ export default function EntryDetailModal({
                   : 'No notes for this entry.'}
               </p>
             </div>
+
+            {/*
+             * Media Links - see the MOOD / MEDIA LINKS comment at the top
+             * of this file. Same labeled-link-out + LINK_CLASSNAME
+             * approach as EntryPanel.tsx's Media Links section - see its
+             * own comment for why the label is derived from the URL's
+             * hostname (utils/mediaLinks.ts) rather than trusted from
+             * `media.type`.
+             */}
+            {entry.mediaLinks.length > 0 && (
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+                  Media Links
+                </p>
+                <div className="mt-1.5 flex flex-col gap-1">
+                  {entry.mediaLinks.map((media, index) => (
+                    <a
+                      key={index}
+                      href={media.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`text-sm ${LINK_CLASSNAME}`}
+                    >
+                      {getMediaLinkLabel(media.url)}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

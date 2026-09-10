@@ -17,7 +17,8 @@
     "mood": null,
     "timestamp": "2009-08-23T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": null
   },
   {
     "id": "806f2291-b9f6-4175-920b-a5c44691956a",
@@ -37,7 +38,8 @@
     "mood": null,
     "timestamp": "2010-01-11T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": null
   },
   {
     "id": "dd58ab73-c4e9-461a-9b2b-5a5f561fc963",
@@ -52,7 +54,8 @@
     "mood": null,
     "timestamp": "2018-09-21T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": "2018-09-23T00:00:00.000Z"
   },
   {
     "id": "d101829f-18fd-45dd-8ede-9ec7729c56e3",
@@ -67,7 +70,8 @@
     "mood": null,
     "timestamp": "2019-09-19T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": "2019-09-22T00:00:00.000Z"
   },
   {
     "id": "7dae7bbd-065e-4e2f-81fe-4a594aff4cda",
@@ -82,7 +86,8 @@
     "mood": null,
     "timestamp": "2020-05-01T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": null
   },
   {
     "id": "5420a212-a6f0-45e0-ab47-cdbaf03e03e7",
@@ -102,7 +107,8 @@
     "mood": null,
     "timestamp": "2020-08-23T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": null
   },
   {
     "id": "fc1f479c-75b9-4c34-8900-1f3f11997450",
@@ -117,7 +123,8 @@
     "mood": null,
     "timestamp": "2020-09-01T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": null
   },
   {
     "id": "cac2c459-ca02-468b-8d63-8c63c1008a21",
@@ -132,7 +139,8 @@
     "mood": null,
     "timestamp": "2021-05-01T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": null
   },
   {
     "id": "91c8ddd8-31f9-4995-99dd-c4c5c48a8883",
@@ -156,7 +164,8 @@
     "mood": null,
     "timestamp": "2021-10-01T00:00:00.000Z",
     "dateDisplay": "October - November 2021",
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": "2021-11-30T00:00:00.000Z"
   },
   {
     "id": "49b65a5a-e0d6-40b1-9ca0-5f8417c6055a",
@@ -176,7 +185,8 @@
     "mood": null,
     "timestamp": "2022-03-09T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": null
   },
   {
     "id": "8e5d87b9-5c87-4e7c-bc88-e83a816e2556",
@@ -200,7 +210,8 @@
     "mood": null,
     "timestamp": "2022-09-01T00:00:00.000Z",
     "dateDisplay": "September - November 2022",
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": "2022-11-30T00:00:00.000Z"
   },
   {
     "id": "f7ed0728-72d0-4855-9492-9cbbb4e65865",
@@ -215,7 +226,8 @@
     "mood": null,
     "timestamp": "2022-12-01T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": null
   },
   {
     "id": "133f5971-1d48-4eae-924c-6df39ead79d4",
@@ -228,9 +240,10 @@
     "location": null,
     "duration": null,
     "mood": null,
-    "timestamp": "2023-03-01T00:00:00.000Z",
+    "timestamp": "2023-03-17T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": "2023-03-19T00:00:00.000Z"
   },
   {
     "id": "e49a79e6-0702-48e5-a4a2-1e4bef4ee598",
@@ -245,7 +258,8 @@
     "mood": null,
     "timestamp": "2023-04-01T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": null
   },
   {
     "id": "52e92c97-4193-4da6-b24c-f8e6f51fc276",
@@ -260,7 +274,8 @@
     "mood": null,
     "timestamp": "2023-06-30T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": null
   },
   {
     "id": "3604f503-f4e2-4402-9341-f70dc4e4fda5",
@@ -275,7 +290,8 @@
     "mood": null,
     "timestamp": "2023-08-01T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": null
   },
   {
     "id": "b2090047-5ecf-4749-8bca-7d1ff9aa034d",
@@ -290,7 +306,8 @@
     "mood": null,
     "timestamp": "2024-03-22T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": "2024-03-24T00:00:00.000Z"
   },
   {
     "id": "4d3fe3a5-75fc-4f6c-83d4-f77cbcdece1b",
@@ -305,6 +322,7 @@
     "mood": null,
     "timestamp": "2024-05-04T00:00:00.000Z",
     "dateDisplay": null,
-    "dateNeedsReview": false
+    "dateNeedsReview": false,
+    "endTimestamp": null
   }
 ]

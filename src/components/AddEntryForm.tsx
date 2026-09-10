@@ -46,10 +46,34 @@
  * - isOpen: boolean - Controls modal visibility (from Layout)
  * - onClose: () => void - Callback to close modal (from Layout)
  * - onSubmit: (entry: Entry) => void - Callback to add entry (from App via Layout)
+ *
+ * THEMING: this modal used to be the one remaining light/white-mode surface
+ * in an otherwise dark-themed app (see index.css :root's THEME TOKENS
+ * comment) - a leftover from before the "night sky" theme existed. It now
+ * uses the same tokens/conventions as the rest of the app: the modal card
+ * itself is --panel-bg-color-solid (same opaque dark surface
+ * EntryPanel.tsx's expanded panels use), borders are --panel-border-color,
+ * and every input/select/textarea gets an explicit `bg-white/5` - a
+ * translucent white lift, the same convention FilterBar.tsx/ResetButton.tsx
+ * already use for surfaces that need to read as distinct from their own
+ * darker backing - so form fields stay clearly identifiable as fields
+ * rather than blending into the modal behind them. Labels/body text use
+ * the same gray-100/300/400/500 scale EntryPanel.tsx uses (near-white for
+ * headings, dimmer grays for secondary/muted text); the indigo CTA buttons
+ * (Next, Create, Add Entry) are unchanged, since indigo-600 already reads
+ * clearly on a dark background - it's the primary-action color used
+ * elsewhere in the app too (Layout.tsx's + button).
  */
 
 import { useState, useEffect } from 'react';
-import { Entry, MediaLink, COMMON_MOODS, SUGGESTED_TAGS, createEntry } from '../types/Entry';
+import {
+  Entry,
+  MediaLink,
+  MediaType,
+  COMMON_MOODS,
+  SUGGESTED_TAGS,
+  createEntry,
+} from '../types/Entry';
 import { Category, DEFAULT_CATEGORIES } from '../types/Category';
 import {
   loadCategories,
@@ -74,6 +98,7 @@ interface AddEntryFormProps {
 
 interface FormErrors {
   title?: string;
+  endDate?: string;
 }
 
 export default function AddEntryForm({
@@ -111,6 +136,17 @@ export default function AddEntryForm({
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [timestamp, setTimestamp] = useState('');
+
+  // ─── Optional multi-day range (iCal-style) ───
+  // Off by default - an entry is a single point in time unless the user
+  // explicitly opts into a range. See the endTimestamp field comment in
+  // types/Entry.ts for why this is optional and backward-compatible.
+  const [isMultiDay, setIsMultiDay] = useState(false);
+  // Date-only (YYYY-MM-DD, from an <input type="date">) rather than
+  // datetime-local like `timestamp` - a multi-day span is about which
+  // days it covers, not a time of day on the end date.
+  const [endDate, setEndDate] = useState('');
+
   const [location, setLocation] = useState('');
   const [duration, setDuration] = useState('');
 
@@ -145,6 +181,8 @@ export default function AddEntryForm({
         .toISOString()
         .slice(0, 16);
       setTimestamp(localDatetime);
+      setIsMultiDay(false);
+      setEndDate('');
 
       // Refresh the category list on every open (not just once on mount)
       // so a category created in an earlier session - or by mock data
@@ -157,12 +195,19 @@ export default function AddEntryForm({
 
   const suggestedTags = SUGGESTED_TAGS[activityType] || [];
 
+  // Date-only (YYYY-MM-DD) portion of `timestamp`'s datetime-local value,
+  // for comparing against `endDate` (also date-only).
+  const startDateOnly = timestamp.slice(0, 10);
+  const isEndDateBeforeStart =
+    isMultiDay && endDate !== '' && endDate < startDateOnly;
+
   /**
    * Determines if the user can proceed from Step 1 to Step 2.
    * Activity Type always has a value (see DYNAMIC CATEGORIES comment
-   * above), so only Title needs to be checked here.
+   * above), so Title and (when a range is enabled) a valid end date are
+   * the only checks needed here.
    */
-  const canProceedToStep2 = title.trim().length > 0;
+  const canProceedToStep2 = title.trim().length > 0 && !isEndDateBeforeStart;
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -171,8 +216,24 @@ export default function AddEntryForm({
       newErrors.title = 'Title is required';
     }
 
+    if (isEndDateBeforeStart) {
+      newErrors.endDate = 'End date cannot be before the start date';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  /**
+   * Toggles the "This spans multiple days" checkbox. Enabling it defaults
+   * the end date to the same day as the start date (iCal-style); disabling
+   * it clears endDate so a stale value can't linger if the user re-enables
+   * the toggle later.
+   */
+  const handleToggleMultiDay = () => {
+    const next = !isMultiDay;
+    setIsMultiDay(next);
+    setEndDate(next ? startDateOnly : '');
   };
 
   /**
@@ -257,6 +318,13 @@ export default function AddEntryForm({
       notes: notes.trim(),
       mood: moods.length > 0 ? moods : undefined,
       timestamp: timestamp ? new Date(timestamp).toISOString() : undefined,
+      // Only set when the user opted into a range via the "This spans
+      // multiple days" toggle - see the endTimestamp field comment in
+      // types/Entry.ts for why this stays undefined otherwise.
+      endTimestamp:
+        isMultiDay && endDate
+          ? new Date(`${endDate}T00:00:00`).toISOString()
+          : undefined,
     });
 
     onSubmit(entry);
@@ -281,6 +349,8 @@ export default function AddEntryForm({
     setDuration('');
     setNotes('');
     setTimestamp('');
+    setIsMultiDay(false);
+    setEndDate('');
     setMediaUrl('');
     setErrors({});
   };
@@ -301,7 +371,7 @@ export default function AddEntryForm({
   };
 
   const removeTag = (tagToRemove: string) => {
-    setTags(tags.filter((tag) => tag !== tagToRemove));
+    setTags(tags.filter(tag => tag !== tagToRemove));
   };
 
   const handleTagInputKeyDown = (e: React.KeyboardEvent) => {
@@ -315,18 +385,38 @@ export default function AddEntryForm({
 
   const toggleMood = (mood: string) => {
     if (moods.includes(mood)) {
-      setMoods(moods.filter((m) => m !== mood));
+      setMoods(moods.filter(m => m !== mood));
     } else {
       setMoods([...moods, mood]);
     }
   };
 
   // ─── Media Link Management ───
+  //
+  // INVESTIGATION NOTE (media links "not appearing" after submit): tracing
+  // this end to end - addMediaLink below pushes onto `mediaLinks` state,
+  // handleSubmit passes that same array straight into createEntry's
+  // `mediaLinks` field with no transformation, and entriesStorage.ts's
+  // saveEntries just JSON.stringifies the whole entry - confirms a media
+  // link added here (via the "Add" button) DOES reach localStorage intact.
+  // The actual bug was downstream: EntryPanel.tsx (the shared sidebar
+  // panel Constellation.tsx/Timeline.tsx both render) had no Media Links
+  // section at all, so a correctly-saved link had nowhere to display - see
+  // EntryPanel.tsx's own comment on its new Media Links section.
 
   const addMediaLink = () => {
     if (mediaUrl.trim()) {
       const newMedia: MediaLink = {
-        type: 'Video' as any,
+        // Was `'Video' as any` - an `any` escape hatch that happened to
+        // match MediaType.Video's runtime value regardless of the actual
+        // URL's platform (an Instagram or TikTok link would still be
+        // stored typed as "Video"). Using the enum member directly fixes
+        // the type-checking bypass; getMediaLinkLabel in
+        // utils/mediaLinks.ts (used by EntryPanel.tsx's display) derives
+        // the platform label from the URL's own hostname instead of
+        // trusting this field, since this form has no per-platform input
+        // to set it accurately anyway.
+        type: MediaType.Video,
         url: mediaUrl.trim(),
       };
       setMediaLinks([...mediaLinks, newMedia]);
@@ -355,20 +445,20 @@ export default function AddEntryForm({
     >
       <div className="flex h-full items-center justify-center p-4">
         <div
-          className="flex w-[90vw] max-w-[500px] flex-col rounded-lg bg-white shadow-xl"
+          className="flex w-[90vw] max-w-[500px] flex-col rounded-lg border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] shadow-xl"
           style={{ maxHeight: '60vh' }}
-          onClick={(e) => e.stopPropagation()}
+          onClick={e => e.stopPropagation()}
         >
           {/* ─── Modal Header with Step Indicator ─── */}
-          <div className="flex-shrink-0 border-b px-6 pt-5 pb-4">
+          <div className="flex-shrink-0 border-b border-[var(--panel-border-color)] px-6 pt-5 pb-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">
+              <h2 className="text-lg font-semibold text-gray-100">
                 {currentStep === 1 ? 'Activity Details' : 'Reflections & Media'}
               </h2>
               <button
                 type="button"
                 onClick={handleCancel}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-gray-400 hover:text-gray-200"
                 aria-label="Close"
               >
                 <svg
@@ -394,7 +484,7 @@ export default function AddEntryForm({
                   className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
                     currentStep === 1
                       ? 'bg-indigo-600 text-white'
-                      : 'bg-indigo-100 text-indigo-600'
+                      : 'bg-indigo-400/20 text-indigo-300'
                   }`}
                 >
                   1
@@ -402,20 +492,20 @@ export default function AddEntryForm({
                 <span
                   className={`text-xs ${
                     currentStep === 1
-                      ? 'font-medium text-gray-900'
+                      ? 'font-medium text-gray-100'
                       : 'text-gray-500'
                   }`}
                 >
                   Details
                 </span>
               </div>
-              <div className="h-px flex-1 bg-gray-200" />
+              <div className="h-px flex-1 bg-white/10" />
               <div className="flex items-center gap-2">
                 <div
                   className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
                     currentStep === 2
                       ? 'bg-indigo-600 text-white'
-                      : 'bg-gray-200 text-gray-500'
+                      : 'bg-white/10 text-gray-400'
                   }`}
                 >
                   2
@@ -423,7 +513,7 @@ export default function AddEntryForm({
                 <span
                   className={`text-xs ${
                     currentStep === 2
-                      ? 'font-medium text-gray-900'
+                      ? 'font-medium text-gray-100'
                       : 'text-gray-500'
                   }`}
                 >
@@ -435,7 +525,18 @@ export default function AddEntryForm({
 
           {/* ─── Scrollable Form Content ─── */}
           <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto px-6 py-4">
+            {/*
+             * dark-scrollbar (see index.css): reuses the exact same
+             * scrollbar treatment SidebarPanelStack.tsx's own
+             * `overflow-y-auto` container already uses - a transparent
+             * scrollbar TRACK (the browser default white one clashes
+             * with the dark theme) with a subtle, still-visible THUMB -
+             * rather than a second copy of that rule for this modal's
+             * own scrolling Step 1/Step 2 content. Keeps every
+             * scrollable container in the app's dark theme looking
+             * consistent.
+             */}
+            <div className="dark-scrollbar flex-1 overflow-y-auto px-6 py-4">
               {/*
                * Step content wrapper with CSS transition.
                * Uses opacity + translateX for a smooth slide/fade effect.
@@ -462,19 +563,17 @@ export default function AddEntryForm({
                     <div>
                       <label
                         htmlFor="activityType"
-                        className="block text-sm font-medium text-gray-700"
+                        className="block text-sm font-medium text-gray-300"
                       >
-                        Activity Type <span className="text-red-500">*</span>
+                        Activity Type <span className="text-red-400">*</span>
                       </label>
                       <select
                         id="activityType"
                         value={activityType}
-                        onChange={(e) =>
-                          handleActivityTypeChange(e.target.value)
-                        }
-                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        onChange={e => handleActivityTypeChange(e.target.value)}
+                        className="mt-1 block w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       >
-                        {categories.map((category) => (
+                        {categories.map(category => (
                           <option key={category.id} value={category.id}>
                             {category.name}
                           </option>
@@ -501,10 +600,10 @@ export default function AddEntryForm({
                      * category; confirming or cancelling closes it again.
                      */}
                     {isAddingCategory && (
-                      <div className="rounded-md border border-indigo-200 bg-indigo-50 p-3">
+                      <div className="rounded-md border border-indigo-400/30 bg-indigo-400/10 p-3">
                         <label
                           htmlFor="newCategoryName"
-                          className="block text-sm font-medium text-gray-700"
+                          className="block text-sm font-medium text-gray-300"
                         >
                           New category name
                         </label>
@@ -512,7 +611,7 @@ export default function AddEntryForm({
                           {/* Color swatch preview - the color this category
                               will be assigned, shown before it's created. */}
                           <span
-                            className="h-6 w-6 flex-shrink-0 rounded-full border border-black/10"
+                            className="h-6 w-6 flex-shrink-0 rounded-full border border-white/20"
                             style={{ backgroundColor: newCategoryColorPreview }}
                             aria-hidden="true"
                           />
@@ -521,8 +620,8 @@ export default function AddEntryForm({
                             id="newCategoryName"
                             autoFocus
                             value={newCategoryName}
-                            onChange={(e) => setNewCategoryName(e.target.value)}
-                            onKeyDown={(e) => {
+                            onChange={e => setNewCategoryName(e.target.value)}
+                            onKeyDown={e => {
                               if (e.key === 'Enter') {
                                 e.preventDefault();
                                 handleCreateCategory();
@@ -532,14 +631,14 @@ export default function AddEntryForm({
                               }
                             }}
                             placeholder="e.g., Pottery, Skateboarding"
-                            className="block flex-1 rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="block flex-1 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           />
                         </div>
                         <div className="mt-2 flex justify-end gap-2">
                           <button
                             type="button"
                             onClick={handleCancelAddCategory}
-                            className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100"
+                            className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-400 hover:bg-white/10"
                           >
                             Cancel
                           </button>
@@ -559,24 +658,24 @@ export default function AddEntryForm({
                     <div>
                       <label
                         htmlFor="title"
-                        className="block text-sm font-medium text-gray-700"
+                        className="block text-sm font-medium text-gray-300"
                       >
-                        Title <span className="text-red-500">*</span>
+                        Title <span className="text-red-400">*</span>
                       </label>
                       <input
                         type="text"
                         id="title"
                         value={title}
-                        onChange={(e) => setTitle(e.target.value)}
+                        onChange={e => setTitle(e.target.value)}
                         placeholder="Brief summary of your activity"
-                        className={`mt-1 block w-full rounded-md border px-3 py-2 shadow-sm focus:outline-none focus:ring-1 ${
+                        className={`mt-1 block w-full rounded-md border bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:outline-none focus:ring-1 ${
                           errors.title
-                            ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
-                            : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'
+                            ? 'border-red-500/60 focus:border-red-500 focus:ring-red-500'
+                            : 'border-white/10 focus:border-indigo-500 focus:ring-indigo-500'
                         }`}
                       />
                       {errors.title && (
-                        <p className="mt-1 text-sm text-red-600">
+                        <p className="mt-1 text-sm text-red-400">
                           {errors.title}
                         </p>
                       )}
@@ -584,7 +683,7 @@ export default function AddEntryForm({
 
                     {/* Tags */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">
+                      <label className="block text-sm font-medium text-gray-300">
                         Tags
                       </label>
                       <div className="mt-1">
@@ -592,15 +691,15 @@ export default function AddEntryForm({
                           <input
                             type="text"
                             value={tagInput}
-                            onChange={(e) => setTagInput(e.target.value)}
+                            onChange={e => setTagInput(e.target.value)}
                             onKeyDown={handleTagInputKeyDown}
                             placeholder="Add tags (press Enter)"
-                            className="block flex-1 rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="block flex-1 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           />
                           <button
                             type="button"
                             onClick={() => addTag(tagInput)}
-                            className="rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+                            className="rounded-md bg-white/10 px-4 py-2 text-sm font-medium text-gray-200 hover:bg-white/20"
                           >
                             Add
                           </button>
@@ -608,16 +707,21 @@ export default function AddEntryForm({
 
                         {tags.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-2">
-                            {tags.map((tag) => (
+                            {tags.map(tag => (
                               <span
                                 key={tag}
-                                className="inline-flex items-center rounded-full bg-indigo-100 px-3 py-1 text-sm font-medium text-indigo-700"
+                                // Same bg-indigo-400/20 + text-indigo-300
+                                // pill EntryPanel.tsx uses for this exact
+                                // entry's tags once saved, so the preview
+                                // while composing already looks like the
+                                // real thing.
+                                className="inline-flex items-center rounded-full bg-indigo-400/20 px-3 py-1 text-sm font-medium text-indigo-300"
                               >
                                 {tag}
                                 <button
                                   type="button"
                                   onClick={() => removeTag(tag)}
-                                  className="ml-1 text-indigo-500 hover:text-indigo-700"
+                                  className="ml-1 text-indigo-400 hover:text-indigo-300"
                                 >
                                   &times;
                                 </button>
@@ -633,14 +737,14 @@ export default function AddEntryForm({
                             </p>
                             <div className="mt-1 flex flex-wrap gap-1">
                               {suggestedTags
-                                .filter((tag) => !tags.includes(tag))
+                                .filter(tag => !tags.includes(tag))
                                 .slice(0, 6)
-                                .map((tag) => (
+                                .map(tag => (
                                   <button
                                     key={tag}
                                     type="button"
                                     onClick={() => addTag(tag)}
-                                    className="rounded-full border border-gray-300 px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100"
+                                    className="rounded-full border border-white/20 px-2 py-0.5 text-xs text-gray-400 hover:bg-white/10"
                                   >
                                     + {tag}
                                   </button>
@@ -655,7 +759,7 @@ export default function AddEntryForm({
                     <div>
                       <label
                         htmlFor="timestamp"
-                        className="block text-sm font-medium text-gray-700"
+                        className="block text-sm font-medium text-gray-300"
                       >
                         Date
                       </label>
@@ -663,9 +767,59 @@ export default function AddEntryForm({
                         type="datetime-local"
                         id="timestamp"
                         value={timestamp}
-                        onChange={(e) => setTimestamp(e.target.value)}
-                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        onChange={e => setTimestamp(e.target.value)}
+                        className="mt-1 block w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
+
+                      {/*
+                       * Optional multi-day range, iCal-style: off by
+                       * default (entry stays a single point in time), and
+                       * only reveals an end date picker when checked. See
+                       * the endTimestamp field comment in types/Entry.ts.
+                       */}
+                      <div className="mt-2 flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="isMultiDay"
+                          checked={isMultiDay}
+                          onChange={handleToggleMultiDay}
+                          className="h-4 w-4 rounded border-white/20 bg-white/5 text-indigo-500 focus:ring-indigo-500"
+                        />
+                        <label
+                          htmlFor="isMultiDay"
+                          className="text-sm text-gray-400"
+                        >
+                          This spans multiple days
+                        </label>
+                      </div>
+
+                      {isMultiDay && (
+                        <div className="mt-2">
+                          <label
+                            htmlFor="endDate"
+                            className="block text-sm font-medium text-gray-300"
+                          >
+                            End date
+                          </label>
+                          <input
+                            type="date"
+                            id="endDate"
+                            value={endDate}
+                            onChange={e => setEndDate(e.target.value)}
+                            className={`mt-1 block w-full rounded-md border bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:outline-none focus:ring-1 ${
+                              errors.endDate || isEndDateBeforeStart
+                                ? 'border-red-500/60 focus:border-red-500 focus:ring-red-500'
+                                : 'border-white/10 focus:border-indigo-500 focus:ring-indigo-500'
+                            }`}
+                          />
+                          {(errors.endDate || isEndDateBeforeStart) && (
+                            <p className="mt-1 text-sm text-red-400">
+                              {errors.endDate ||
+                                'End date cannot be before the start date'}
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Location and Duration (side by side) */}
@@ -673,7 +827,7 @@ export default function AddEntryForm({
                       <div>
                         <label
                           htmlFor="location"
-                          className="block text-sm font-medium text-gray-700"
+                          className="block text-sm font-medium text-gray-300"
                         >
                           Location
                         </label>
@@ -681,15 +835,15 @@ export default function AddEntryForm({
                           type="text"
                           id="location"
                           value={location}
-                          onChange={(e) => setLocation(e.target.value)}
+                          onChange={e => setLocation(e.target.value)}
                           placeholder="Where?"
-                          className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          className="mt-1 block w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       </div>
                       <div>
                         <label
                           htmlFor="duration"
-                          className="block text-sm font-medium text-gray-700"
+                          className="block text-sm font-medium text-gray-300"
                         >
                           Duration (min)
                         </label>
@@ -697,10 +851,10 @@ export default function AddEntryForm({
                           type="number"
                           id="duration"
                           value={duration}
-                          onChange={(e) => setDuration(e.target.value)}
+                          onChange={e => setDuration(e.target.value)}
                           placeholder="Minutes"
                           min="0"
-                          className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          className="mt-1 block w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       </div>
                     </div>
@@ -709,17 +863,17 @@ export default function AddEntryForm({
                     <div>
                       <label
                         htmlFor="description"
-                        className="block text-sm font-medium text-gray-700"
+                        className="block text-sm font-medium text-gray-300"
                       >
                         Description
                       </label>
                       <textarea
                         id="description"
                         value={description}
-                        onChange={(e) => setDescription(e.target.value)}
+                        onChange={e => setDescription(e.target.value)}
                         rows={3}
                         placeholder="What did you do? What happened?"
-                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:outline-none focus:ring-1 focus:border-indigo-500 focus:ring-indigo-500"
+                        className="mt-1 block w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:outline-none focus:ring-1 focus:border-indigo-500 focus:ring-indigo-500"
                       />
                     </div>
                   </div>
@@ -731,11 +885,11 @@ export default function AddEntryForm({
                   <div className="space-y-4">
                     {/* Mood Selector */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">
+                      <label className="block text-sm font-medium text-gray-300">
                         Mood
                       </label>
                       <div className="mt-2 flex flex-wrap gap-2">
-                        {COMMON_MOODS.map((mood) => (
+                        {COMMON_MOODS.map(mood => (
                           <button
                             key={mood}
                             type="button"
@@ -743,7 +897,7 @@ export default function AddEntryForm({
                             className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
                               moods.includes(mood)
                                 ? 'bg-indigo-600 text-white'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                : 'bg-white/10 text-gray-300 hover:bg-white/20'
                             }`}
                           >
                             {mood}
@@ -756,41 +910,41 @@ export default function AddEntryForm({
                     <div>
                       <label
                         htmlFor="notes"
-                        className="block text-sm font-medium text-gray-700"
+                        className="block text-sm font-medium text-gray-300"
                       >
                         Notes
                       </label>
                       <textarea
                         id="notes"
                         value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
+                        onChange={e => setNotes(e.target.value)}
                         rows={3}
                         placeholder="What did you learn? How do you feel about it?"
-                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        className="mt-1 block w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
                     </div>
 
                     {/* Media Links (YouTube/Vimeo URLs) */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">
+                      <label className="block text-sm font-medium text-gray-300">
                         Media Links
                       </label>
                       <p className="mt-0.5 text-xs text-gray-500">
-                        Add YouTube or Vimeo URLs
+                        Add a link - YouTube, Vimeo, Instagram, etc.
                       </p>
                       <div className="mt-1 flex gap-2">
                         <input
                           type="url"
                           value={mediaUrl}
-                          onChange={(e) => setMediaUrl(e.target.value)}
+                          onChange={e => setMediaUrl(e.target.value)}
                           placeholder="https://youtube.com/watch?v=..."
-                          className="block flex-1 rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          className="block flex-1 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                         <button
                           type="button"
                           onClick={addMediaLink}
                           disabled={!mediaUrl.trim()}
-                          className="rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="rounded-md bg-white/10 px-4 py-2 text-sm font-medium text-gray-200 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           Add
                         </button>
@@ -802,15 +956,15 @@ export default function AddEntryForm({
                           {mediaLinks.map((media, index) => (
                             <div
                               key={index}
-                              className="flex items-center justify-between rounded-md bg-gray-50 px-3 py-2"
+                              className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2"
                             >
-                              <span className="truncate text-sm text-gray-700">
+                              <span className="truncate text-sm text-gray-300">
                                 {media.url}
                               </span>
                               <button
                                 type="button"
                                 onClick={() => removeMediaLink(index)}
-                                className="ml-2 flex-shrink-0 text-red-500 hover:text-red-700"
+                                className="ml-2 flex-shrink-0 text-red-400 hover:text-red-300"
                               >
                                 &times;
                               </button>
@@ -836,13 +990,13 @@ export default function AddEntryForm({
                      * - Handle upload progress and errors
                      */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">
+                      <label className="block text-sm font-medium text-gray-300">
                         Photos
                       </label>
-                      <div className="mt-1 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 px-6 py-8">
+                      <div className="mt-1 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-white/20 bg-white/5 px-6 py-8">
                         {/* Greyed-out camera/image icon */}
                         <svg
-                          className="h-10 w-10 text-gray-300"
+                          className="h-10 w-10 text-gray-600"
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
@@ -871,7 +1025,7 @@ export default function AddEntryForm({
             </div>
 
             {/* ─── Footer: Navigation Buttons ─── */}
-            <div className="flex-shrink-0 border-t px-6 py-4">
+            <div className="flex-shrink-0 border-t border-[var(--panel-border-color)] px-6 py-4">
               <div className="flex justify-between">
                 {currentStep === 1 ? (
                   <>
@@ -879,7 +1033,7 @@ export default function AddEntryForm({
                     <button
                       type="button"
                       onClick={handleCancel}
-                      className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      className="rounded-md border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 hover:bg-white/5"
                     >
                       Cancel
                     </button>
@@ -893,10 +1047,10 @@ export default function AddEntryForm({
                       type="button"
                       onClick={handleNext}
                       disabled={!canProceedToStep2}
-                      className={`rounded-md px-4 py-2 text-sm font-medium text-white ${
+                      className={`rounded-md px-4 py-2 text-sm font-medium ${
                         canProceedToStep2
-                          ? 'bg-indigo-600 hover:bg-indigo-700'
-                          : 'cursor-not-allowed bg-gray-300'
+                          ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                          : 'cursor-not-allowed bg-white/10 text-gray-500'
                       }`}
                     >
                       Next
@@ -908,13 +1062,13 @@ export default function AddEntryForm({
                     <button
                       type="button"
                       onClick={handleBack}
-                      className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      className="rounded-md border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 hover:bg-white/5"
                     >
                       Back
                     </button>
                     <button
                       type="button"
-                      onClick={(e) => handleSubmit(e)}
+                      onClick={e => handleSubmit(e)}
                       disabled={isSubmitting}
                       className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >

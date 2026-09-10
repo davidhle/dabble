@@ -1,5 +1,5 @@
 /**
- * FilterBar.tsx - Sort Mode + Category Filter Controls (Constellation view)
+ * FilterBar.tsx - Sort Mode + Category Filter Controls
  *
  * Renders, top to bottom: the per-activityType filter toggles + "Show
  * All" reset, then the sort-mode toggle ("By Date" / "By Category") -
@@ -7,13 +7,19 @@
  * since it only shows once there's a sidebar stack to sort (see
  * `hasSelection` below), sitting immediately above that stack.
  *
+ * Shared by every visualization page that renders a canvas + sidebar
+ * panel stack - Constellation.tsx (StarMap) and Timeline.tsx
+ * (LinearTimeline) both render this exact component with the exact same
+ * props shape, sourced from useEntrySelection.ts's `sortMode`/
+ * `filterCategories` state.
+ *
  * WHY THIS IS DECOUPLED FROM THE SIDEBAR'S VISIBILITY:
- * The sidebar overlay only renders (see Constellation.tsx) when
+ * A page's sidebar overlay (SidebarPanelStack.tsx) only renders when
  * `selectedEntries` is non-empty. These controls, though, are useful
  * *before* that ever happens too - e.g. filtering categories down, or
- * picking a sort mode, before opening a single star. So FilterBar is
- * rendered unconditionally by Constellation.tsx, as a sibling of the
- * page title/instructions rather than inside the sidebar overlay's
+ * picking a sort mode, before opening a single entry. So FilterBar is
+ * rendered unconditionally by each page, as a sibling of the page
+ * title/instructions rather than inside the sidebar overlay's
  * conditional block - it has no dependency on `selectedEntries` for
  * *whether it renders*.
  *
@@ -22,11 +28,11 @@
  * with an empty (or single-panel) sidebar, so that one control is hidden
  * (not just disabled) until there's a stack to sort. The category filter
  * buttons have no such dependency and always render, since filtering
- * affects the star map regardless of whether any panel is open.
+ * affects the canvas regardless of whether any panel is open.
  *
  * TRANSPARENT CONTAINER, CONTRASTED CONTENT:
- * This component has no background/border/shadow of its own anymore -
- * it sits directly over StarMap's starfield (see Constellation.tsx's
+ * This component has no background/border/shadow of its own - it sits
+ * directly over a page's full-bleed canvas (see Constellation.tsx's
  * layout comment for why it's a normal-flow sibling of the page header
  * rather than its own floating box). Instead of legibility coming from
  * one opaque backing box behind everything, each individual control
@@ -34,11 +40,11 @@
  * background, and every button has either a solid fill (when active) or
  * a colored border + its own subtle background (when inactive) - so
  * nothing here depends on an opaque container to stay readable against a
- * busy field of stars.
+ * busy canvas.
  *
- * State (`sortMode`, `filterCategories`) still lives in Constellation.tsx
- * - this component is purely a controlled view over props, the same
- * pattern the rest of the page uses (see EntryPanel.tsx, StarMap.tsx).
+ * State (`sortMode`, `filterCategories`) lives in useEntrySelection.ts,
+ * not here - this component is purely a controlled view over props, the
+ * same pattern the rest of a page uses (see EntryPanel.tsx, StarMap.tsx).
  */
 
 import { Category } from '../types/Category';

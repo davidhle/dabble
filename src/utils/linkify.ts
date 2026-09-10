@@ -22,6 +22,16 @@ import { createElement, Fragment, ReactNode } from 'react';
 const URL_PATTERN = /https?:\/\/[^\s]+/g;
 
 /**
+ * The clickable-link styling every <a> this file renders uses. Exported so
+ * other components that render their own <a> elements for a URL - e.g.
+ * EntryPanel.tsx's Media Links section, which renders a labeled link
+ * ("View on Instagram") rather than the raw URL text linkify() itself
+ * produces - can reuse the exact same visual language instead of a second,
+ * possibly-drifting copy of this class string.
+ */
+export const LINK_CLASSNAME = 'text-indigo-400 underline hover:text-indigo-300';
+
+/**
  * Splits `text` on http(s) URLs and returns an array of React nodes:
  * plain text segments interleaved with <a> elements for each URL found.
  * Drop-in replacement anywhere a component currently renders the raw
@@ -64,7 +74,7 @@ export function linkify(text: string): ReactNode[] {
           href: url,
           target: '_blank',
           rel: 'noopener noreferrer',
-          className: 'text-indigo-400 underline hover:text-indigo-300',
+          className: LINK_CLASSNAME,
         },
         url
       )

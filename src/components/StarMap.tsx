@@ -104,8 +104,10 @@
  * Each star is a plain SVG <circle> with a React `onClick` handler that
  * calls `onStarClick(star.entry)`. StarMap itself holds no notion of
  * "selected" entries - that state (an array, so multiple stars can be
- * open at once) lives in the parent (Constellation.tsx), which decides
- * what to do with a clicked entry (currently: add it to a sidebar list).
+ * open at once) lives in useEntrySelection.ts, and `onStarClick` is that
+ * hook's `handleEntryClick` passed straight through by Constellation.tsx -
+ * see its CLICK OUTCOMES comment for what a click actually does (open,
+ * expand, or deselect, depending on the entry's current state).
  *
  * This works cleanly alongside d3-zoom's drag-to-pan because d3.zoom's
  * default `clickDistance` is 0: if the pointer moves at all between
@@ -139,7 +141,14 @@ interface StarMapProps {
    * it) so it isn't independently reloaded here.
    */
   categories: Category[];
-  /** Called with the clicked entry when a star is clicked. */
+  /**
+   * Called with the clicked entry when a star is clicked - wired by
+   * Constellation.tsx directly to useEntrySelection.ts's
+   * `handleEntryClick`, which already implements the full open-new /
+   * expand-minimized / deselect-expanded decision (see that hook's CLICK
+   * OUTCOMES comment) - StarMap forwards every click to it unconditionally
+   * and holds no click-branching logic of its own anymore.
+   */
   onStarClick: (entry: Entry) => void;
   /**
    * IDs of entries currently "opened" (i.e. represented by a panel,
@@ -151,24 +160,16 @@ interface StarMapProps {
   openedEntryIds: string[];
   /**
    * The id of the single entry whose panel is currently expanded (not
-   * minimized) in Constellation.tsx's sidebar, or `null` if none is. This
-   * is what lets `handleStarClick` below tell an "expand a minimized
-   * panel" click apart from a "deselect an already-expanded panel" click
-   * on the same star - see the STAR CLICK OUTCOMES comment on
-   * `handleStarClick`. It's also the trigger for the CLICK-TO-CENTER
-   * effect below: centering runs off *this prop changing*, not off the
-   * click event itself, so it fires the same way whether the expand was
-   * caused by clicking the star directly or by clicking its minimized row
-   * in the sidebar.
+   * minimized) in Constellation.tsx's sidebar, or `null` if none is. Used
+   * here only to drive the CLICK-TO-CENTER effect below - centering runs
+   * off *this prop changing*, not off the click event itself, so it fires
+   * the same way whether the expand was caused by clicking the star
+   * directly or by clicking its minimized row in the sidebar. (The
+   * open-new/expand/deselect decision that changes this prop in the first
+   * place is useEntrySelection.ts's `handleEntryClick` - see its CLICK
+   * OUTCOMES comment - not anything StarMap itself computes.)
    */
   expandedEntryId: string | null;
-  /**
-   * Called instead of `onStarClick` when the clicked star's entry is
-   * already opened AND already expanded - see STAR CLICK OUTCOMES below.
-   * Constellation.tsx wires this to the same removal path as a panel's
-   * × close button.
-   */
-  onStarDeselect: (entry: Entry) => void;
   /**
    * activityTypes currently "active" (Constellation.tsx's sidebar filter
    * toggles). Stars whose activityType is NOT in this list are dimmed to
@@ -270,7 +271,6 @@ export default function StarMap({
   onStarClick,
   openedEntryIds,
   expandedEntryId,
-  onStarDeselect,
   filterCategories,
   sidebarWidth,
   resetViewSignal,
@@ -279,8 +279,9 @@ export default function StarMap({
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomLayerRef = useRef<SVGGElement>(null);
   // Holds the same zoom *behavior* instance attached to the <svg> below, so
-  // click-to-center (see handleStarClick) can programmatically drive it
-  // later, outside of the 'zoom' event handler that normally drives it.
+  // click-to-center (see the CLICK-TO-CENTER effect below) can
+  // programmatically drive it later, outside of the 'zoom' event handler
+  // that normally drives it.
   const zoomBehaviorRef = useRef<d3.ZoomBehavior<
     SVGSVGElement,
     unknown
@@ -339,40 +340,30 @@ export default function StarMap({
 
   /**
    * ──────────────────────────────────────────────────────────────────────
-   * STAR CLICK OUTCOMES: OPEN NEW / EXPAND MINIMIZED / DESELECT EXPANDED
+   * STAR CLICK OUTCOMES: NOW OWNED BY useEntrySelection.ts
    * ──────────────────────────────────────────────────────────────────────
-   * Clicking a star means one of three different things depending on that
-   * entry's current state in the sidebar, distinguished using the
-   * `openedEntryIds` / `expandedEntryId` props:
+   * Clicking a star used to mean one of three different things -
+   * open/expand/deselect - decided HERE, via a local `handleStarClick`
+   * wrapper that compared `entry.id` against `expandedEntryId` and called
+   * either `onStarClick` or a separate `onStarDeselect` prop. That
+   * three-way decision is now made entirely inside
+   * useEntrySelection.ts's `handleEntryClick` (see its own CLICK OUTCOMES
+   * comment for the full open-new / expand-minimized / deselect-expanded
+   * breakdown) - Constellation.tsx passes that single function straight
+   * through as `onStarClick`, so every star click here forwards to it
+   * unconditionally (see the `onClick` below), with no branching left in
+   * this file. This is also what LinearTimeline.tsx's points/capsules
+   * call for their own clicks, via the same hook - one shared
+   * implementation instead of two copies of this logic drifting apart.
    *
-   *   1. Not opened at all -> open it: forwarded to `onStarClick`, which
-   *      Constellation.tsx uses to add a new (expanded) panel to the
-   *      stack.
-   *   2. Opened but minimized (in `openedEntryIds`, but its id isn't
-   *      `expandedEntryId`) -> expand it: also forwarded to `onStarClick`,
-   *      which Constellation.tsx's existing handler already treats the
-   *      same as case 1's "make this one the expanded panel" outcome.
-   *   3. Opened AND already expanded (`entry.id === expandedEntryId`) ->
-   *      deselect it: clicking a star that's already front-and-center is
-   *      read as "close this," not "reopen this," so it's forwarded to
-   *      `onStarDeselect` instead, which removes the panel entirely (same
-   *      as its × button) rather than re-expanding it.
-   *
-   * Cases 1 and 2 both result in this entry becoming (or staying) the
-   * expanded panel, so both should pan/center the canvas on it. Case 3 is
-   * a close, not an open, so it must NOT trigger that pan - see the
-   * CLICK-TO-CENTER effect below for why centering is wired to react to
-   * that shared "becomes expanded" outcome directly, rather than being
-   * called from here.
+   * Cases 1 and 2 (open new / expand minimized) both result in this
+   * entry becoming (or staying) the expanded panel, so both should
+   * pan/center the canvas on it. Case 3 (deselect) is a close, not an
+   * open, so it must NOT trigger that pan - see the CLICK-TO-CENTER
+   * effect below for why centering is wired to react to that shared
+   * "becomes expanded" outcome (`expandedEntryId` changing) directly,
+   * rather than being triggered from the click itself.
    */
-  const handleStarClick = (entry: Entry) => {
-    const isAlreadyExpanded = entry.id === expandedEntryId;
-    if (isAlreadyExpanded) {
-      onStarDeselect(entry);
-      return;
-    }
-    onStarClick(entry);
-  };
 
   /**
    * ──────────────────────────────────────────────────────────────────────
@@ -622,8 +613,8 @@ export default function StarMap({
   // LinearTimeline.tsx uses for its own hover state - see the "Hover
   // tooltip" comment there. This is entirely independent of
   // `openedEntryIds`/`expandedEntryId` (the click-to-open-panel highlight
-  // ring below) and of `handleStarClick` - hovering never opens or closes
-  // a panel, and opening/closing a panel doesn't touch this state, so the
+  // ring below) and of `onStarClick` - hovering never opens or closes a
+  // panel, and opening/closing a panel doesn't touch this state, so the
   // tooltip layers on top of the existing click/highlight behavior rather
   // than interacting with it at all.
   const [hovered, setHovered] = useState<{
@@ -761,7 +752,7 @@ export default function StarMap({
                   strokeOpacity={0.35}
                   strokeWidth={4}
                   className="cursor-pointer"
-                  onClick={() => handleStarClick(entry)}
+                  onClick={() => onStarClick(entry)}
                   // Same hover handlers (and the EDIT: no more native
                   // <title> element - see the "Hover tooltip" comment
                   // above) as LinearTimeline.tsx's points: track the

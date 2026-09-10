@@ -140,6 +140,12 @@ export default function Layout({ onAddEntry }: LayoutProps) {
                   Timeline
                 </Link>
                 <Link
+                  to="/spiral"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                >
+                  Spiral
+                </Link>
+                <Link
                   to="/constellation"
                   className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
                 >

@@ -36,6 +36,8 @@ interface RawSeedEntry {
   timestamp: string;
   dateDisplay: string | null;
   dateNeedsReview: boolean;
+  /** Optional multi-day end date - see the endTimestamp field comment in types/Entry.ts. */
+  endTimestamp?: string | null;
 }
 
 /**
@@ -95,6 +97,7 @@ function toEntry(raw: RawSeedEntry): Entry {
     ...(raw.duration != null ? { duration: raw.duration } : {}),
     ...(raw.mood ? { mood: [raw.mood] } : {}),
     ...(raw.dateDisplay ? { dateDisplay: raw.dateDisplay } : {}),
+    ...(raw.endTimestamp ? { endTimestamp: raw.endTimestamp } : {}),
   };
 }
 

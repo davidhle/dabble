@@ -172,6 +172,21 @@ export interface Entry {
    * but isn't precise enough to show to the user as-is.
    */
   dateDisplay?: string;
+
+  /**
+   * Optional end of a multi-day activity, ISO string format like `timestamp`.
+   *
+   * OPTIONAL & BACKWARD-COMPATIBLE:
+   * This is iCal-style - an entry is a single point in time by default, and
+   * only becomes a date range when this is explicitly set (via the "This
+   * spans multiple days" toggle in AddEntryForm.tsx). Existing entries
+   * created before this field existed simply don't have it, and continue
+   * to render as single-point-in-time events with no data migration
+   * needed. When present, `timestamp` is the range's start and this is its
+   * (inclusive) end - see EntryDetailModal.tsx / EntryPanel.tsx for how the
+   * range is displayed.
+   */
+  endTimestamp?: string;
 }
 
 /**

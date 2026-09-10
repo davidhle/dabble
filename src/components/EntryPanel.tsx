@@ -16,11 +16,16 @@
  *     was in, so there's one close handler, not one per mode.
  *
  * THEMING: the sidebar itself sits on --bg-color (same token as StarMap's
- * canvas - see index.css :root), so this panel uses --panel-bg-color, a
- * subtle lightened overlay of that same base color, to stay visually
- * separable from the page and from other stacked panels without breaking
- * the cohesive dark theme. Both tokens move together if a light mode is
- * added later.
+ * canvas - see index.css :root), so both modes use a lightened overlay of
+ * that same base color to stay visually separable from the page and from
+ * other stacked panels without breaking the cohesive dark theme - but not
+ * the SAME overlay: the minimized row keeps the regular --panel-bg-color
+ * (its one line of text needs little help standing out over the
+ * starfield), while the EXPANDED panel - a full block of title, tags,
+ * description and notes - uses the much more opaque --panel-bg-color-solid
+ * instead, so that text stays legible over StarMap's busy starfield
+ * showing through underneath. Both tokens move together if a light mode
+ * is added later.
  *
  * The left accent bar's color (present in both modes) comes from
  * utils/colors.ts - the same mapping StarMap.tsx uses to tint this
@@ -28,12 +33,29 @@
  * comment in colors.ts for why: in short, one shared mapping can't drift
  * out of sync with itself, while two copies of "activityType -> color"
  * inevitably would once either one is edited without remembering the other.
+ *
+ * MOOD / MEDIA LINKS: this is the ONE shared panel component
+ * Constellation.tsx and Timeline.tsx both render an entry's full detail
+ * through (see SidebarPanelStack.tsx) - so a display gap here is a display
+ * gap on every page that uses it, not just one. It used to render Tags,
+ * Description, and Notes only; entry.mood and entry.mediaLinks were both
+ * being collected by AddEntryForm.tsx and saved onto the entry correctly,
+ * but had no section here to actually show up in, so they silently never
+ * appeared no matter how many moods were picked or media links added.
+ * Both gaps are covered now - see the Mood and Media Links sections below,
+ * which follow the exact same "label + content, render nothing at all
+ * when empty" pattern Tags already used, rather than introducing a new
+ * one. (Spiral.tsx doesn't render through this component yet - it still
+ * uses EntryDetailModal.tsx, which got the same two sections added for
+ * the same reason; see that file's own comments.)
  */
 
 import { Entry } from '../types/Entry';
 import { getActivityColor } from '../utils/colors';
 import { getCategoryName } from '../utils/categories';
-import { linkify } from '../utils/linkify';
+import { linkify, LINK_CLASSNAME } from '../utils/linkify';
+import { getMediaLinkLabel } from '../utils/mediaLinks';
+import { formatEntryDate } from '../utils/formatEntryDate';
 
 interface EntryPanelProps {
   entry: Entry;
@@ -144,22 +166,20 @@ export default function EntryPanel({
     );
   }
 
-  // Prefer the imprecise, human-written dateDisplay (e.g. "October -
-  // November 2021") when present - see the dateDisplay field comment in
-  // types/Entry.ts - falling back to the exact formatted timestamp for
-  // entries where the real date is actually known.
-  const formattedDate =
-    entry.dateDisplay ??
-    new Date(entry.timestamp).toLocaleDateString(undefined, {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+  // See formatEntryDate for the dateDisplay / date-range / single-date
+  // precedence - shows a range like "Jun 30 – Jul 2, 2023" when the entry
+  // has an endTimestamp (see types/Entry.ts).
+  const formattedDate = formatEntryDate(entry);
 
   return (
     <div
-      className="w-full flex-shrink-0 rounded-lg border bg-[var(--panel-bg-color)] shadow-sm"
+      // bg-[var(--panel-bg-color-solid)]: unlike the minimized row above
+      // (still --panel-bg-color), this expanded panel is a full block of
+      // text sitting directly over StarMap's starfield - see the THEMING
+      // comment at the top of this file, and --panel-bg-color-solid's own
+      // comment in index.css for the ~92% opacity value and why it's
+      // deliberately short of fully opaque.
+      className="w-full flex-shrink-0 rounded-lg border bg-[var(--panel-bg-color-solid)] shadow-sm"
       style={panelStyle}
     >
       {/* ─── Header ─── */}
@@ -198,6 +218,37 @@ export default function EntryPanel({
           </div>
         )}
 
+        {/*
+         * Mood - see the MOOD / MEDIA LINKS comment at the top of this
+         * file. `entry.mood` is optional (`string[] | undefined`) and, per
+         * AddEntryForm.tsx, is never set to an empty array either (moods
+         * only gets passed through when at least one was picked) - the
+         * length check is still here defensively rather than trusting
+         * that invariant, so this renders NOTHING (not an empty "Mood"
+         * label with no chips under it) for any falsy/empty value. Teal
+         * rather than Tags' indigo or any color from
+         * NEW_CATEGORY_COLOR_PALETTE (utils/categories.ts) - a color no
+         * category can ever be assigned, so a mood chip can never be
+         * mistaken for a category-colored one.
+         */}
+        {entry.mood && entry.mood.length > 0 && (
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+              Mood
+            </p>
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {entry.mood.map(mood => (
+                <span
+                  key={mood}
+                  className="inline-flex items-center rounded-full bg-teal-400/20 px-3 py-1 text-sm font-medium text-teal-300"
+                >
+                  {mood}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
             Description
@@ -217,6 +268,40 @@ export default function EntryPanel({
             {entry.notes ? linkify(entry.notes) : 'No notes for this entry.'}
           </p>
         </div>
+
+        {/*
+         * Media Links - see the MOOD / MEDIA LINKS comment at the top of
+         * this file. Each link renders as a labeled clickable link-out
+         * ("View on Instagram") rather than the raw URL - getMediaLinkLabel
+         * (utils/mediaLinks.ts) derives the platform from the URL's own
+         * hostname, since AddEntryForm.tsx has no per-platform input and
+         * always saves `media.type` as "Video" regardless of the actual
+         * platform (see its addMediaLink comment) - `media.type` isn't
+         * trustworthy enough to label off of. Same target="_blank" +
+         * rel="noopener noreferrer" + LINK_CLASSNAME styling linkify.ts
+         * uses for a URL found inside free-text notes/description, so a
+         * link reads the same way wherever it appears in this panel.
+         */}
+        {entry.mediaLinks.length > 0 && (
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+              Media Links
+            </p>
+            <div className="mt-1.5 flex flex-col gap-1">
+              {entry.mediaLinks.map((media, index) => (
+                <a
+                  key={index}
+                  href={media.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`text-sm ${LINK_CLASSNAME}`}
+                >
+                  {getMediaLinkLabel(media.url)}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
