@@ -168,9 +168,18 @@ import { getActivityColor } from '../utils/colors';
 // header comment for why this was pulled out into one component instead
 // of each visualization keeping its own copy of the markup.
 import EntryTooltip from './EntryTooltip';
+import VizEmptyState, { TimeRangeSelectorRect } from './VizEmptyState';
 
 interface LinearTimelineProps {
   entries: Entry[];
+  /**
+   * Whether the RAW, unfiltered dataset (Timeline.tsx's own
+   * `entries.length > 0`, not the time-filtered `entries` prop above) has
+   * any entries at all - passed straight through to VizEmptyState.tsx so
+   * it can distinguish "no data exists" from "filtered to nothing" - see
+   * that component's own top-of-file comment for the full reasoning.
+   */
+  hasAnyEntries: boolean;
   /**
    * activityTypes currently "active" - see useEntrySelection.ts's
    * CATEGORY FILTER comment. Points/ranges whose activityType is NOT in
@@ -237,6 +246,14 @@ interface LinearTimelineProps {
    * entries that happen to fall inside it cluster away from one edge.
    */
   domainRange: DateRange;
+  /**
+   * TimeRangeSelector's own card's live rendered position
+   * (Timeline.tsx's own `timeRangeSelectorRect`) - passed straight
+   * through to VizEmptyState.tsx so it can position its "filtered"
+   * message immediately beside that card. See VizEmptyState.tsx's own
+   * POSITIONING comment.
+   */
+  timeRangeSelectorRect: TimeRangeSelectorRect;
 }
 
 /** Opacity applied to a point/range whose category is filtered out - same value as StarMap.tsx's FILTERED_OUT_OPACITY. */
@@ -354,6 +371,7 @@ function capsuleOutlineRect(
 
 export default function LinearTimeline({
   entries,
+  hasAnyEntries,
   filterCategories,
   onEntryClick,
   openedEntryIds,
@@ -361,6 +379,7 @@ export default function LinearTimeline({
   sidebarWidth,
   topOffset,
   domainRange,
+  timeRangeSelectorRect,
 }: LinearTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -462,6 +481,15 @@ export default function LinearTimeline({
   const activeCategorySet = useMemo(
     () => new Set<string>(filterCategories),
     [filterCategories]
+  );
+
+  // Whether there's anything actually visible to plot right now - see
+  // StarMap.tsx's identical `isEmpty` comment and VizEmptyState.tsx's own
+  // top-of-file comment for the full reasoning (this single check covers
+  // both the time filter and the category filter as a possible cause).
+  const isEmpty = useMemo(
+    () => !entries.some(entry => activeCategorySet.has(entry.activityType)),
+    [entries, activeCategorySet]
   );
 
   // Set for O(1) membership checks per point/range - same pattern, same
@@ -938,263 +966,244 @@ export default function LinearTimeline({
     // floating header and sidebar overlay both render above this with
     // their own higher z-index.
     <div ref={containerRef} className="fixed inset-0 z-0 bg-[var(--bg-color)]">
-      {entries.length === 0 ? (
-        // Same empty-state messaging pattern as the post-reset banner in
-        // About.tsx (rounded-md border + colored border/bg/text trio) -
-        // reused here rather than inventing a second visual language for
-        // "there's nothing to show yet." `topOffset`-aware `top` (rather
-        // than a flat `top-24`) so this never collides with the header
-        // stack either, same reasoning as VERTICAL CENTERING above.
-        // `left` is `contentOriginX`-aware for the same reason: a panel
-        // CAN be open with zero VISIBLE (time-filtered) entries - e.g. the
-        // brush narrowed to a window with nothing in it while a panel for
-        // an out-of-window entry stays open (panels don't auto-close on
-        // filtering - see useEntrySelection.ts's CATEGORY FILTER comment
-        // for the same independence) - so this message needs to avoid the
-        // sidebar exactly like the real content does.
-        <div
-          className="absolute max-w-sm rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-sm text-indigo-300"
-          style={{ top: topOffset + 24, left: contentOriginX + 6 }}
-          role="status"
-        >
-          No entries yet. Click the + button (top right) to add your first one,
-          and it'll show up here on the timeline.
-        </div>
-      ) : (
-        <svg
-          ref={svgRef}
-          width={size.width}
-          height={size.height}
-          className="cursor-grab text-[var(--text-muted-color)] active:cursor-grabbing"
-        >
-          <defs>
-            {/*
-             * Soft blur used behind opened entries' highlight ring, so it
-             * reads as a glow rather than a hard-edged shape - same id
-             * PATTERN and same filter primitive as StarMap.tsx's
-             * `opened-star-glow` (kept as a separate id here since defs
-             * ids are scoped per-<svg>, not shared across components).
-             */}
-            <filter
-              id="opened-point-glow"
-              x="-100%"
-              y="-100%"
-              width="300%"
-              height="300%"
-            >
-              <feGaussianBlur stdDeviation="3" />
-            </filter>
-          </defs>
+      <svg
+        ref={svgRef}
+        width={size.width}
+        height={size.height}
+        className="cursor-grab text-[var(--text-muted-color)] active:cursor-grabbing"
+      >
+        <defs>
           {/*
-           * `contentOriginX`, not `MARGIN.left` - see the CANVAS ORIGIN
-           * SHIFT comment above. This is the one place the shift actually
-           * takes effect: every point/range/axis position computed below
-           * is already relative to THIS origin, so shifting it here is
-           * what moves the whole rendered timeline past the sidebar,
-           * rather than drawing it at a fixed spot and panning the view.
+           * Soft blur used behind opened entries' highlight ring, so it
+           * reads as a glow rather than a hard-edged shape - same id
+           * PATTERN and same filter primitive as StarMap.tsx's
+           * `opened-star-glow` (kept as a separate id here since defs
+           * ids are scoped per-<svg>, not shared across components).
            */}
-          <g transform={`translate(${contentOriginX},${contentOffsetY})`}>
-            {isReady &&
-              // Range entries (endTimestamp set): a short horizontal
-              // capsule from start to end x, instead of a single point -
-              // `strokeLinecap="round"` is what turns a plain line into
-              // a pill/capsule shape (rounded rather than square ends).
-              // Same POINT_RADIUS-based thickness and hover/click wiring
-              // as the single-point circles below, for visual and
-              // interaction consistency between the two entry shapes.
-              //
-              // HIT-TESTING ACROSS THE WHOLE CAPSULE, NOT JUST ITS
-              // CENTER: the mouse handlers below are attached to this
-              // single <line> element covering the entire cxStart..cxEnd
-              // span, not to a point at its midpoint - an SVG shape's
-              // default `pointer-events: visiblePainted` makes its
-              // rendered STROKE the hit-test area, so hovering/clicking
-              // anywhere along this thick stroke (including the rounded
-              // end caps) fires the same handlers, exactly as if the
-              // whole capsule were one big target. No manual bounding-box
-              // math or per-segment hit-testing is needed for this to
-              // work across the full length.
-              ranges.map(({ entry, cxStart, cxEnd, color, lane }) => {
-                const isOpened = openedEntryIdSet.has(entry.id);
-                const isFilteredOut = !activeCategorySet.has(
-                  entry.activityType
-                );
-                const y = BASELINE_Y + (lane + 1) * LANE_HEIGHT;
-                return (
-                  // SELECTED-ENTRY HIGHLIGHT: one group per range, opacity
-                  // applied once to the whole group (glow + capsule +
-                  // ring) so a filtered-out capsule's highlight dims
-                  // along with it - same structure as StarMap.tsx's
-                  // per-star <g>.
-                  <g
-                    key={entry.id}
-                    style={{
-                      opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
-                    }}
-                    className="transition-opacity duration-200"
-                  >
-                    {isOpened && (
-                      // SELECTED-ENTRY HIGHLIGHT (capsule glow): same
-                      // visual language as a point's glow circle just
-                      // above/below - a blurred, `fill="none"` OUTLINE
-                      // (not a filled shape) at +5px, so it reads as a
-                      // soft halo AROUND the capsule rather than a filled
-                      // disc behind it. Shaped as a rounded-rect "pill"
-                      // (see capsuleOutlineRect) instead of a circle,
-                      // since a capsule isn't circular - everything else
-                      // (the same `opened-point-glow` blur filter, the
-                      // same +5px inflation, the same 4px stroke width,
-                      // the same 0.6 opacity) is identical to the point
-                      // version above.
-                      <rect
-                        {...capsuleOutlineRect(cxStart, cxEnd, y, 5)}
-                        fill="none"
-                        stroke={OPENED_HIGHLIGHT_COLOR}
-                        strokeWidth={4}
-                        strokeOpacity={0.6}
-                        filter="url(#opened-point-glow)"
-                        className="pointer-events-none"
-                      />
-                    )}
-                    <line
-                      x1={cxStart}
-                      x2={cxEnd}
-                      y1={y}
-                      y2={y}
-                      stroke={color}
-                      strokeWidth={POINT_RADIUS * 2}
-                      strokeLinecap="round"
-                      strokeOpacity={0.85}
-                      className="cursor-pointer"
-                      onMouseEnter={event =>
-                        setHovered({
-                          entry,
-                          x: event.clientX,
-                          y: event.clientY,
-                        })
-                      }
-                      onMouseMove={event =>
-                        setHovered(current =>
-                          current && current.entry.id === entry.id
-                            ? { ...current, x: event.clientX, y: event.clientY }
-                            : current
-                        )
-                      }
-                      onMouseLeave={() => setHovered(null)}
-                      onClick={() => onEntryClick(entry)}
+          <filter
+            id="opened-point-glow"
+            x="-100%"
+            y="-100%"
+            width="300%"
+            height="300%"
+          >
+            <feGaussianBlur stdDeviation="3" />
+          </filter>
+        </defs>
+        {/*
+         * `contentOriginX`, not `MARGIN.left` - see the CANVAS ORIGIN
+         * SHIFT comment above. This is the one place the shift actually
+         * takes effect: every point/range/axis position computed below
+         * is already relative to THIS origin, so shifting it here is
+         * what moves the whole rendered timeline past the sidebar,
+         * rather than drawing it at a fixed spot and panning the view.
+         */}
+        <g transform={`translate(${contentOriginX},${contentOffsetY})`}>
+          {isReady &&
+            // Range entries (endTimestamp set): a short horizontal
+            // capsule from start to end x, instead of a single point -
+            // `strokeLinecap="round"` is what turns a plain line into
+            // a pill/capsule shape (rounded rather than square ends).
+            // Same POINT_RADIUS-based thickness and hover/click wiring
+            // as the single-point circles below, for visual and
+            // interaction consistency between the two entry shapes.
+            //
+            // HIT-TESTING ACROSS THE WHOLE CAPSULE, NOT JUST ITS
+            // CENTER: the mouse handlers below are attached to this
+            // single <line> element covering the entire cxStart..cxEnd
+            // span, not to a point at its midpoint - an SVG shape's
+            // default `pointer-events: visiblePainted` makes its
+            // rendered STROKE the hit-test area, so hovering/clicking
+            // anywhere along this thick stroke (including the rounded
+            // end caps) fires the same handlers, exactly as if the
+            // whole capsule were one big target. No manual bounding-box
+            // math or per-segment hit-testing is needed for this to
+            // work across the full length.
+            ranges.map(({ entry, cxStart, cxEnd, color, lane }) => {
+              const isOpened = openedEntryIdSet.has(entry.id);
+              const isFilteredOut = !activeCategorySet.has(entry.activityType);
+              const y = BASELINE_Y + (lane + 1) * LANE_HEIGHT;
+              return (
+                // SELECTED-ENTRY HIGHLIGHT: one group per range, opacity
+                // applied once to the whole group (glow + capsule +
+                // ring) so a filtered-out capsule's highlight dims
+                // along with it - same structure as StarMap.tsx's
+                // per-star <g>.
+                <g
+                  key={entry.id}
+                  style={{
+                    opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
+                  }}
+                  className="transition-opacity duration-200"
+                >
+                  {isOpened && (
+                    // SELECTED-ENTRY HIGHLIGHT (capsule glow): same
+                    // visual language as a point's glow circle just
+                    // above/below - a blurred, `fill="none"` OUTLINE
+                    // (not a filled shape) at +5px, so it reads as a
+                    // soft halo AROUND the capsule rather than a filled
+                    // disc behind it. Shaped as a rounded-rect "pill"
+                    // (see capsuleOutlineRect) instead of a circle,
+                    // since a capsule isn't circular - everything else
+                    // (the same `opened-point-glow` blur filter, the
+                    // same +5px inflation, the same 4px stroke width,
+                    // the same 0.6 opacity) is identical to the point
+                    // version above.
+                    <rect
+                      {...capsuleOutlineRect(cxStart, cxEnd, y, 5)}
+                      fill="none"
+                      stroke={OPENED_HIGHLIGHT_COLOR}
+                      strokeWidth={4}
+                      strokeOpacity={0.6}
+                      filter="url(#opened-point-glow)"
+                      className="pointer-events-none"
                     />
-                    {isOpened && (
-                      // SELECTED-ENTRY HIGHLIGHT (capsule ring): same
-                      // visual language as a point's crisp ring just
-                      // above/below - a `fill="none"` OUTLINE traced
-                      // +3px outside the capsule's own edge, same 1.5px
-                      // stroke width as the point ring. This used to be a
-                      // plain wide `<line>` (effectively a SOLID capsule
-                      // slightly bigger than the colored one, painted on
-                      // top of it) - since a `<line>`'s stroke IS its
-                      // whole visible shape, there's no way for a line to
-                      // trace just an outline the way a `fill="none"`
-                      // shape can, so that version visually washed the
-                      // category color out under a near-opaque white
-                      // overlay instead of framing it. capsuleOutlineRect
-                      // (see its own comment) fixes that by tracing a
-                      // true pill OUTLINE around the capsule instead,
-                      // exactly like the point ring circle does around a
-                      // dot - the category-colored capsule underneath
-                      // stays fully visible, just framed.
-                      <rect
-                        {...capsuleOutlineRect(cxStart, cxEnd, y, 3)}
-                        fill="none"
-                        stroke={OPENED_HIGHLIGHT_COLOR}
-                        strokeWidth={1.5}
-                        className="pointer-events-none"
-                      />
-                    )}
-                  </g>
-                );
-              })}
-            {isReady &&
-              points.map(({ entry, cx, color }) => {
-                const isOpened = openedEntryIdSet.has(entry.id);
-                const isFilteredOut = !activeCategorySet.has(
-                  entry.activityType
-                );
-                return (
-                  // SELECTED-ENTRY HIGHLIGHT: same per-entry <g> + opacity
-                  // + glow/ring structure as StarMap.tsx's stars.map() -
-                  // see the comment on the range <g> above.
-                  <g
-                    key={entry.id}
-                    style={{
-                      opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
-                    }}
-                    className="transition-opacity duration-200"
-                  >
-                    {isOpened && (
-                      // Soft blurred halo, behind the point - same as
-                      // StarMap's opened-star glow circle.
-                      <circle
-                        cx={cx}
-                        cy={BASELINE_Y}
-                        r={POINT_RADIUS + 5}
-                        fill="none"
-                        stroke={OPENED_HIGHLIGHT_COLOR}
-                        strokeWidth={4}
-                        strokeOpacity={0.6}
-                        filter="url(#opened-point-glow)"
-                        className="pointer-events-none"
-                      />
-                    )}
+                  )}
+                  <line
+                    x1={cxStart}
+                    x2={cxEnd}
+                    y1={y}
+                    y2={y}
+                    stroke={color}
+                    strokeWidth={POINT_RADIUS * 2}
+                    strokeLinecap="round"
+                    strokeOpacity={0.85}
+                    className="cursor-pointer"
+                    onMouseEnter={event =>
+                      setHovered({
+                        entry,
+                        x: event.clientX,
+                        y: event.clientY,
+                      })
+                    }
+                    onMouseMove={event =>
+                      setHovered(current =>
+                        current && current.entry.id === entry.id
+                          ? { ...current, x: event.clientX, y: event.clientY }
+                          : current
+                      )
+                    }
+                    onMouseLeave={() => setHovered(null)}
+                    onClick={() => onEntryClick(entry)}
+                  />
+                  {isOpened && (
+                    // SELECTED-ENTRY HIGHLIGHT (capsule ring): same
+                    // visual language as a point's crisp ring just
+                    // above/below - a `fill="none"` OUTLINE traced
+                    // +3px outside the capsule's own edge, same 1.5px
+                    // stroke width as the point ring. This used to be a
+                    // plain wide `<line>` (effectively a SOLID capsule
+                    // slightly bigger than the colored one, painted on
+                    // top of it) - since a `<line>`'s stroke IS its
+                    // whole visible shape, there's no way for a line to
+                    // trace just an outline the way a `fill="none"`
+                    // shape can, so that version visually washed the
+                    // category color out under a near-opaque white
+                    // overlay instead of framing it. capsuleOutlineRect
+                    // (see its own comment) fixes that by tracing a
+                    // true pill OUTLINE around the capsule instead,
+                    // exactly like the point ring circle does around a
+                    // dot - the category-colored capsule underneath
+                    // stays fully visible, just framed.
+                    <rect
+                      {...capsuleOutlineRect(cxStart, cxEnd, y, 3)}
+                      fill="none"
+                      stroke={OPENED_HIGHLIGHT_COLOR}
+                      strokeWidth={1.5}
+                      className="pointer-events-none"
+                    />
+                  )}
+                </g>
+              );
+            })}
+          {isReady &&
+            points.map(({ entry, cx, color }) => {
+              const isOpened = openedEntryIdSet.has(entry.id);
+              const isFilteredOut = !activeCategorySet.has(entry.activityType);
+              return (
+                // SELECTED-ENTRY HIGHLIGHT: same per-entry <g> + opacity
+                // + glow/ring structure as StarMap.tsx's stars.map() -
+                // see the comment on the range <g> above.
+                <g
+                  key={entry.id}
+                  style={{
+                    opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
+                  }}
+                  className="transition-opacity duration-200"
+                >
+                  {isOpened && (
+                    // Soft blurred halo, behind the point - same as
+                    // StarMap's opened-star glow circle.
                     <circle
                       cx={cx}
                       cy={BASELINE_Y}
-                      r={POINT_RADIUS}
-                      fill={color}
-                      stroke={color}
-                      strokeOpacity={0.35}
+                      r={POINT_RADIUS + 5}
+                      fill="none"
+                      stroke={OPENED_HIGHLIGHT_COLOR}
                       strokeWidth={4}
-                      className="cursor-pointer"
-                      onMouseEnter={event =>
-                        setHovered({
-                          entry,
-                          x: event.clientX,
-                          y: event.clientY,
-                        })
-                      }
-                      onMouseMove={event =>
-                        setHovered(current =>
-                          current && current.entry.id === entry.id
-                            ? { ...current, x: event.clientX, y: event.clientY }
-                            : current
-                        )
-                      }
-                      onMouseLeave={() => setHovered(null)}
-                      onClick={() => onEntryClick(entry)}
+                      strokeOpacity={0.6}
+                      filter="url(#opened-point-glow)"
+                      className="pointer-events-none"
                     />
-                    {isOpened && (
-                      // Crisp thin ring on top, for a defined edge against
-                      // the glow - same as StarMap's crisp ring drawn on
-                      // top of an opened star.
-                      <circle
-                        cx={cx}
-                        cy={BASELINE_Y}
-                        r={POINT_RADIUS + 3}
-                        fill="none"
-                        stroke={OPENED_HIGHLIGHT_COLOR}
-                        strokeWidth={1.5}
-                        className="pointer-events-none"
-                      />
-                    )}
-                  </g>
-                );
-              })}
-            <g ref={axisRef} transform={`translate(0,${axisY})`} />
-          </g>
-        </svg>
-      )}
+                  )}
+                  <circle
+                    cx={cx}
+                    cy={BASELINE_Y}
+                    r={POINT_RADIUS}
+                    fill={color}
+                    stroke={color}
+                    strokeOpacity={0.35}
+                    strokeWidth={4}
+                    className="cursor-pointer"
+                    onMouseEnter={event =>
+                      setHovered({
+                        entry,
+                        x: event.clientX,
+                        y: event.clientY,
+                      })
+                    }
+                    onMouseMove={event =>
+                      setHovered(current =>
+                        current && current.entry.id === entry.id
+                          ? { ...current, x: event.clientX, y: event.clientY }
+                          : current
+                      )
+                    }
+                    onMouseLeave={() => setHovered(null)}
+                    onClick={() => onEntryClick(entry)}
+                  />
+                  {isOpened && (
+                    // Crisp thin ring on top, for a defined edge against
+                    // the glow - same as StarMap's crisp ring drawn on
+                    // top of an opened star.
+                    <circle
+                      cx={cx}
+                      cy={BASELINE_Y}
+                      r={POINT_RADIUS + 3}
+                      fill="none"
+                      stroke={OPENED_HIGHLIGHT_COLOR}
+                      strokeWidth={1.5}
+                      className="pointer-events-none"
+                    />
+                  )}
+                </g>
+              );
+            })}
+          <g ref={axisRef} transform={`translate(0,${axisY})`} />
+        </g>
+      </svg>
 
       {hovered && (
         <EntryTooltip entry={hovered.entry} x={hovered.x} y={hovered.y} />
+      )}
+
+      {isEmpty && (
+        <VizEmptyState
+          hasAnyEntries={hasAnyEntries}
+          topOffset={topOffset}
+          sidebarWidth={sidebarWidth}
+          timeRangeSelectorRect={timeRangeSelectorRect}
+        />
       )}
     </div>
   );

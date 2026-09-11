@@ -98,7 +98,7 @@
  * change just because the visible time window did.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import FilterBar from '../components/FilterBar';
 import LinearTimeline from '../components/LinearTimeline';
 import ResetButton from '../components/ResetButton';
@@ -221,6 +221,41 @@ export default function Timeline({ entries }: TimelineProps) {
     return () => observer.disconnect();
   }, [hasSelection]);
 
+  // TimeRangeSelector's own CARD's live rendered position - identical to
+  // Constellation.tsx's own `timeRangeSelectorRect` measurement; see its
+  // comment for the full reasoning (why `sidebarWidth` is a dependency,
+  // why both a ResizeObserver AND a resize listener are needed, and why
+  // `useLayoutEffect`).
+  const timeRangeSelectorCardRef = useRef<HTMLDivElement>(null);
+  const [timeRangeSelectorRect, setTimeRangeSelectorRect] = useState({
+    top: 0,
+    right: 0,
+    height: 0,
+  });
+
+  useLayoutEffect(() => {
+    const el = timeRangeSelectorCardRef.current;
+    if (!el) return;
+
+    const updateRect = () => {
+      const rect = el.getBoundingClientRect();
+      setTimeRangeSelectorRect({
+        top: rect.top,
+        right: rect.right,
+        height: rect.height,
+      });
+    };
+    updateRect();
+
+    const observer = new ResizeObserver(updateRect);
+    observer.observe(el);
+    window.addEventListener('resize', updateRect);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateRect);
+    };
+  }, [sidebarWidth]);
+
   return (
     // Fragment, not a `space-y-4` div - see Constellation.tsx's identical
     // comment: `space-y-*` would misalign LinearTimeline's `fixed inset-0`
@@ -245,6 +280,7 @@ export default function Timeline({ entries }: TimelineProps) {
 
       <LinearTimeline
         entries={timeFilteredEntries}
+        hasAnyEntries={entries.length > 0}
         filterCategories={filterCategories}
         onEntryClick={handleEntryClick}
         openedEntryIds={openedEntryIds}
@@ -252,6 +288,7 @@ export default function Timeline({ entries }: TimelineProps) {
         sidebarWidth={sidebarWidth}
         topOffset={headerLayout.top}
         domainRange={selectedRange}
+        timeRangeSelectorRect={timeRangeSelectorRect}
       />
 
       {/*
@@ -265,8 +302,14 @@ export default function Timeline({ entries }: TimelineProps) {
        * within the same sidebar-excluded visible region LinearTimeline's
        * own content now starts past - see both files' own comments on
        * their respective (different) sidebar-aware layout mechanisms.
+       * `ref` is the TimeRangeSelector.tsx forwardRef - see the
+       * `timeRangeSelectorRect` measurement above for why.
        */}
-      <TimeRangeSelector entries={entries} sidebarWidth={sidebarWidth} />
+      <TimeRangeSelector
+        ref={timeRangeSelectorCardRef}
+        entries={entries}
+        sidebarWidth={sidebarWidth}
+      />
 
       <ResetToast visible={resetPending} />
       <ResetButton onClick={resetAll} />

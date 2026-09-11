@@ -131,9 +131,18 @@ import { getActivityColor } from '../utils/colors';
 // EntryTooltip.tsx's header comment for why this is a shared pattern
 // across both visualization views rather than duplicated per-component.
 import EntryTooltip from './EntryTooltip';
+import VizEmptyState, { TimeRangeSelectorRect } from './VizEmptyState';
 
 interface StarMapProps {
   entries: Entry[];
+  /**
+   * Whether the RAW, unfiltered dataset (Constellation.tsx's own
+   * `entries.length > 0`, not the time-filtered `entries` prop above) has
+   * any entries at all - passed straight through to VizEmptyState.tsx so
+   * it can distinguish "no data exists" from "filtered to nothing" - see
+   * that component's own top-of-file comment for the full reasoning.
+   */
+  hasAnyEntries: boolean;
   /**
    * The dynamic category list - one "constellation anchor" is laid out per
    * category here (see categoryCenters below), rather than per fixed
@@ -200,6 +209,23 @@ interface StarMapProps {
    * just happened" rather than "a value changed."
    */
   resetViewSignal: number;
+  /**
+   * The page's measured header bottom edge (Constellation.tsx's own
+   * `headerLayout.top`) - used only to position VizEmptyState.tsx below
+   * the header when there's nothing to show; StarMap's own star
+   * positions/layout don't need this (see the FULL-BLEED CANVAS comment
+   * above for why StarMap, unlike LinearTimeline, has never needed a
+   * vertical exclusion of its own).
+   */
+  topOffset: number;
+  /**
+   * TimeRangeSelector's own card's live rendered position
+   * (Constellation.tsx's own `timeRangeSelectorRect`) - passed straight
+   * through to VizEmptyState.tsx so it can position its "filtered"
+   * message immediately beside that card. See VizEmptyState.tsx's own
+   * POSITIONING comment.
+   */
+  timeRangeSelectorRect: TimeRangeSelectorRect;
 }
 
 /** Opacity applied to a star whose category is filtered out. */
@@ -267,6 +293,7 @@ function randomPointInDisc(random: () => number, radius: number) {
 
 export default function StarMap({
   entries,
+  hasAnyEntries,
   categories,
   onStarClick,
   openedEntryIds,
@@ -274,6 +301,8 @@ export default function StarMap({
   filterCategories,
   sidebarWidth,
   resetViewSignal,
+  topOffset,
+  timeRangeSelectorRect,
 }: StarMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -608,6 +637,19 @@ export default function StarMap({
     [filterCategories]
   );
 
+  // Whether there's anything actually visible to plot right now - "of the
+  // entries inside the current time window (already time-filtered by
+  // Constellation.tsx before reaching this `entries` prop), is at least
+  // one ALSO in an active category?" See VizEmptyState.tsx's own
+  // top-of-file comment for why this single check covers both the time
+  // filter and the category filter as a possible cause, and why
+  // `hasAnyEntries` (the RAW, pre-time-filter count) is threaded in
+  // separately to decide which of its two messages to show.
+  const isEmpty = useMemo(
+    () => !entries.some(entry => activeCategorySet.has(entry.activityType)),
+    [entries, activeCategorySet]
+  );
+
   // ─── Hover tooltip ───
   // Same shape and same viewport-clientX/clientY-based tracking
   // LinearTimeline.tsx uses for its own hover state - see the "Hover
@@ -800,6 +842,15 @@ export default function StarMap({
        */}
       {hovered && (
         <EntryTooltip entry={hovered.entry} x={hovered.x} y={hovered.y} />
+      )}
+
+      {isEmpty && (
+        <VizEmptyState
+          hasAnyEntries={hasAnyEntries}
+          topOffset={topOffset}
+          sidebarWidth={sidebarWidth}
+          timeRangeSelectorRect={timeRangeSelectorRect}
+        />
       )}
     </div>
   );

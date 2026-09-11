@@ -97,18 +97,55 @@
  * comes from styling each piece of *content* for contrast individually -
  * see VizPageHeader.tsx and FilterBar.tsx. Multiple small contrasted
  * elements instead of one big backing box.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * SHARED TIME-RANGE FILTER: SAME CONTEXT, SAME COMPONENT AS Timeline.tsx
+ * ──────────────────────────────────────────────────────────────────────
+ * This page now consumes TimeRangeContext exactly the way Timeline.tsx
+ * does (see that file's STAGE 3 comment and TimeRangeContext.tsx's own
+ * top-of-file comment for the full reasoning) - `selectedRange` is global/
+ * persistent state that lives above the router, so it's already whatever
+ * was last set on EITHER page: narrowing the brush here, then navigating
+ * to Timeline, shows the same narrowed window there, and vice versa,
+ * without either page needing to read or write anything Timeline/
+ * Constellation-specific.
+ *
+ * `timeFilteredEntries` (not `entries`) is what actually reaches StarMap -
+ * a hard filter via the SAME `isEntryWithinRange` overlap test
+ * Timeline.tsx uses for its own range/capsule entries, not the
+ * dim-don't-remove treatment `filterCategories` gets. Because StarMap's
+ * own star positions/jitter/CLICK-TO-CENTER math are all computed
+ * directly off its `entries` prop, handing it the already-time-filtered
+ * set means that recentering math (and everything else StarMap derives
+ * from `entries`) automatically operates on the FILTERED set too, with no
+ * separate wiring needed here.
+ *
+ * `<TimeRangeSelector>` below is the exact same component, same
+ * `sidebarWidth`-driven centering, and same fixed-bottom floating-chrome
+ * position Timeline.tsx renders - one shared brush control for both pages
+ * rather than a second copy. `onFullReset` (passed to useEntrySelection
+ * below) now also calls `resetToFullRange()` alongside this page's own
+ * `resetViewSignal` bump, so the bottom-right reset button / Escape's
+ * full reset puts the brush back to the full range here too, exactly like
+ * Timeline.tsx's own `resetAll` already does - confirmed by
+ * TimeRangeSelector's own SYNC EFFECT reacting to `selectedRange`
+ * changing from outside a drag, the same mechanism that already made this
+ * work on Timeline.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import FilterBar from '../components/FilterBar';
 import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
 import SidebarPanelStack from '../components/SidebarPanelStack';
 import StarMap from '../components/StarMap';
+import TimeRangeSelector from '../components/TimeRangeSelector';
 import VizPageHeader from '../components/VizPageHeader';
 import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
+import { isEntryWithinRange } from '../utils/entryDateRange';
 import { useEntrySelection } from '../hooks/useEntrySelection';
+import { useTimeRange } from '../context/TimeRangeContext';
 
 interface ConstellationProps {
   entries: Entry[];
@@ -121,6 +158,18 @@ export default function Constellation({ entries }: ConstellationProps) {
   // same action). Passed down to useEntrySelection, FilterBar, and StarMap
   // rather than having each of them independently reload it.
   const categories = useMemo(() => loadCategories(), [entries]);
+
+  // See the SHARED TIME-RANGE FILTER comment above: `selectedRange` is the
+  // shared, cross-page time filter (same context Timeline.tsx reads);
+  // `timeFilteredEntries` is `entries` hard-cut down to only what's
+  // `isEntryWithinRange` of it - this (not `entries`) is what actually
+  // reaches StarMap below, identical in spirit to Timeline.tsx's own
+  // `timeFilteredEntries`/LinearTimeline wiring.
+  const { selectedRange, resetToFullRange } = useTimeRange();
+  const timeFilteredEntries = useMemo(
+    () => entries.filter(entry => isEntryWithinRange(entry, selectedRange)),
+    [entries, selectedRange]
+  );
 
   // Bumped every time useEntrySelection's Escape-key full reset actually
   // fires (via `onFullReset` below) - passed to StarMap as
@@ -151,7 +200,20 @@ export default function Constellation({ entries }: ConstellationProps) {
     resetAll,
   } = useEntrySelection({
     categories,
-    onFullReset: () => setResetViewSignal(signal => signal + 1),
+    // RESET INCLUDES THE BRUSH: bumping `resetViewSignal` (StarMap's own
+    // pan/zoom reset) alongside `resetToFullRange()` (TimeRangeContext's
+    // brush reset) is the exact same "onFullReset covers whatever ELSE a
+    // page wants a full reset to also cover" pattern Timeline.tsx uses for
+    // its own `resetAll` - see useEntrySelection.ts's `onFullReset` comment
+    // and TimeRangeContext.tsx's `resetToFullRange` comment for why this
+    // (not `setSelectedRange(fullRange)`) is the right call for a FULL
+    // reset specifically. This confirms the bottom-right reset button/
+    // Escape's full reset snaps the brush back to the full range from THIS
+    // page too, not just from Timeline.
+    onFullReset: () => {
+      setResetViewSignal(signal => signal + 1);
+      resetToFullRange();
+    },
   });
 
   // The sidebar overlay's live rendered width, passed to StarMap so it
@@ -180,6 +242,50 @@ export default function Constellation({ entries }: ConstellationProps) {
     observer.observe(el);
     return () => observer.disconnect();
   }, [hasSelection]);
+
+  // TimeRangeSelector's own CARD's live rendered position - forwarded via
+  // TimeRangeSelector.tsx's `forwardRef` (see its own comment) - so
+  // VizEmptyState's "filtered" message (below, via StarMap) can position
+  // itself immediately to the card's right, on the same row, instead of
+  // guessing at a fixed offset. Re-measured whenever `sidebarWidth`
+  // changes (a dependency, not just mount) because TimeRangeSelector
+  // re-centers its card within a narrower `[sidebarWidth, viewport
+  // right]` box as the sidebar opens/closes - a pure horizontal
+  // TRANSLATION of the same-sized card, which a ResizeObserver alone
+  // would miss (it only fires on size changes, not position). The window
+  // resize listener alongside it catches the OTHER way this position can
+  // change: the viewport itself resizing. `useLayoutEffect` (not
+  // `useEffect`) so this is measured before the first paint the message
+  // could appear in, avoiding a one-frame flash at the wrong position.
+  const timeRangeSelectorCardRef = useRef<HTMLDivElement>(null);
+  const [timeRangeSelectorRect, setTimeRangeSelectorRect] = useState({
+    top: 0,
+    right: 0,
+    height: 0,
+  });
+
+  useLayoutEffect(() => {
+    const el = timeRangeSelectorCardRef.current;
+    if (!el) return;
+
+    const updateRect = () => {
+      const rect = el.getBoundingClientRect();
+      setTimeRangeSelectorRect({
+        top: rect.top,
+        right: rect.right,
+        height: rect.height,
+      });
+    };
+    updateRect();
+
+    const observer = new ResizeObserver(updateRect);
+    observer.observe(el);
+    window.addEventListener('resize', updateRect);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateRect);
+    };
+  }, [sidebarWidth]);
 
   // Where the header stack (title/subtitle + FilterBar) actually sits in
   // the viewport, so SidebarPanelStack below can start just past its
@@ -306,7 +412,8 @@ export default function Constellation({ entries }: ConstellationProps) {
        * be - see StarMap.tsx's own STAR CLICK OUTCOMES comment.
        */}
       <StarMap
-        entries={entries}
+        entries={timeFilteredEntries}
+        hasAnyEntries={entries.length > 0}
         categories={categories}
         onStarClick={handleEntryClick}
         openedEntryIds={openedEntryIds}
@@ -314,6 +421,25 @@ export default function Constellation({ entries }: ConstellationProps) {
         filterCategories={filterCategories}
         sidebarWidth={sidebarWidth}
         resetViewSignal={resetViewSignal}
+        topOffset={headerLayout.top}
+        timeRangeSelectorRect={timeRangeSelectorRect}
+      />
+
+      {/*
+       * Same component, same props shape, and same fixed-bottom
+       * sidebar-aware centering as Timeline.tsx's own <TimeRangeSelector> -
+       * see the SHARED TIME-RANGE FILTER comment at the top of this file.
+       * Passed the full, unfiltered `entries` (not `timeFilteredEntries`)
+       * for its density ticks - same reasoning as Timeline.tsx's own
+       * comment on this prop: the ticks need to show where data exists
+       * across the entire `fullRange`, not just within the current
+       * selection. `ref` is the new TimeRangeSelector.tsx forwardRef -
+       * see the `timeRangeSelectorRect` measurement above for why.
+       */}
+      <TimeRangeSelector
+        ref={timeRangeSelectorCardRef}
+        entries={entries}
+        sidebarWidth={sidebarWidth}
       />
 
       <ResetToast visible={resetPending} />

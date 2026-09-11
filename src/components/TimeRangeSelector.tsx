@@ -69,7 +69,14 @@
  * padding, so an `<svg>` sized to match it can never exceed that box.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
 import { useTimeRange } from '../context/TimeRangeContext';
@@ -110,242 +117,257 @@ const HANDLE_WIDTH = 8;
 /** `%b %d, %Y` - e.g. "Mar 17, 2023" - used for the start/end labels flanking the track. */
 const formatDate = d3.timeFormat('%b %d, %Y');
 
-export default function TimeRangeSelector({
-  entries,
-  sidebarWidth,
-}: TimeRangeSelectorProps) {
-  const { fullRange, selectedRange, setSelectedRange } = useTimeRange();
+/**
+ * `forwardRef`, forwarded to the CARD div below (the `w-full max-w-xl
+ * rounded-2xl ...` one) - not the outer `fixed` wrapper, which merely
+ * spans the full `[sidebarWidth, viewport right]` region it centers
+ * itself within. A calling page (see VizEmptyState.tsx's "filtered"
+ * message) needs the CARD's own actual rendered position/size to
+ * position something relative to it (e.g. immediately to its right) -
+ * the outer wrapper's own box wouldn't give that, since it's always
+ * exactly `[sidebarWidth, viewport right]` regardless of how wide the
+ * card centered inside it actually renders.
+ */
+const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
+  function TimeRangeSelector({ entries, sidebarWidth }, cardRef) {
+    const { fullRange, selectedRange, setSelectedRange } = useTimeRange();
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const brushGroupRef = useRef<SVGGElement>(null);
-  const brushBehaviorRef = useRef<d3.BrushBehavior<unknown> | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const brushGroupRef = useRef<SVGGElement>(null);
+    const brushBehaviorRef = useRef<d3.BrushBehavior<unknown> | null>(null);
 
-  // Same measure-before-paint approach as LinearTimeline.tsx's own
-  // "Responsive sizing" - see its comment for why `useLayoutEffect`
-  // (not `useEffect`) matters for getting a correct size on the very
-  // first rendered frame.
-  const [width, setWidth] = useState(0);
+    // Same measure-before-paint approach as LinearTimeline.tsx's own
+    // "Responsive sizing" - see its comment for why `useLayoutEffect`
+    // (not `useEffect`) matters for getting a correct size on the very
+    // first rendered frame.
+    const [width, setWidth] = useState(0);
 
-  useLayoutEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+    useLayoutEffect(() => {
+      const el = containerRef.current;
+      if (!el) return;
 
-    const updateWidth = () => setWidth(el.getBoundingClientRect().width);
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+      const updateWidth = () => setWidth(el.getBoundingClientRect().width);
+      updateWidth();
+      const observer = new ResizeObserver(updateWidth);
+      observer.observe(el);
+      return () => observer.disconnect();
+    }, []);
 
-  const innerWidth = Math.max(0, width - MARGIN.left - MARGIN.right);
+    const innerWidth = Math.max(0, width - MARGIN.left - MARGIN.right);
 
-  // See the DOMAIN IS ALWAYS fullRange comment above - this never reads
-  // `selectedRange`.
-  const scale = useMemo(
-    () =>
-      d3
-        .scaleTime()
-        .domain([fullRange.start, fullRange.end])
-        .range([0, innerWidth]),
-    [fullRange, innerWidth]
-  );
+    // See the DOMAIN IS ALWAYS fullRange comment above - this never reads
+    // `selectedRange`.
+    const scale = useMemo(
+      () =>
+        d3
+          .scaleTime()
+          .domain([fullRange.start, fullRange.end])
+          .range([0, innerWidth]),
+      [fullRange, innerWidth]
+    );
 
-  /**
-   * ─── DENSITY TICKS: where entries fall across `fullRange` ───
-   * A lightweight, purely visual reference for where events cluster
-   * along the FULL track - drawn before the user ever touches the brush,
-   * so they can see roughly where the data actually is before deciding
-   * how to narrow the selection. Each entry gets exactly one thin
-   * vertical tick at `scale(entry.timestamp)` - using the start
-   * timestamp uniformly for BOTH point and range entries (not e.g. a
-   * tick per day of a range entry's span), and no lane/stacking logic to
-   * keep entries that land close together from overlapping - this is
-   * deliberately simpler than LinearTimeline.tsx's own lane-assignment
-   * for capsules: ticks here are only ~20px tall and semi-transparent, so
-   * several overlapping ticks at nearby dates naturally read as a
-   * slightly denser/brighter band via alpha blending alone (a "poor
-   * man's histogram") rather than needing real layout to stay legible.
-   * Plain React-rendered SVG `<line>`s, not anything d3 draws - no
-   * imperative DOM manipulation needed for a static list of marks with no
-   * interaction of their own.
-   */
-  const densityTickX = useMemo(
-    () => entries.map(entry => scale(new Date(entry.timestamp))),
-    [entries, scale]
-  );
+    /**
+     * ─── DENSITY TICKS: where entries fall across `fullRange` ───
+     * A lightweight, purely visual reference for where events cluster
+     * along the FULL track - drawn before the user ever touches the brush,
+     * so they can see roughly where the data actually is before deciding
+     * how to narrow the selection. Each entry gets exactly one thin
+     * vertical tick at `scale(entry.timestamp)` - using the start
+     * timestamp uniformly for BOTH point and range entries (not e.g. a
+     * tick per day of a range entry's span), and no lane/stacking logic to
+     * keep entries that land close together from overlapping - this is
+     * deliberately simpler than LinearTimeline.tsx's own lane-assignment
+     * for capsules: ticks here are only ~20px tall and semi-transparent, so
+     * several overlapping ticks at nearby dates naturally read as a
+     * slightly denser/brighter band via alpha blending alone (a "poor
+     * man's histogram") rather than needing real layout to stay legible.
+     * Plain React-rendered SVG `<line>`s, not anything d3 draws - no
+     * imperative DOM manipulation needed for a static list of marks with no
+     * interaction of their own.
+     */
+    const densityTickX = useMemo(
+      () => entries.map(entry => scale(new Date(entry.timestamp))),
+      [entries, scale]
+    );
 
-  // ─── Create/attach the brush whenever the geometry or domain changes ───
-  // Recreated (not just repositioned) on `scale`/`innerWidth` changes since
-  // both the pixel `.extent()` and the handler's closure over `scale`
-  // (for `scale.invert()`) need to stay current - a stale closure here
-  // would silently convert brush pixel positions back to the WRONG dates
-  // after a resize or a `fullRange` change.
-  useEffect(() => {
-    const group = brushGroupRef.current;
-    if (!group || innerWidth === 0) return;
+    // ─── Create/attach the brush whenever the geometry or domain changes ───
+    // Recreated (not just repositioned) on `scale`/`innerWidth` changes since
+    // both the pixel `.extent()` and the handler's closure over `scale`
+    // (for `scale.invert()`) need to stay current - a stale closure here
+    // would silently convert brush pixel positions back to the WRONG dates
+    // after a resize or a `fullRange` change.
+    useEffect(() => {
+      const group = brushGroupRef.current;
+      if (!group || innerWidth === 0) return;
 
-    const brush = d3
-      .brushX()
-      .handleSize(HANDLE_WIDTH)
-      .extent([
-        [0, 0],
-        [innerWidth, TRACK_HEIGHT],
-      ])
-      .on('brush end', (event: d3.D3BrushEvent<unknown>) => {
-        // See the SYNCING A CONTROLLED d3-brush comment above.
-        if (!event.sourceEvent) return;
+      const brush = d3
+        .brushX()
+        .handleSize(HANDLE_WIDTH)
+        .extent([
+          [0, 0],
+          [innerWidth, TRACK_HEIGHT],
+        ])
+        .on('brush end', (event: d3.D3BrushEvent<unknown>) => {
+          // See the SYNCING A CONTROLLED d3-brush comment above.
+          if (!event.sourceEvent) return;
 
-        if (!event.selection) {
-          // An empty selection (the user clicked without dragging,
-          // collapsing the brush to nothing) reads as "clear the
-          // filter" - snap back to the full range rather than leaving
-          // the timeline showing zero entries.
-          setSelectedRange(fullRange);
-          return;
-        }
+          if (!event.selection) {
+            // An empty selection (the user clicked without dragging,
+            // collapsing the brush to nothing) reads as "clear the
+            // filter" - snap back to the full range rather than leaving
+            // the timeline showing zero entries.
+            setSelectedRange(fullRange);
+            return;
+          }
 
-        const [x0, x1] = event.selection as [number, number];
-        setSelectedRange({ start: scale.invert(x0), end: scale.invert(x1) });
-      });
+          const [x0, x1] = event.selection as [number, number];
+          setSelectedRange({ start: scale.invert(x0), end: scale.invert(x1) });
+        });
 
-    const selection = d3.select(group);
-    selection.call(brush);
+      const selection = d3.select(group);
+      selection.call(brush);
 
-    // Restyle the brush's auto-generated elements for the dark theme -
-    // d3-brush gives `.selection`/`.handle` some default (light-mode)
-    // inline presentation attributes of its own; overriding them here,
-    // right after `.call(brush)`, is the same "restyle d3's own output"
-    // pattern LinearTimeline.tsx's AXIS EFFECT uses for its tick text.
-    selection
-      .select('.selection')
-      .attr('fill', 'rgba(99, 102, 241, 0.35)') // indigo-500 tint
-      .attr('stroke', 'rgba(199, 210, 254, 0.8)') // indigo-200-ish
-      .attr('stroke-width', 1)
-      .attr('rx', TRACK_HEIGHT / 2);
-    selection
-      .selectAll('.handle')
-      .attr('fill', '#a5b4fc') // indigo-300
-      .attr('stroke', 'none')
-      .attr('rx', HANDLE_WIDTH / 2)
-      .attr('cursor', 'ew-resize');
+      // Restyle the brush's auto-generated elements for the dark theme -
+      // d3-brush gives `.selection`/`.handle` some default (light-mode)
+      // inline presentation attributes of its own; overriding them here,
+      // right after `.call(brush)`, is the same "restyle d3's own output"
+      // pattern LinearTimeline.tsx's AXIS EFFECT uses for its tick text.
+      selection
+        .select('.selection')
+        .attr('fill', 'rgba(99, 102, 241, 0.35)') // indigo-500 tint
+        .attr('stroke', 'rgba(199, 210, 254, 0.8)') // indigo-200-ish
+        .attr('stroke-width', 1)
+        .attr('rx', TRACK_HEIGHT / 2);
+      selection
+        .selectAll('.handle')
+        .attr('fill', '#a5b4fc') // indigo-300
+        .attr('stroke', 'none')
+        .attr('rx', HANDLE_WIDTH / 2)
+        .attr('cursor', 'ew-resize');
 
-    brushBehaviorRef.current = brush;
+      brushBehaviorRef.current = brush;
 
-    return () => {
-      selection.on('.brush', null);
-      brushBehaviorRef.current = null;
-    };
-  }, [scale, innerWidth, fullRange, setSelectedRange]);
+      return () => {
+        selection.on('.brush', null);
+        brushBehaviorRef.current = null;
+      };
+    }, [scale, innerWidth, fullRange, setSelectedRange]);
 
-  // ─── Keep the brush's handle positions synced to `selectedRange` ───
-  // Covers both the INITIAL position right after the effect above
-  // (re)creates the brush (a freshly attached brush has no selection at
-  // all until moved), and any later change to `selectedRange` that didn't
-  // originate from dragging this brush itself - see the SYNCING A
-  // CONTROLLED d3-brush comment above for why that's safe (the
-  // `sourceEvent` guard) rather than fighting this effect in a loop.
-  useEffect(() => {
-    const group = brushGroupRef.current;
-    const brush = brushBehaviorRef.current;
-    if (!group || !brush || innerWidth === 0) return;
+    // ─── Keep the brush's handle positions synced to `selectedRange` ───
+    // Covers both the INITIAL position right after the effect above
+    // (re)creates the brush (a freshly attached brush has no selection at
+    // all until moved), and any later change to `selectedRange` that didn't
+    // originate from dragging this brush itself - see the SYNCING A
+    // CONTROLLED d3-brush comment above for why that's safe (the
+    // `sourceEvent` guard) rather than fighting this effect in a loop.
+    useEffect(() => {
+      const group = brushGroupRef.current;
+      const brush = brushBehaviorRef.current;
+      if (!group || !brush || innerWidth === 0) return;
 
-    d3.select(group).call(brush.move, [
-      scale(selectedRange.start),
-      scale(selectedRange.end),
-    ]);
-  }, [selectedRange, scale, innerWidth]);
+      d3.select(group).call(brush.move, [
+        scale(selectedRange.start),
+        scale(selectedRange.end),
+      ]);
+    }, [selectedRange, scale, innerWidth]);
 
-  const height = TRACK_HEIGHT + MARGIN.top + MARGIN.bottom;
+    const height = TRACK_HEIGHT + MARGIN.top + MARGIN.bottom;
 
-  return (
-    // Self-contained `fixed bottom-*` floating chrome, same positioning
-    // pattern as ResetButton.tsx/ResetToast.tsx (both also self-position
-    // rather than taking layout coordinates as props - unlike
-    // SidebarPanelStack.tsx, nothing here depends on the page's own
-    // measured header layout). Centered rather than pinned to a corner
-    // (there's no natural corner for a horizontal track the way a round
-    // button has one), and given the SAME opaque "floating chrome" surface
-    // (bg-gray-900/90 + border-white/10 + backdrop-blur + shadow-lg)
-    // ResetButton/ResetToast use - this is a floating CONTROL, not header
-    // content, so it follows their visual language rather than the
-    // header's own fully-transparent "text over the starfield" treatment.
-    // z-40: same tier as ResetButton/ResetToast, above the canvas (z-0)
-    // and header (z-10), below the AddEntryForm modal (z-50).
-    //
-    // SIDEBAR-AWARE CENTERING: `left: sidebarWidth` (an inline style, not
-    // a Tailwind class, since `sidebarWidth` is a runtime number) replaces
-    // the flat `inset-x-0` this used to be - narrowing this flex
-    // container's own box down to exactly `[sidebarWidth, viewport right
-    // edge]` rather than the full viewport width. `justify-center` then
-    // centers the card WITHIN that narrowed box instead of the whole
-    // window, so the control visually centers on the REMAINING visible
-    // canvas the same way LinearTimeline.tsx's own content now starts
-    // past the sidebar (see its CANVAS ORIGIN SHIFT comment) - two
-    // different mechanisms (a shifted flex box here; a shifted SVG
-    // drawing origin there) converging on the same "center within what's
-    // actually visible" result. `sidebarWidth === 0` (no panel open)
-    // makes `left: 0`, equivalent to the old `inset-x-0` - full-width
-    // centering, unchanged.
-    <div
-      className="fixed bottom-6 right-0 z-40 flex justify-center px-6"
-      style={{ left: sidebarWidth }}
-    >
-      <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-gray-900/90 px-4 py-3 shadow-lg backdrop-blur">
-        {/*
-         * WIDTH MEASUREMENT div - see the top-of-file comment for why this
-         * has to be a separate, unpadded element from the card above
-         * rather than measuring the padded card directly.
-         */}
-        <div ref={containerRef} className="w-full">
-          <svg width={width} height={height}>
-            <g transform={`translate(${MARGIN.left},${MARGIN.top})`}>
-              {/*
-               * The always-visible background track - see the DOMAIN IS
-               * ALWAYS fullRange comment above. This is a plain rect, not
-               * anything d3-brush draws; the brush's own `.selection`
-               * element (restyled above) sits on top of it once attached.
-               */}
-              <rect
-                width={innerWidth}
-                height={TRACK_HEIGHT}
-                rx={TRACK_HEIGHT / 2}
-                fill="rgba(255, 255, 255, 0.08)"
-              />
+    return (
+      // Self-contained `fixed bottom-*` floating chrome, same positioning
+      // pattern as ResetButton.tsx/ResetToast.tsx (both also self-position
+      // rather than taking layout coordinates as props - unlike
+      // SidebarPanelStack.tsx, nothing here depends on the page's own
+      // measured header layout). Centered rather than pinned to a corner
+      // (there's no natural corner for a horizontal track the way a round
+      // button has one), and given the SAME opaque "floating chrome" surface
+      // (bg-gray-900/90 + border-white/10 + backdrop-blur + shadow-lg)
+      // ResetButton/ResetToast use - this is a floating CONTROL, not header
+      // content, so it follows their visual language rather than the
+      // header's own fully-transparent "text over the starfield" treatment.
+      // z-40: same tier as ResetButton/ResetToast, above the canvas (z-0)
+      // and header (z-10), below the AddEntryForm modal (z-50).
+      //
+      // SIDEBAR-AWARE CENTERING: `left: sidebarWidth` (an inline style, not
+      // a Tailwind class, since `sidebarWidth` is a runtime number) replaces
+      // the flat `inset-x-0` this used to be - narrowing this flex
+      // container's own box down to exactly `[sidebarWidth, viewport right
+      // edge]` rather than the full viewport width. `justify-center` then
+      // centers the card WITHIN that narrowed box instead of the whole
+      // window, so the control visually centers on the REMAINING visible
+      // canvas the same way LinearTimeline.tsx's own content now starts
+      // past the sidebar (see its CANVAS ORIGIN SHIFT comment) - two
+      // different mechanisms (a shifted flex box here; a shifted SVG
+      // drawing origin there) converging on the same "center within what's
+      // actually visible" result. `sidebarWidth === 0` (no panel open)
+      // makes `left: 0`, equivalent to the old `inset-x-0` - full-width
+      // centering, unchanged.
+      <div
+        className="fixed bottom-6 right-0 z-40 flex justify-center px-6"
+        style={{ left: sidebarWidth }}
+      >
+        <div
+          ref={cardRef}
+          className="w-full max-w-xl rounded-2xl border border-white/10 bg-gray-900/90 px-4 py-3 shadow-lg backdrop-blur"
+        >
+          {/*
+           * WIDTH MEASUREMENT div - see the top-of-file comment for why this
+           * has to be a separate, unpadded element from the card above
+           * rather than measuring the padded card directly.
+           */}
+          <div ref={containerRef} className="w-full">
+            <svg width={width} height={height}>
+              <g transform={`translate(${MARGIN.left},${MARGIN.top})`}>
+                {/*
+                 * The always-visible background track - see the DOMAIN IS
+                 * ALWAYS fullRange comment above. This is a plain rect, not
+                 * anything d3-brush draws; the brush's own `.selection`
+                 * element (restyled above) sits on top of it once attached.
+                 */}
+                <rect
+                  width={innerWidth}
+                  height={TRACK_HEIGHT}
+                  rx={TRACK_HEIGHT / 2}
+                  fill="rgba(255, 255, 255, 0.08)"
+                />
 
-              {/*
-               * DENSITY TICKS - see the useMemo comment above. Rendered
-               * AFTER the plain background rect (so they show up against
-               * it) but BEFORE the brush's own group (so the brush's
-               * `.selection`/`.handle` elements still paint visibly on
-               * top of the ticks, not hidden underneath them).
-               * `pointer-events-none` so these never steal a drag gesture
-               * meant for the brush underneath/around them - they're a
-               * read-only visual reference only.
-               */}
-              <g className="pointer-events-none">
-                {densityTickX.map((x, index) => (
-                  <line
-                    key={index}
-                    x1={x}
-                    x2={x}
-                    y1={0}
-                    y2={TRACK_HEIGHT}
-                    stroke="rgba(255, 255, 255, 0.35)"
-                    strokeWidth={1.5}
-                  />
-                ))}
+                {/*
+                 * DENSITY TICKS - see the useMemo comment above. Rendered
+                 * AFTER the plain background rect (so they show up against
+                 * it) but BEFORE the brush's own group (so the brush's
+                 * `.selection`/`.handle` elements still paint visibly on
+                 * top of the ticks, not hidden underneath them).
+                 * `pointer-events-none` so these never steal a drag gesture
+                 * meant for the brush underneath/around them - they're a
+                 * read-only visual reference only.
+                 */}
+                <g className="pointer-events-none">
+                  {densityTickX.map((x, index) => (
+                    <line
+                      key={index}
+                      x1={x}
+                      x2={x}
+                      y1={0}
+                      y2={TRACK_HEIGHT}
+                      stroke="rgba(255, 255, 255, 0.35)"
+                      strokeWidth={1.5}
+                    />
+                  ))}
+                </g>
+
+                <g ref={brushGroupRef} />
               </g>
+            </svg>
+          </div>
 
-              <g ref={brushGroupRef} />
-            </g>
-          </svg>
-        </div>
-
-        <div className="mt-1 flex justify-between text-xs text-gray-400">
-          <span>{formatDate(selectedRange.start)}</span>
-          <span>{formatDate(selectedRange.end)}</span>
+          <div className="mt-1 flex justify-between text-xs text-gray-400">
+            <span>{formatDate(selectedRange.start)}</span>
+            <span>{formatDate(selectedRange.end)}</span>
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
+);
+
+export default TimeRangeSelector;
