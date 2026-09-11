@@ -82,5 +82,14 @@ export const DEFAULT_CATEGORIES: Category[] = [
     color: '#fb923c',
     domain: 'Movement',
   }, // orange
-  { id: 'CWalk', name: 'C-Walk', color: '#60a5fa', domain: 'Movement' }, // blue
+  { id: 'CWalk', 
+    name: 'C-Walk', 
+    color: '#60a5fa', 
+    domain: 'Movement' 
+  }, // blue
+  { id: 'PoleDance', 
+    name: 'Pole Dance', 
+    color: '#f87171', 
+    domain: 'Movement' 
+  }, // salmon
 ];
