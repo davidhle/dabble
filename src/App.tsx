@@ -198,7 +198,7 @@ function App() {
    *               └── Route path="/" (matches all routes starting with /)
    *                     └── Layout (navbar + outlet, receives onAddEntry)
    *                           ├── Route index (/) → Home
-   *                           ├── Route /chart → Timeline
+   *                           ├── Route /linear → Timeline
    *                           └── Route /about → About
    *
    * PASSING PROPS TO LAYOUT:
@@ -259,7 +259,7 @@ function App() {
              * Or use Outlet context in Layout to pass data.
              */}
             <Route index element={<Home />} />
-            <Route path="chart" element={<Timeline entries={entries} />} />
+            <Route path="linear" element={<Timeline entries={entries} />} />
             <Route path="spiral" element={<Spiral entries={entries} />} />
             <Route
               path="constellation"

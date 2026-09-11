@@ -134,7 +134,7 @@ export default function Layout({ onAddEntry }: LayoutProps) {
                   Home
                 </Link>
                 <Link
-                  to="/chart"
+                  to="/linear"
                   className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
                 >
                   Timeline
@@ -206,7 +206,7 @@ export default function Layout({ onAddEntry }: LayoutProps) {
          *
          * This renders the component for the current route:
          * - "/" renders Home
-         * - "/chart" renders Chart
+         * - "/linear" renders Timeline
          * - "/about" renders About
          *
          * The Layout wraps all routes, so the navbar persists
