@@ -214,6 +214,29 @@
     "endTimestamp": "2022-11-30T00:00:00.000Z"
   },
   {
+    "id": "e4bc5140-5a67-4e4b-986b-13a0fe0edd60",
+    "activityType": "house-dance",
+    "title": "First House Dance Class",
+    "description": "Joined Thuy & friends to a class Sharxilla was teaching. Don't remember what type of class but it was probably fundamentals or something like that",
+    "notes": "Looking back on it now, going to classes with other dance friends (in this context shuffle friends) was a way that made me feel at home and part of a community in Paris, contributed to my sense of belonging 😌",
+    "tags": [
+      "class"
+    ],
+    "mediaLinks": [
+      {
+        "type": "instagram",
+        "url": "https://www.instagram.com/s/aGlnaGxpZ2h0OjE3OTM1MTMwNDg5Mjk1MDE3?story_media_id=2937441139384398571&stkn=dWo0MnUzeTNmczQ="
+      }
+    ],
+    "location": "LAX Studio (Paris)",
+    "duration": null,
+    "mood": null,
+    "timestamp": "2022-09-28T16:00:00.000Z",
+    "dateDisplay": null,
+    "dateNeedsReview": false,
+    "endTimestamp": null
+  },
+  {
     "id": "f7ed0728-72d0-4855-9492-9cbbb4e65865",
     "activityType": "house-dance",
     "title": "First experience watching a dance battle in person",
@@ -321,6 +344,101 @@
     "duration": null,
     "mood": null,
     "timestamp": "2024-05-04T00:00:00.000Z",
+    "dateDisplay": null,
+    "dateNeedsReview": false,
+    "endTimestamp": null
+  },
+  {
+    "id": "c311c80b-c341-4e7b-9a71-02c9b02e01f2",
+    "activityType": "pole-dance",
+    "title": "First pole class (Absolute Beginner's)",
+    "description": "Took my first pole class -- the fact that it was called \"Introduction to the Pole Dance life..New members Absolute Beginner's\" and that a man was the instructor all contributed to me feeling comfortable enough to try it out. I think we did basic spins and climbs.",
+    "notes": "The start of a new dance practice after some time of feeling a bit disconnected with my \"main\" one (shuffling)\n\nThe videos I watched a while back of boulderers trying pole dance and pole dancers trying bouldering definitely influenced my decision to try this out. Great decision and added so much to my life in Berlin and appreciation and awareness of my body and its capabilities :)",
+    "tags": [],
+    "mediaLinks": [
+      {
+        "type": "youtube",
+        "url": "https://www.youtube.com/watch?v=yV9zAlk72PY"
+      },
+      {
+        "type": "youtube",
+        "url": "https://www.youtube.com/watch?v=eEm078s0Xws"
+      }
+    ],
+    "location": "Boogaloo Tanzstudio",
+    "duration": 60,
+    "mood": null,
+    "timestamp": "2025-05-30T12:20:00.000Z",
+    "dateDisplay": null,
+    "dateNeedsReview": false,
+    "endTimestamp": null
+  },
+  {
+    "id": "318e6fd9-14d8-468c-9c96-5d69614036e5",
+    "activityType": "pole-dance",
+    "title": "First handspring!!",
+    "description": "Class with Mary\n\nGot my first handspring(s) without needing a spot 🥹",
+    "notes": "was both in cup and twisted grip :D felt super nice that I could get this advanced trick 6 months into my pole practice. \n\nthe wrist strength I'd built from bouldering for sure helped get me there",
+    "tags": [
+      "tricks"
+    ],
+    "mediaLinks": [
+      {
+        "type": "instagram",
+        "url": "https://www.instagram.com/s/aGlnaGxpZ2h0OjE4MDQ1NzY2MjkyNjc3MDEx?story_media_id=3786577898644569321&stkn=d2E3OWdhOWhmajIz"
+      }
+    ],
+    "location": "motion*s GLEISDREIECK",
+    "duration": 60,
+    "mood": "Accomplished, Happy",
+    "timestamp": "2025-12-12T18:00:00.000Z",
+    "dateDisplay": null,
+    "dateNeedsReview": false,
+    "endTimestamp": null
+  },
+  {
+    "id": "0338e1bd-c395-43cf-8744-2fd574706600",
+    "activityType": "pole-dance",
+    "title": "First Flying Pole Class",
+    "description": "Lea encouraged me to try out her flying pole class since I was progressing well in her handstand handspring class so I tried it out :)\n\nPracticed entries, handsprings and getting used to the spinning in general",
+    "notes": "Loved it!! I feel like trying this out is inner child healing work kind of, since freshman year in high school I'd always been curious about the cirque program at school, especially aerial silks, but didn't have the courage to try it out. Really fulfilling :)",
+    "tags": [
+      "flying pole",
+      "aerial"
+    ],
+    "mediaLinks": [
+      {
+        "type": "instagram",
+        "url": "https://www.instagram.com/s/aGlnaGxpZ2h0OjE3OTA5NjM1MzUzNDQ5NjIw?story_media_id=3926076159700048544&stkn=MTQxMzg3dG9jd3Jscw=="
+      }
+    ],
+    "location": "IMA Berlin",
+    "duration": 90,
+    "mood": "Curious, Happy, Excited",
+    "timestamp": "2026-06-23T18:00:00.000Z",
+    "dateDisplay": null,
+    "dateNeedsReview": false,
+    "endTimestamp": null
+  },
+  {
+    "id": "cc4627de-f96f-4c46-90cb-ae9e935985f6",
+    "activityType": "pole-dance",
+    "title": "First Janeiro on spin",
+    "description": "I got my first Janeiro on spin pole :) was just for a couple of seconds, felt great though, didn't know what to transition to afterwards",
+    "notes": "",
+    "tags": [
+      "spin pole"
+    ],
+    "mediaLinks": [
+      {
+        "type": "instagram",
+        "url": "https://www.instagram.com/reel/DcmO7ISt6fU/?stkn=YWYyc3VvdGIxN2g="
+      }
+    ],
+    "location": "Orbit Studio",
+    "duration": null,
+    "mood": "Happy, Accomplished",
+    "timestamp": "2026-08-28T18:00:00.000Z",
     "dateDisplay": null,
     "dateNeedsReview": false,
     "endTimestamp": null

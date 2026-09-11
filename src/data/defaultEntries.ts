@@ -51,6 +51,7 @@ const CATEGORY_ID_BY_ACTIVITY_TYPE: Record<string, string> = {
   'house-dance': 'HouseDance',
   'c-walk': 'CWalk',
   'shuffle-dance': 'ShuffleDance',
+  'pole-dance': 'PoleDance'
 };
 
 /**
