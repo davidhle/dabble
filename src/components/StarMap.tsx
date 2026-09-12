@@ -247,8 +247,13 @@ const LABEL_CLEARANCE = 16;
  * it needs to read clearly against *every* star color, including the
  * LanguageLearning category's own gold (#facc15), so a warm gold
  * highlight would blend into that one category instead of standing out.
+ * A theme token (--star-highlight-color, see index.css), not a fixed hex
+ * value - white glows brightly against the dark theme's night sky but
+ * would nearly vanish against the light theme's cream canvas, so this
+ * flips to a dark ink color in light mode instead, preserving the same
+ * "reads clearly against every star color AND the canvas itself" goal.
  */
-const OPENED_HIGHLIGHT_COLOR = '#ffffff';
+const OPENED_HIGHLIGHT_COLOR = 'var(--star-highlight-color)';
 
 /**
  * Tiny deterministic string hash (djb2 variant) -> 32-bit seed.
@@ -681,10 +686,17 @@ export default function StarMap({
         className="cursor-grab bg-[var(--bg-color)] active:cursor-grabbing"
       >
         <defs>
-          {/* Subtle radial vignette so the sky feels deeper toward the edges. */}
+          {/*
+           * Subtle radial vignette so the sky/page feels deeper toward the
+           * edges - theme tokens (--starmap-vignette-start/-end, see
+           * index.css) rather than fixed hex stops, so this reads as a
+           * gentle deepening of the light theme's own cream tone too,
+           * instead of staying a night-sky navy gradient regardless of
+           * theme.
+           */}
           <radialGradient id="sky-vignette" cx="50%" cy="50%" r="75%">
-            <stop offset="0%" stopColor="#141a35" />
-            <stop offset="100%" stopColor="#05070f" />
+            <stop offset="0%" stopColor="var(--starmap-vignette-start)" />
+            <stop offset="100%" stopColor="var(--starmap-vignette-end)" />
           </radialGradient>
           {/*
            * Soft blur used behind opened stars' highlight ring, so it
@@ -748,7 +760,8 @@ export default function StarMap({
                   x={labelX}
                   y={labelY}
                   textAnchor="middle"
-                  className="pointer-events-none select-none fill-white/30 text-xs uppercase tracking-widest"
+                  fill="var(--viz-label-color)"
+                  className="pointer-events-none select-none text-xs uppercase tracking-widest"
                 >
                   {category.name}
                 </text>

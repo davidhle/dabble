@@ -425,9 +425,11 @@ const FILTERED_OUT_OPACITY = 0.15;
  * Neutral, bright highlight color for the "opened entry" ring/glow - same
  * color, same reasoning as StarMap.tsx's/LinearTimeline.tsx's own
  * OPENED_HIGHLIGHT_COLOR: deliberately not tied to any activityType
- * color, so it reads clearly against every entry color.
+ * color, so it reads clearly against every entry color. A theme token
+ * (--star-highlight-color), not a fixed hex value - see StarMap.tsx's own
+ * comment on its identical constant for why.
  */
-const OPENED_HIGHLIGHT_COLOR = '#ffffff';
+const OPENED_HIGHLIGHT_COLOR = 'var(--star-highlight-color)';
 
 interface SpiralParams {
   centerX: number;
@@ -1185,7 +1187,8 @@ export default function SpiralTimeline({
                   return (
                     <text
                       key={year}
-                      className="pointer-events-none select-none fill-white/40 text-[10px] uppercase tracking-widest"
+                      fill="var(--viz-label-color)"
+                      className="pointer-events-none select-none text-[10px] uppercase tracking-widest"
                     >
                       <textPath
                         href={`#${spiralPathId}`}
@@ -1210,7 +1213,8 @@ export default function SpiralTimeline({
                     dy={-6}
                     textAnchor="middle"
                     transform={`rotate(${angle}, ${x}, ${y})`}
-                    className="pointer-events-none select-none fill-white/40 text-[10px] uppercase tracking-widest"
+                    fill="var(--viz-label-color)"
+                    className="pointer-events-none select-none text-[10px] uppercase tracking-widest"
                   >
                     {year}
                   </text>

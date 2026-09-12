@@ -224,28 +224,41 @@ export default function Spiral({ entries }: SpiralProps) {
     // edges by adding margin-top to it as a sibling.
     <>
       {/*
-       * `w-[33vw]`, NOT `w-fit`: Constellation.tsx/Timeline.tsx use `w-fit`
-       * here because it happens to work for THEIR subtitles - `w-fit`
-       * shrinks this wrapper down to the widest child's own intrinsic
-       * (max-content) width, and FilterBar's own root already hard-codes
-       * `w-[33vw]` (see FilterBar.tsx's comment), so as long as no OTHER
-       * child wants to be wider than that, the wrapper ends up exactly
-       * 33vw wide for free. Spiral's subtitle is two full sentences
-       * (longer than either other page's single sentence) - long enough
-       * that its unwrapped one-line intrinsic width exceeds 33vw, which
-       * made THIS wrapper's `w-fit` computation pick the subtitle's own
-       * (wider) intrinsic width instead of FilterBar's 33vw, stretching
-       * the whole header out over the canvas and blocking clicks on
-       * points/arcs underneath it. Setting an explicit, fixed `w-[33vw]`
-       * here - the same literal value FilterBar.tsx/SidebarPanelStack.tsx
-       * already use (there's no extracted shared constant for it to
-       * import) - forces the subtitle <p> to actually WRAP within that
-       * width instead of contributing its full one-line width to a
-       * shrink-to-fit calculation, so the header, FilterBar, and (once a
-       * panel is open) the sidebar panel stack all stay a consistent,
-       * canvas-sparing 33vw regardless of subtitle length.
+       * A fixed width, NOT `w-fit`: Constellation.tsx/Timeline.tsx use
+       * `w-fit` here because it happens to work for THEIR subtitles -
+       * `w-fit` shrinks this wrapper down to the widest child's own
+       * intrinsic (max-content) width, and FilterBar's own root already
+       * has a fixed width matching the sidebar's (see FilterBar.tsx's
+       * `leftInset` prop comment), so as long as no OTHER child wants to
+       * be wider than that, the wrapper ends up that same width for free.
+       * Spiral's subtitle is two full sentences (longer than either other
+       * page's single sentence) - long enough that its unwrapped one-line
+       * intrinsic width exceeds FilterBar's own width, which made THIS
+       * wrapper's `w-fit` computation pick the subtitle's own (wider)
+       * intrinsic width instead, stretching the whole header out over the
+       * canvas and blocking clicks on points/arcs underneath it.
+       *
+       * `calc(33vw - headerLayout.left)`, not a flat `33vw`: matches
+       * FilterBar's own width exactly (see its `leftInset` prop comment
+       * for why a flat 33vw would overshoot SidebarPanelStack.tsx's actual
+       * right edge by `headerLayout.left` pixels) - using the same flat
+       * 33vw here instead would leave this wrapper wider than the
+       * FilterBar it contains, and since this wrapper is itself
+       * `relative z-10` (positioned above the canvas), that extra sliver
+       * would silently block clicks on whatever's underneath it, the
+       * exact bug this fixed width was introduced to avoid in the first
+       * place. This forces the subtitle <p> to wrap within the SAME real
+       * width FilterBar/SidebarPanelStack.tsx already share, so the
+       * header, FilterBar, and (once a panel is open) the sidebar panel
+       * stack all stay a consistent, canvas-sparing width regardless of
+       * subtitle length or how much horizontal page padding
+       * `headerLayout.left` happens to be.
        */}
-      <div ref={headerRef} className="relative z-10 w-[33vw] space-y-4">
+      <div
+        ref={headerRef}
+        className="relative z-10 space-y-4"
+        style={{ width: `calc(33vw - ${headerLayout.left}px)` }}
+      >
         <VizPageHeader
           title="Spiral"
           subtitle="Drag to pan, scroll to zoom, and click a point (or arc) to see the entry behind it. Time coils outward from the center - oldest at the middle, most recent at the rim."
@@ -259,6 +272,7 @@ export default function Spiral({ entries }: SpiralProps) {
           onToggleFilterCategory={handleToggleFilterCategory}
           onResetFilters={handleResetFilters}
           hasSelection={hasSelection}
+          leftInset={headerLayout.left}
         />
       </div>
 

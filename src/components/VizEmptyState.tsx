@@ -199,7 +199,7 @@ export default function VizEmptyState({
           }}
         >
           <div
-            className="pointer-events-auto max-w-sm rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-center text-sm text-indigo-300"
+            className="pointer-events-auto max-w-sm rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-center text-sm text-[var(--indigo-accent-text)]"
             role="status"
           >
             {message}
@@ -218,7 +218,7 @@ export default function VizEmptyState({
         }}
       >
         <div
-          className="pointer-events-auto rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-sm text-indigo-300"
+          className="pointer-events-auto rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-sm text-[var(--indigo-accent-text)]"
           style={{
             maxWidth: Math.max(
               0,
@@ -239,7 +239,7 @@ export default function VizEmptyState({
       style={{ top: topOffset, left: sidebarWidth, right: 0, bottom: 0 }}
     >
       <div
-        className="pointer-events-auto max-w-sm rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-center text-sm text-indigo-300"
+        className="pointer-events-auto max-w-sm rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-center text-sm text-[var(--indigo-accent-text)]"
         role="status"
       >
         No entries yet. Click the + button (top right) to add your first one,

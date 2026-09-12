@@ -51,18 +51,20 @@
  * in an otherwise dark-themed app (see index.css :root's THEME TOKENS
  * comment) - a leftover from before the "night sky" theme existed. It now
  * uses the same tokens/conventions as the rest of the app: the modal card
- * itself is --panel-bg-color-solid (same opaque dark surface
- * EntryPanel.tsx's expanded panels use), borders are --panel-border-color,
- * and every input/select/textarea gets an explicit `bg-white/5` - a
- * translucent white lift, the same convention FilterBar.tsx/ResetButton.tsx
- * already use for surfaces that need to read as distinct from their own
- * darker backing - so form fields stay clearly identifiable as fields
- * rather than blending into the modal behind them. Labels/body text use
- * the same gray-100/300/400/500 scale EntryPanel.tsx uses (near-white for
- * headings, dimmer grays for secondary/muted text); the indigo CTA buttons
- * (Next, Create, Add Entry) are unchanged, since indigo-600 already reads
- * clearly on a dark background - it's the primary-action color used
- * elsewhere in the app too (Layout.tsx's + button).
+ * itself is --panel-bg-color-solid (same opaque surface EntryPanel.tsx's
+ * expanded panels use), borders are --panel-border-color, and every
+ * input/select/textarea gets an explicit `bg-[var(--field-tint-1)]` - a
+ * translucent lift off the modal's own background, the same convention
+ * FilterBar.tsx/ResetButton.tsx already use for surfaces that need to read
+ * as distinct from their own backing - so form fields stay clearly
+ * identifiable as fields rather than blending into the modal behind them.
+ * Labels/body text use the same --text-color/--text-secondary-color/
+ * --text-muted-color scale EntryPanel.tsx uses (--text-color for headings,
+ * the dimmer two for secondary/muted text) - see index.css's THEME TOKENS
+ * comment for both themes' values; the indigo CTA buttons (Next, Create,
+ * Add Entry) are unchanged, since indigo-600 already reads clearly
+ * regardless of theme - it's the primary-action color used elsewhere in
+ * the app too (Layout.tsx's + button).
  */
 
 import { useState, useEffect } from 'react';
@@ -452,13 +454,13 @@ export default function AddEntryForm({
           {/* ─── Modal Header with Step Indicator ─── */}
           <div className="flex-shrink-0 border-b border-[var(--panel-border-color)] px-6 pt-5 pb-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-100">
+              <h2 className="text-lg font-semibold text-[var(--text-color)]">
                 {currentStep === 1 ? 'Activity Details' : 'Reflections & Media'}
               </h2>
               <button
                 type="button"
                 onClick={handleCancel}
-                className="text-gray-400 hover:text-gray-200"
+                className="text-[var(--text-muted-color)] hover:text-[var(--text-secondary-color)]"
                 aria-label="Close"
               >
                 <svg
@@ -492,20 +494,20 @@ export default function AddEntryForm({
                 <span
                   className={`text-xs ${
                     currentStep === 1
-                      ? 'font-medium text-gray-100'
-                      : 'text-gray-500'
+                      ? 'font-medium text-[var(--text-color)]'
+                      : 'text-[var(--text-muted-color)]'
                   }`}
                 >
                   Details
                 </span>
               </div>
-              <div className="h-px flex-1 bg-white/10" />
+              <div className="h-px flex-1 bg-[var(--field-tint-2)]" />
               <div className="flex items-center gap-2">
                 <div
                   className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
                     currentStep === 2
                       ? 'bg-indigo-600 text-white'
-                      : 'bg-white/10 text-gray-400'
+                      : 'bg-[var(--field-tint-2)] text-[var(--text-muted-color)]'
                   }`}
                 >
                   2
@@ -513,8 +515,8 @@ export default function AddEntryForm({
                 <span
                   className={`text-xs ${
                     currentStep === 2
-                      ? 'font-medium text-gray-100'
-                      : 'text-gray-500'
+                      ? 'font-medium text-[var(--text-color)]'
+                      : 'text-[var(--text-muted-color)]'
                   }`}
                 >
                   Reflections
@@ -563,7 +565,7 @@ export default function AddEntryForm({
                     <div>
                       <label
                         htmlFor="activityType"
-                        className="block text-sm font-medium text-gray-300"
+                        className="block text-sm font-medium text-[var(--text-secondary-color)]"
                       >
                         Activity Type <span className="text-red-400">*</span>
                       </label>
@@ -571,7 +573,7 @@ export default function AddEntryForm({
                         id="activityType"
                         value={activityType}
                         onChange={e => handleActivityTypeChange(e.target.value)}
-                        className="mt-1 block w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       >
                         {categories.map(category => (
                           <option key={category.id} value={category.id}>
@@ -603,7 +605,7 @@ export default function AddEntryForm({
                       <div className="rounded-md border border-indigo-400/30 bg-indigo-400/10 p-3">
                         <label
                           htmlFor="newCategoryName"
-                          className="block text-sm font-medium text-gray-300"
+                          className="block text-sm font-medium text-[var(--text-secondary-color)]"
                         >
                           New category name
                         </label>
@@ -611,7 +613,7 @@ export default function AddEntryForm({
                           {/* Color swatch preview - the color this category
                               will be assigned, shown before it's created. */}
                           <span
-                            className="h-6 w-6 flex-shrink-0 rounded-full border border-white/20"
+                            className="h-6 w-6 flex-shrink-0 rounded-full border border-[var(--field-border-strong)]"
                             style={{ backgroundColor: newCategoryColorPreview }}
                             aria-hidden="true"
                           />
@@ -631,14 +633,14 @@ export default function AddEntryForm({
                               }
                             }}
                             placeholder="e.g., Pottery, Skateboarding"
-                            className="block flex-1 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           />
                         </div>
                         <div className="mt-2 flex justify-end gap-2">
                           <button
                             type="button"
                             onClick={handleCancelAddCategory}
-                            className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-400 hover:bg-white/10"
+                            className="rounded-md px-3 py-1.5 text-sm font-medium text-[var(--text-muted-color)] hover:bg-[var(--field-tint-2)]"
                           >
                             Cancel
                           </button>
@@ -658,7 +660,7 @@ export default function AddEntryForm({
                     <div>
                       <label
                         htmlFor="title"
-                        className="block text-sm font-medium text-gray-300"
+                        className="block text-sm font-medium text-[var(--text-secondary-color)]"
                       >
                         Title <span className="text-red-400">*</span>
                       </label>
@@ -668,10 +670,10 @@ export default function AddEntryForm({
                         value={title}
                         onChange={e => setTitle(e.target.value)}
                         placeholder="Brief summary of your activity"
-                        className={`mt-1 block w-full rounded-md border bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:outline-none focus:ring-1 ${
+                        className={`mt-1 block w-full rounded-md border bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:outline-none focus:ring-1 ${
                           errors.title
                             ? 'border-red-500/60 focus:border-red-500 focus:ring-red-500'
-                            : 'border-white/10 focus:border-indigo-500 focus:ring-indigo-500'
+                            : 'border-[var(--panel-border-color)] focus:border-indigo-500 focus:ring-indigo-500'
                         }`}
                       />
                       {errors.title && (
@@ -683,7 +685,7 @@ export default function AddEntryForm({
 
                     {/* Tags */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-300">
+                      <label className="block text-sm font-medium text-[var(--text-secondary-color)]">
                         Tags
                       </label>
                       <div className="mt-1">
@@ -694,12 +696,12 @@ export default function AddEntryForm({
                             onChange={e => setTagInput(e.target.value)}
                             onKeyDown={handleTagInputKeyDown}
                             placeholder="Add tags (press Enter)"
-                            className="block flex-1 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           />
                           <button
                             type="button"
                             onClick={() => addTag(tagInput)}
-                            className="rounded-md bg-white/10 px-4 py-2 text-sm font-medium text-gray-200 hover:bg-white/20"
+                            className="rounded-md bg-[var(--field-tint-2)] px-4 py-2 text-sm font-medium text-[var(--text-secondary-color)] hover:bg-[var(--field-tint-3)]"
                           >
                             Add
                           </button>
@@ -732,7 +734,7 @@ export default function AddEntryForm({
 
                         {suggestedTags.length > 0 && (
                           <div className="mt-2">
-                            <p className="text-xs text-gray-500">
+                            <p className="text-xs text-[var(--text-muted-color)]">
                               Suggestions:
                             </p>
                             <div className="mt-1 flex flex-wrap gap-1">
@@ -744,7 +746,7 @@ export default function AddEntryForm({
                                     key={tag}
                                     type="button"
                                     onClick={() => addTag(tag)}
-                                    className="rounded-full border border-white/20 px-2 py-0.5 text-xs text-gray-400 hover:bg-white/10"
+                                    className="rounded-full border border-[var(--field-border-strong)] px-2 py-0.5 text-xs text-[var(--text-muted-color)] hover:bg-[var(--field-tint-2)]"
                                   >
                                     + {tag}
                                   </button>
@@ -759,7 +761,7 @@ export default function AddEntryForm({
                     <div>
                       <label
                         htmlFor="timestamp"
-                        className="block text-sm font-medium text-gray-300"
+                        className="block text-sm font-medium text-[var(--text-secondary-color)]"
                       >
                         Date
                       </label>
@@ -768,7 +770,7 @@ export default function AddEntryForm({
                         id="timestamp"
                         value={timestamp}
                         onChange={e => setTimestamp(e.target.value)}
-                        className="mt-1 block w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
 
                       {/*
@@ -783,11 +785,11 @@ export default function AddEntryForm({
                           id="isMultiDay"
                           checked={isMultiDay}
                           onChange={handleToggleMultiDay}
-                          className="h-4 w-4 rounded border-white/20 bg-white/5 text-indigo-500 focus:ring-indigo-500"
+                          className="h-4 w-4 rounded border-[var(--field-border-strong)] bg-[var(--field-tint-1)] text-indigo-500 focus:ring-indigo-500"
                         />
                         <label
                           htmlFor="isMultiDay"
-                          className="text-sm text-gray-400"
+                          className="text-sm text-[var(--text-muted-color)]"
                         >
                           This spans multiple days
                         </label>
@@ -797,7 +799,7 @@ export default function AddEntryForm({
                         <div className="mt-2">
                           <label
                             htmlFor="endDate"
-                            className="block text-sm font-medium text-gray-300"
+                            className="block text-sm font-medium text-[var(--text-secondary-color)]"
                           >
                             End date
                           </label>
@@ -806,10 +808,10 @@ export default function AddEntryForm({
                             id="endDate"
                             value={endDate}
                             onChange={e => setEndDate(e.target.value)}
-                            className={`mt-1 block w-full rounded-md border bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:outline-none focus:ring-1 ${
+                            className={`mt-1 block w-full rounded-md border bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:outline-none focus:ring-1 ${
                               errors.endDate || isEndDateBeforeStart
                                 ? 'border-red-500/60 focus:border-red-500 focus:ring-red-500'
-                                : 'border-white/10 focus:border-indigo-500 focus:ring-indigo-500'
+                                : 'border-[var(--panel-border-color)] focus:border-indigo-500 focus:ring-indigo-500'
                             }`}
                           />
                           {(errors.endDate || isEndDateBeforeStart) && (
@@ -827,7 +829,7 @@ export default function AddEntryForm({
                       <div>
                         <label
                           htmlFor="location"
-                          className="block text-sm font-medium text-gray-300"
+                          className="block text-sm font-medium text-[var(--text-secondary-color)]"
                         >
                           Location
                         </label>
@@ -837,13 +839,13 @@ export default function AddEntryForm({
                           value={location}
                           onChange={e => setLocation(e.target.value)}
                           placeholder="Where?"
-                          className="mt-1 block w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       </div>
                       <div>
                         <label
                           htmlFor="duration"
-                          className="block text-sm font-medium text-gray-300"
+                          className="block text-sm font-medium text-[var(--text-secondary-color)]"
                         >
                           Duration (min)
                         </label>
@@ -854,7 +856,7 @@ export default function AddEntryForm({
                           onChange={e => setDuration(e.target.value)}
                           placeholder="Minutes"
                           min="0"
-                          className="mt-1 block w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       </div>
                     </div>
@@ -863,7 +865,7 @@ export default function AddEntryForm({
                     <div>
                       <label
                         htmlFor="description"
-                        className="block text-sm font-medium text-gray-300"
+                        className="block text-sm font-medium text-[var(--text-secondary-color)]"
                       >
                         Description
                       </label>
@@ -873,7 +875,7 @@ export default function AddEntryForm({
                         onChange={e => setDescription(e.target.value)}
                         rows={3}
                         placeholder="What did you do? What happened?"
-                        className="mt-1 block w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:outline-none focus:ring-1 focus:border-indigo-500 focus:ring-indigo-500"
+                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:outline-none focus:ring-1 focus:border-indigo-500 focus:ring-indigo-500"
                       />
                     </div>
                   </div>
@@ -885,7 +887,7 @@ export default function AddEntryForm({
                   <div className="space-y-4">
                     {/* Mood Selector */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-300">
+                      <label className="block text-sm font-medium text-[var(--text-secondary-color)]">
                         Mood
                       </label>
                       <div className="mt-2 flex flex-wrap gap-2">
@@ -897,7 +899,7 @@ export default function AddEntryForm({
                             className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
                               moods.includes(mood)
                                 ? 'bg-indigo-600 text-white'
-                                : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                                : 'bg-[var(--field-tint-2)] text-[var(--text-secondary-color)] hover:bg-[var(--field-tint-3)]'
                             }`}
                           >
                             {mood}
@@ -910,7 +912,7 @@ export default function AddEntryForm({
                     <div>
                       <label
                         htmlFor="notes"
-                        className="block text-sm font-medium text-gray-300"
+                        className="block text-sm font-medium text-[var(--text-secondary-color)]"
                       >
                         Notes
                       </label>
@@ -920,16 +922,16 @@ export default function AddEntryForm({
                         onChange={e => setNotes(e.target.value)}
                         rows={3}
                         placeholder="What did you learn? How do you feel about it?"
-                        className="mt-1 block w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
                     </div>
 
                     {/* Media Links (YouTube/Vimeo URLs) */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-300">
+                      <label className="block text-sm font-medium text-[var(--text-secondary-color)]">
                         Media Links
                       </label>
-                      <p className="mt-0.5 text-xs text-gray-500">
+                      <p className="mt-0.5 text-xs text-[var(--text-muted-color)]">
                         Add a link - YouTube, Vimeo, Instagram, etc.
                       </p>
                       <div className="mt-1 flex gap-2">
@@ -938,13 +940,13 @@ export default function AddEntryForm({
                           value={mediaUrl}
                           onChange={e => setMediaUrl(e.target.value)}
                           placeholder="https://youtube.com/watch?v=..."
-                          className="block flex-1 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-gray-100 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                         <button
                           type="button"
                           onClick={addMediaLink}
                           disabled={!mediaUrl.trim()}
-                          className="rounded-md bg-white/10 px-4 py-2 text-sm font-medium text-gray-200 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="rounded-md bg-[var(--field-tint-2)] px-4 py-2 text-sm font-medium text-[var(--text-secondary-color)] hover:bg-[var(--field-tint-3)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           Add
                         </button>
@@ -956,9 +958,9 @@ export default function AddEntryForm({
                           {mediaLinks.map((media, index) => (
                             <div
                               key={index}
-                              className="flex items-center justify-between rounded-md bg-white/5 px-3 py-2"
+                              className="flex items-center justify-between rounded-md bg-[var(--field-tint-1)] px-3 py-2"
                             >
-                              <span className="truncate text-sm text-gray-300">
+                              <span className="truncate text-sm text-[var(--text-secondary-color)]">
                                 {media.url}
                               </span>
                               <button
@@ -990,13 +992,13 @@ export default function AddEntryForm({
                      * - Handle upload progress and errors
                      */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-300">
+                      <label className="block text-sm font-medium text-[var(--text-secondary-color)]">
                         Photos
                       </label>
-                      <div className="mt-1 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-white/20 bg-white/5 px-6 py-8">
+                      <div className="mt-1 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-[var(--field-border-strong)] bg-[var(--field-tint-1)] px-6 py-8">
                         {/* Greyed-out camera/image icon */}
                         <svg
-                          className="h-10 w-10 text-gray-600"
+                          className="h-10 w-10 text-[var(--text-muted-color)]"
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
@@ -1014,7 +1016,7 @@ export default function AddEntryForm({
                             d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"
                           />
                         </svg>
-                        <p className="mt-2 text-sm text-gray-400">
+                        <p className="mt-2 text-sm text-[var(--text-muted-color)]">
                           Photo upload coming soon
                         </p>
                       </div>
@@ -1033,7 +1035,7 @@ export default function AddEntryForm({
                     <button
                       type="button"
                       onClick={handleCancel}
-                      className="rounded-md border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 hover:bg-white/5"
+                      className="rounded-md border border-[var(--panel-border-color)] px-4 py-2 text-sm font-medium text-[var(--text-secondary-color)] hover:bg-[var(--field-tint-1)]"
                     >
                       Cancel
                     </button>
@@ -1050,7 +1052,7 @@ export default function AddEntryForm({
                       className={`rounded-md px-4 py-2 text-sm font-medium ${
                         canProceedToStep2
                           ? 'bg-indigo-600 text-white hover:bg-indigo-700'
-                          : 'cursor-not-allowed bg-white/10 text-gray-500'
+                          : 'cursor-not-allowed bg-[var(--field-tint-2)] text-[var(--text-muted-color)]'
                       }`}
                     >
                       Next
@@ -1062,7 +1064,7 @@ export default function AddEntryForm({
                     <button
                       type="button"
                       onClick={handleBack}
-                      className="rounded-md border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 hover:bg-white/5"
+                      className="rounded-md border border-[var(--panel-border-color)] px-4 py-2 text-sm font-medium text-[var(--text-secondary-color)] hover:bg-[var(--field-tint-1)]"
                     >
                       Back
                     </button>

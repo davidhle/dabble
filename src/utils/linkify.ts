@@ -29,7 +29,8 @@ const URL_PATTERN = /https?:\/\/[^\s]+/g;
  * produces - can reuse the exact same visual language instead of a second,
  * possibly-drifting copy of this class string.
  */
-export const LINK_CLASSNAME = 'text-indigo-400 underline hover:text-indigo-300';
+export const LINK_CLASSNAME =
+  'text-[var(--indigo-accent-text)] underline hover:opacity-80';
 
 /**
  * Splits `text` on http(s) URLs and returns an array of React nodes:

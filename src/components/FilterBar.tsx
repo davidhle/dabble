@@ -61,6 +61,28 @@ interface FilterBarProps {
   onResetFilters: () => void;
   /** Whether the sidebar has at least one panel open - see the header comment above. */
   hasSelection: boolean;
+  /**
+   * The calling page's own measured `headerLayout.left` - this component's
+   * own horizontal offset from the viewport's left edge, since it renders
+   * in normal document flow (inside `main`'s own padding/centering)
+   * instead of being pinned to the viewport like SidebarPanelStack.tsx.
+   *
+   * WHY THIS IS NEEDED: SidebarPanelStack.tsx is `fixed left-0` with a
+   * `w-[33vw]` box, so its right edge always lands at exactly 33vw from
+   * the VIEWPORT's left edge, regardless of `left` (its `paddingLeft: left`
+   * only pushes its CONTENT in from that box's left side, without moving
+   * the box's own right edge). This component, by contrast, sits at
+   * `x = leftInset` in normal flow - so a flat `w-[33vw]` here would end at
+   * `leftInset + 33vw`, overshooting the sidebar's own right edge by
+   * exactly `leftInset` pixels (visibly, category pills/the sort toggle
+   * rendering wider than the sidebar and spilling out over the canvas).
+   * Subtracting `leftInset` from the width here instead lands this
+   * component's own right edge at the same `33vw` viewport-relative
+   * position the sidebar's content already uses, so the two match exactly
+   * regardless of viewport width or how much horizontal page padding
+   * `leftInset` happens to be.
+   */
+  leftInset: number;
 }
 
 export default function FilterBar({
@@ -71,16 +93,19 @@ export default function FilterBar({
   onToggleFilterCategory,
   onResetFilters,
   hasSelection,
+  leftInset,
 }: FilterBarProps) {
   return (
-    // w-[33vw]: a FIXED width - one third of the viewport - rather than
-    // matching the instructional subtitle text's rendered width (the
-    // previous behavior). Applied to this component's own root, which is
-    // enough to make both rows below (the category buttons and the sort
-    // toggle) match it too, since neither constrains its own width. The
-    // sidebar panel stack in Constellation.tsx uses this same `w-[33vw]`
-    // class, so all three stay a consistent width with each other.
-    <div className="flex w-[33vw] flex-col gap-3">
+    // width: an inline style (not a `w-[33vw]` class) so it can subtract
+    // `leftInset` - see the prop's own comment above for why a flat 33vw
+    // doesn't actually line up with SidebarPanelStack.tsx's own right
+    // edge. Applied to this component's own root, which is enough to make
+    // both rows below (the category buttons and the sort toggle) match it
+    // too, since neither constrains its own width.
+    <div
+      className="flex flex-col gap-3"
+      style={{ width: `calc(33vw - ${leftInset}px)` }}
+    >
       {/*
        * Category filter toggles - see the "CATEGORY FILTER" comment in
        * Constellation.tsx. Purely visual (dims stars in StarMap) and
@@ -98,17 +123,26 @@ export default function FilterBar({
               onClick={() => onToggleFilterCategory(category.id)}
               aria-pressed={isActive}
               className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                isActive ? 'text-gray-900' : 'text-gray-200'
+                // text-gray-900 (active) is deliberately unchanged across
+                // themes - it's dark text against category.color itself
+                // (a data-identity color, not a theme color), so it needs
+                // to stay dark regardless of light/dark mode. The inactive
+                // case now uses the themed primary text color instead of a
+                // fixed text-gray-200, which would go near-invisible
+                // against the light theme's own light background tint.
+                isActive ? 'text-gray-900' : 'text-[var(--text-color)]'
               }`}
               style={{
                 // Inactive buttons still get a subtle background of their
                 // own (rather than fully transparent) - see the
                 // "TRANSPARENT CONTAINER, CONTRASTED CONTENT" comment
                 // above: this button needs to read clearly with nothing
-                // opaque behind it but the starfield.
+                // opaque behind it but the starfield. Themed (was a fixed
+                // white tint) so it stays a subtle LIFT off the canvas in
+                // either theme, not a bright wash in light mode.
                 backgroundColor: isActive
                   ? category.color
-                  : 'rgba(255, 255, 255, 0.08)',
+                  : 'var(--field-tint-1)',
                 borderColor: category.color,
               }}
             >
@@ -119,7 +153,7 @@ export default function FilterBar({
         <button
           type="button"
           onClick={onResetFilters}
-          className="rounded-full border border-white/15 bg-white/[0.08] px-2.5 py-1 text-xs font-medium text-gray-200 hover:text-white hover:underline"
+          className="rounded-full border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-2.5 py-1 text-xs font-medium text-[var(--text-color)] hover:underline"
         >
           Show All
         </button>
@@ -132,8 +166,13 @@ export default function FilterBar({
         // (not just disabled) while the sidebar is empty, since there's
         // nothing to sort yet. Rendered below the category filters (and
         // above the sidebar panel stack, per Constellation.tsx's layout)
-        // rather than above them.
-        <div className="flex flex-shrink-0 gap-1 rounded-lg bg-white/5 p-1">
+        // rather than above them. bg-[var(--panel-bg-color-solid)]: the
+        // unselected/track background matches EntryPanel.tsx's expanded
+        // (and now minimized - see its own comment) panel background
+        // exactly, rather than a separate --field-tint-1 lift, so this
+        // toggle reads as the same opaque surface as the sidebar panels
+        // sitting directly below it instead of a visibly different shade.
+        <div className="flex flex-shrink-0 gap-1 rounded-lg bg-[var(--panel-bg-color-solid)] p-1">
           {(['date', 'category'] as const).map(mode => (
             <button
               key={mode}
@@ -143,7 +182,7 @@ export default function FilterBar({
               className={`flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
                 sortMode === mode
                   ? 'bg-indigo-500 text-white'
-                  : 'text-gray-300 hover:text-gray-100'
+                  : 'text-[var(--text-muted-color)] hover:text-[var(--text-color)]'
               }`}
             >
               {mode === 'date' ? 'By Date' : 'By Category'}

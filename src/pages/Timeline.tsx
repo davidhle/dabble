@@ -275,6 +275,7 @@ export default function Timeline({ entries }: TimelineProps) {
           onToggleFilterCategory={handleToggleFilterCategory}
           onResetFilters={handleResetFilters}
           hasSelection={hasSelection}
+          leftInset={headerLayout.left}
         />
       </div>
 

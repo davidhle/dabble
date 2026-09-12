@@ -214,7 +214,7 @@ export default function Home() {
         </div>
       )}
 
-      <div className="mt-8 rounded-md border border-white/10 bg-white/5 p-4">
+      <div className="mt-8 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] p-4">
         <h2 className="text-lg font-semibold text-[var(--text-color)]">
           Backup &amp; Restore
         </h2>

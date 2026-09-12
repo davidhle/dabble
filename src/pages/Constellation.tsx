@@ -59,15 +59,22 @@
  *     edge, instead of overlapping or misaligning with it - see
  *     `headerLayout` below.
  * FilterBar's own two rows (category filters, sort toggle) and
- * SidebarPanelStack all share the SAME fixed `33vw` width (one third of
- * the viewport) - previously this was measured off the instructional
- * subtitle `<p>`'s own rendered width instead, so all three matched it
- * exactly; that matching has been intentionally replaced with a flat
- * viewport-relative proportion (see FilterBar.tsx and
- * SidebarPanelStack.tsx), independent of the subtitle's width.
- * `headerLayout` still only measures `top`/`left` (position, not size) -
- * see below - to keep the sidebar's *left edge* aligned with the header,
- * which is unrelated to this width change.
+ * SidebarPanelStack render the SAME effective width on screen - one third
+ * of the viewport, minus this header's own horizontal offset from the
+ * viewport's left edge (`headerLayout.left`, passed to FilterBar as its
+ * `leftInset` prop). A flat `33vw` on both used to be enough BY ITSELF
+ * (previously this was measured off the instructional subtitle `<p>`'s own
+ * rendered width, then intentionally replaced with a flat viewport-relative
+ * proportion instead) - but SidebarPanelStack.tsx is `fixed left-0` (so its
+ * `33vw` box is anchored to the VIEWPORT's left edge), while FilterBar
+ * renders in this normal-flow header instead, offset from the viewport by
+ * `headerLayout.left`. A flat `33vw` on FilterBar therefore overshot
+ * SidebarPanelStack's own right edge by exactly `headerLayout.left` pixels
+ * - see FilterBar.tsx's `leftInset` prop comment for the full math. So
+ * `headerLayout` measuring `left` (not just `top`) now matters for TWO
+ * things: keeping the sidebar's own left edge aligned with the header (as
+ * before), and letting FilterBar subtract that same offset from its width
+ * so its right edge lands exactly where the sidebar's does.
  *
  * ──────────────────────────────────────────────────────────────────────
  * HEADER STACKING: FLOW LAYOUT, NOT MANUAL OFFSETS
@@ -290,10 +297,10 @@ export default function Constellation({ entries }: ConstellationProps) {
   // Where the header stack (title/subtitle + FilterBar) actually sits in
   // the viewport, so SidebarPanelStack below can start just past its
   // bottom edge and share its left edge, instead of overlapping or
-  // misaligning with it. This is position only, NOT size/width - see the
+  // misaligning with it. `left` ALSO now feeds FilterBar's own `leftInset`
+  // prop, so its width can subtract this same offset - see the
   // "FULL-BLEED CANVAS + FLOATING OVERLAY SIDEBAR" comment at the top of
-  // this file for why width is now a flat 33vw instead of being derived
-  // from anything measured here.
+  // this file for the full width-matching reasoning.
   //
   // Neither top nor left can be a hardcoded guess:
   //   - top: the navbar's height lives in Layout.tsx (not this file), and
@@ -365,21 +372,23 @@ export default function Constellation({ entries }: ConstellationProps) {
        *
        * w-fit: without this, a plain block div stretches to its parent's
        * full width (`main`'s max-w-7xl content box) by default, even
-       * though its actual content - the title, subtitle, and the
-       * `w-[33vw]` FilterBar - is narrower than that. Since this div sits
-       * above StarMap's starfield (z-10, transparent, no background of
-       * its own - see "TRANSPARENT CONTAINER, CONTRASTED CONTENT" above),
-       * that extra empty box-model width to the right of the visible
-       * text/buttons would still catch pointer events, silently blocking
-       * clicks on any star that happens to render underneath it. `w-fit`
-       * shrinks the div's own box down to its widest child (in practice,
-       * FilterBar's `w-[33vw]`) instead, so there's no invisible
-       * click-blocking area left over - only the CONTAINER's width
-       * behavior changes here; the children below still stack and
-       * left-align exactly as before via `space-y-4`, and this has no
-       * effect on the sidebar panel stack, sort toggle, or their own
-       * independent `w-[33vw]` width-matching (see the top-of-file
-       * layout comment) - none of that is sized off this wrapper.
+       * though its actual content - the title, subtitle, and FilterBar's
+       * own (narrower-than-full-width) row - is narrower than that. Since
+       * this div sits above StarMap's starfield (z-10, transparent, no
+       * background of its own - see "TRANSPARENT CONTAINER, CONTRASTED
+       * CONTENT" above), that extra empty box-model width to the right of
+       * the visible text/buttons would still catch pointer events,
+       * silently blocking clicks on any star that happens to render
+       * underneath it. `w-fit` shrinks the div's own box down to its
+       * widest child (in practice, FilterBar's own row, unless a page's
+       * subtitle happens to render wider - see Spiral.tsx for that case)
+       * instead, so there's no invisible click-blocking area left over -
+       * only the CONTAINER's width behavior changes here; the children
+       * below still stack and left-align exactly as before via
+       * `space-y-4`, and this has no effect on the sidebar panel stack,
+       * sort toggle, or their own independent width-matching (see the
+       * top-of-file layout comment) - none of that is sized off this
+       * wrapper.
        */}
       <div ref={headerRef} className="relative z-10 w-fit space-y-4">
         <VizPageHeader
@@ -395,6 +404,7 @@ export default function Constellation({ entries }: ConstellationProps) {
           onToggleFilterCategory={handleToggleFilterCategory}
           onResetFilters={handleResetFilters}
           hasSelection={hasSelection}
+          leftInset={headerLayout.left}
         />
       </div>
 

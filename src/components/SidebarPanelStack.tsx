@@ -76,7 +76,7 @@ const SidebarPanelStack = forwardRef<HTMLDivElement, SidebarPanelStackProps>(
         {sortMode === 'date' ? (
           <>
             {/* Makes the (already-default) ordering explicit rather than silent. */}
-            <div className="flex flex-shrink-0 items-center gap-1.5 px-1 text-xs text-gray-500">
+            <div className="flex flex-shrink-0 items-center gap-1.5 px-1 text-xs text-[var(--text-muted-color)]">
               <svg
                 className="h-3.5 w-3.5 flex-shrink-0"
                 fill="none"

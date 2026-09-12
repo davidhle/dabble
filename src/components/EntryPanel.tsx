@@ -16,16 +16,17 @@
  *     was in, so there's one close handler, not one per mode.
  *
  * THEMING: the sidebar itself sits on --bg-color (same token as StarMap's
- * canvas - see index.css :root), so both modes use a lightened overlay of
- * that same base color to stay visually separable from the page and from
- * other stacked panels without breaking the cohesive dark theme - but not
- * the SAME overlay: the minimized row keeps the regular --panel-bg-color
- * (its one line of text needs little help standing out over the
- * starfield), while the EXPANDED panel - a full block of title, tags,
- * description and notes - uses the much more opaque --panel-bg-color-solid
- * instead, so that text stays legible over StarMap's busy starfield
- * showing through underneath. Both tokens move together if a light mode
- * is added later.
+ * canvas - see index.css :root), so both modes use an overlay of that same
+ * base color to stay visually separable from the page and from other
+ * stacked panels without breaking the cohesive theme. Both modes now use
+ * the SAME --panel-bg-color-solid surface - the minimized row used to keep
+ * the more translucent --panel-bg-color instead (its one line of text
+ * "needs little help standing out over the starfield"), but that let
+ * StarMap's stars show through a minimized row clearly enough to hurt
+ * legibility, especially once a light theme's brighter canvas made the
+ * translucency more noticeable. Matching the expanded panel's fully opaque
+ * surface keeps every row - minimized or expanded - equally legible over
+ * whatever's rendering underneath it, in either theme.
  *
  * The left accent bar's color (present in both modes) comes from
  * utils/colors.ts - the same mapping StarMap.tsx uses to tint this
@@ -86,7 +87,7 @@ function CloseButton({
     <button
       type="button"
       onClick={onClick}
-      className="ml-2 flex-shrink-0 text-gray-500 hover:text-gray-300"
+      className="ml-2 flex-shrink-0 text-[var(--text-muted-color)] hover:text-[var(--text-secondary-color)]"
       aria-label={label}
     >
       <svg
@@ -145,14 +146,14 @@ export default function EntryPanel({
         onKeyDown={event => {
           if (event.key === 'Enter' || event.key === ' ') onExpand();
         }}
-        className="flex w-full flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border bg-[var(--panel-bg-color)] px-4 py-2.5 text-sm shadow-sm"
+        className="flex w-full flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border bg-[var(--panel-bg-color-solid)] px-4 py-2.5 text-sm shadow-sm"
         style={panelStyle}
       >
-        <span className="flex-shrink-0 text-gray-400">
+        <span className="flex-shrink-0 text-[var(--text-muted-color)]">
           {displayActivityType}
         </span>
-        <span className="text-gray-600">&middot;</span>
-        <span className="min-w-0 flex-1 truncate text-gray-100">
+        <span className="text-[var(--text-muted-color)]">&middot;</span>
+        <span className="min-w-0 flex-1 truncate text-[var(--text-color)]">
           {entry.title}
         </span>
         <CloseButton
@@ -173,12 +174,13 @@ export default function EntryPanel({
 
   return (
     <div
-      // bg-[var(--panel-bg-color-solid)]: unlike the minimized row above
-      // (still --panel-bg-color), this expanded panel is a full block of
-      // text sitting directly over StarMap's starfield - see the THEMING
-      // comment at the top of this file, and --panel-bg-color-solid's own
-      // comment in index.css for the ~92% opacity value and why it's
-      // deliberately short of fully opaque.
+      // bg-[var(--panel-bg-color-solid)]: same opaque surface the
+      // minimized row above now also uses (see the THEMING comment at the
+      // top of this file) - this expanded panel is a full block of text
+      // sitting directly over StarMap's starfield, so legibility matters
+      // even more here. See --panel-bg-color-solid's own comment in
+      // index.css for the ~92% opacity value and why it's deliberately
+      // short of fully opaque.
       className="w-full flex-shrink-0 rounded-lg border bg-[var(--panel-bg-color-solid)] shadow-sm"
       style={panelStyle}
     >
@@ -188,10 +190,10 @@ export default function EntryPanel({
         style={{ borderColor: 'var(--panel-border-color)' }}
       >
         <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold text-gray-100">
+          <h2 className="truncate text-base font-semibold text-[var(--text-color)]">
             {entry.title}
           </h2>
-          <p className="mt-1 text-sm text-gray-400">
+          <p className="mt-1 text-sm text-[var(--text-muted-color)]">
             {displayActivityType} &middot; {formattedDate}
           </p>
         </div>
@@ -202,14 +204,14 @@ export default function EntryPanel({
       <div className="space-y-3 px-4 py-3">
         {entry.tags.length > 0 && (
           <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
               Tags
             </p>
             <div className="mt-1.5 flex flex-wrap gap-2">
               {entry.tags.map(tag => (
                 <span
                   key={tag}
-                  className="inline-flex items-center rounded-full bg-indigo-400/20 px-3 py-1 text-sm font-medium text-indigo-300"
+                  className="inline-flex items-center rounded-full bg-indigo-400/20 px-3 py-1 text-sm font-medium text-[var(--indigo-accent-text)]"
                 >
                   {tag}
                 </span>
@@ -233,14 +235,14 @@ export default function EntryPanel({
          */}
         {entry.mood && entry.mood.length > 0 && (
           <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
               Mood
             </p>
             <div className="mt-1.5 flex flex-wrap gap-2">
               {entry.mood.map(mood => (
                 <span
                   key={mood}
-                  className="inline-flex items-center rounded-full bg-teal-400/20 px-3 py-1 text-sm font-medium text-teal-300"
+                  className="inline-flex items-center rounded-full bg-teal-400/20 px-3 py-1 text-sm font-medium text-[var(--teal-accent-text)]"
                 >
                   {mood}
                 </span>
@@ -250,10 +252,10 @@ export default function EntryPanel({
         )}
 
         <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+          <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
             Description
           </p>
-          <p className="mt-1.5 whitespace-pre-wrap text-sm text-gray-300">
+          <p className="mt-1.5 whitespace-pre-wrap text-sm text-[var(--text-secondary-color)]">
             {entry.description
               ? linkify(entry.description)
               : 'No description for this entry.'}
@@ -261,10 +263,10 @@ export default function EntryPanel({
         </div>
 
         <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+          <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
             Notes
           </p>
-          <p className="mt-1.5 whitespace-pre-wrap text-sm text-gray-300">
+          <p className="mt-1.5 whitespace-pre-wrap text-sm text-[var(--text-secondary-color)]">
             {entry.notes ? linkify(entry.notes) : 'No notes for this entry.'}
           </p>
         </div>
@@ -284,7 +286,7 @@ export default function EntryPanel({
          */}
         {entry.mediaLinks.length > 0 && (
           <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
               Media Links
             </p>
             <div className="mt-1.5 flex flex-col gap-1">

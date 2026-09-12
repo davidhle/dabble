@@ -227,11 +227,15 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
       const selection = d3.select(group);
       selection.call(brush);
 
-      // Restyle the brush's auto-generated elements for the dark theme -
-      // d3-brush gives `.selection`/`.handle` some default (light-mode)
-      // inline presentation attributes of its own; overriding them here,
-      // right after `.call(brush)`, is the same "restyle d3's own output"
+      // Restyle the brush's auto-generated elements - d3-brush gives
+      // `.selection`/`.handle` some default (light-mode-only) inline
+      // presentation attributes of its own; overriding them here, right
+      // after `.call(brush)`, is the same "restyle d3's own output"
       // pattern LinearTimeline.tsx's AXIS EFFECT uses for its tick text.
+      // Fixed indigo values, deliberately NOT theme tokens: like a
+      // category's own color, indigo here is a brand accent that supplies
+      // its own contrast against either theme's background, the same
+      // reasoning the indigo CTA buttons elsewhere in the app follow.
       selection
         .select('.selection')
         .attr('fill', 'rgba(99, 102, 241, 0.35)') // indigo-500 tint
@@ -281,10 +285,11 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
       // measured header layout). Centered rather than pinned to a corner
       // (there's no natural corner for a horizontal track the way a round
       // button has one), and given the SAME opaque "floating chrome" surface
-      // (bg-gray-900/90 + border-white/10 + backdrop-blur + shadow-lg)
-      // ResetButton/ResetToast use - this is a floating CONTROL, not header
-      // content, so it follows their visual language rather than the
-      // header's own fully-transparent "text over the starfield" treatment.
+      // (--panel-bg-color-solid + --panel-border-color + backdrop-blur +
+      // shadow-lg) ResetButton/ResetToast use - this is a floating
+      // CONTROL, not header content, so it follows their visual language
+      // rather than the header's own fully-transparent "text over the
+      // starfield" treatment.
       // z-40: same tier as ResetButton/ResetToast, above the canvas (z-0)
       // and header (z-10), below the AddEntryForm modal (z-50).
       //
@@ -308,7 +313,7 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
       >
         <div
           ref={cardRef}
-          className="w-full max-w-xl rounded-2xl border border-white/10 bg-gray-900/90 px-4 py-3 shadow-lg backdrop-blur"
+          className="w-full max-w-xl rounded-2xl border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] px-4 py-3 shadow-lg backdrop-blur"
         >
           {/*
            * WIDTH MEASUREMENT div - see the top-of-file comment for why this
@@ -328,7 +333,7 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
                   width={innerWidth}
                   height={TRACK_HEIGHT}
                   rx={TRACK_HEIGHT / 2}
-                  fill="rgba(255, 255, 255, 0.08)"
+                  fill="var(--field-tint-1)"
                 />
 
                 {/*
@@ -349,7 +354,8 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
                       x2={x}
                       y1={0}
                       y2={TRACK_HEIGHT}
-                      stroke="rgba(255, 255, 255, 0.35)"
+                      stroke="var(--text-muted-color)"
+                      strokeOpacity={0.6}
                       strokeWidth={1.5}
                     />
                   ))}
@@ -360,7 +366,7 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
             </svg>
           </div>
 
-          <div className="mt-1 flex justify-between text-xs text-gray-400">
+          <div className="mt-1 flex justify-between text-xs text-[var(--text-muted-color)]">
             <span>{formatDate(selectedRange.start)}</span>
             <span>{formatDate(selectedRange.end)}</span>
           </div>

@@ -36,6 +36,7 @@
 import { useState } from 'react';
 import { Link, Outlet } from 'react-router-dom';
 import AddEntryForm from './AddEntryForm';
+import ThemeToggle from './ThemeToggle';
 import { Entry } from '../types/Entry';
 
 /** Props interface for Layout component */
@@ -127,33 +128,42 @@ export default function Layout({ onAddEntry }: LayoutProps) {
                 </span>
               </div>
               <div className="ml-6 flex space-x-8">
+                {/*
+                 * text-[var(--text-muted-color)]/hover:text-[var(--text-color)]:
+                 * these used to be fixed text-gray-400/hover:text-gray-200 -
+                 * tuned for the dark theme only, and effectively invisible
+                 * (near-white on near-white) once --bg-color switches to the
+                 * light theme's cream - see index.css's THEME TOKENS
+                 * comment. hover:border-[var(--panel-border-color)]
+                 * replaces hover:border-gray-500 for the same reason.
+                 */}
                 <Link
                   to="/"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
                   Home
                 </Link>
                 <Link
                   to="/linear"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
                   Timeline
                 </Link>
                 <Link
                   to="/spiral"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
                   Spiral
                 </Link>
                 <Link
                   to="/constellation"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
                   Constellation
                 </Link>
                 <Link
                   to="/about"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
                   About
                 </Link>
@@ -233,6 +243,14 @@ export default function Layout({ onAddEntry }: LayoutProps) {
         onClose={handleCloseModal}
         onSubmit={handleAddEntry}
       />
+
+      {/*
+       * Rendered here (not per-page like ResetButton) so the toggle is
+       * available on every page, including Home/About - see
+       * ThemeToggle.tsx's own header comment for its positioning relative
+       * to ResetButton's bottom-right corner.
+       */}
+      <ThemeToggle />
     </div>
   );
 }

@@ -8,43 +8,129 @@
   font-weight: 400;
 
   /*
-   * THEME TOKENS - shared dark ("night sky") theme
-   * ────────────────────────────────────────────────────────────
+   * ════════════════════════════════════════════════════════════════════
+   * THEME TOKENS - DARK ("night sky") + LIGHT ("sketchbook paper")
+   * ════════════════════════════════════════════════════════════════════
    * Originally defined for just the Constellation view (StarMap.tsx's
    * canvas background, Constellation.tsx's sidebar, EntryPanel.tsx's entry
    * cards), now consumed via var(--token-name) the same way by the rest of
    * the app's shell and pages too - Layout.tsx's navbar AND outer page
-   * shell, Home.tsx, Chart.tsx (and LinearTimeline.tsx), About.tsx - instead of
-   * each hardcoding its own (previously light-mode) colors. That's prep
-   * for a future dark/light mode toggle: to add one, redefine these under
-   * e.g. a `[data-theme="light"]` selector (or a `prefers-color-scheme`
-   * media query) and every consumer re-themes automatically - no
-   * component code needs to change, just these values.
+   * shell, Home.tsx, Chart.tsx (and LinearTimeline.tsx), About.tsx,
+   * SpiralTimeline.tsx, AddEntryForm.tsx, FilterBar.tsx,
+   * TimeRangeSelector.tsx, and every other component that used to hardcode
+   * its own (previously dark-only) colors - instead of a component ever
+   * hardcoding a gray/white/black value that only looks right in one
+   * theme.
    *
-   * Full list of tokens defined so far - add new ones here, not scattered
-   * across individual component files, so this stays the one place to
-   * find/extend them when the toggle itself gets built:
-   *   --bg-color           page/canvas background - Layout.tsx's outer
-   *                        shell + navbar, StarMap.tsx's canvas,
-   *                        Constellation's sidebar page background
-   *   --text-color         primary text (headings) on --bg-color
-   *   --text-muted-color   secondary/muted body text on --bg-color
-   *   --panel-bg-color     card/panel surface: a subtle lift off
-   *                        --bg-color - EntryPanel.tsx's entry cards, and
-   *                        now the Home.tsx/Chart.tsx card surfaces too
-   *   --panel-border-color card/panel border, tuned for --panel-bg-color
-   *   --panel-bg-color-solid a much more opaque variant of the same dark
-   *                        surface, for the two spots where legibility of
-   *                        the panel's OWN content matters more than the
-   *                        subtle see-through "lift" --panel-bg-color
-   *                        gives everywhere else: EntryTooltip.tsx's
-   *                        hover tooltip (floats over busy star/timeline
-   *                        content) and EntryPanel.tsx's expanded sidebar
-   *                        panels (float over StarMap's starfield)
+   * THE SWITCH: dark is the `:root` DEFAULT (no attribute needed - this is
+   * still the app's primary designed experience, and what a first-time
+   * visitor sees before ever touching the toggle). A `data-theme="light"`
+   * attribute on <html> (set/cleared by useTheme.ts, toggled by
+   * ThemeToggle.tsx - see those files) switches every token below to its
+   * light value via the `:root[data-theme="light"]` block further down.
+   * No component needs to know which theme is active - swapping the
+   * VALUES these tokens resolve to is the entire mechanism.
+   *
+   * Every token is listed here TWICE - once with a short description of
+   * what it's for, once in each of the two value tables below - so this
+   * stays the one place to see both themes' values side by side and adjust
+   * either without hunting through component files:
+   *
+   *   --bg-color             page/canvas background - Layout.tsx's outer
+   *                          shell + navbar, StarMap.tsx's canvas,
+   *                          Constellation's sidebar page background
+   *   --text-color           primary text (headings) on --bg-color
+   *   --text-secondary-color body copy one step down from --text-color -
+   *                          EntryPanel.tsx's description/notes text,
+   *                          AddEntryForm.tsx's field labels
+   *   --text-muted-color     secondary/muted text on --bg-color -
+   *                          timestamps, section labels, axis ticks
+   *   --panel-bg-color       card/panel surface: a subtle lift off
+   *                          --bg-color - EntryPanel.tsx's entry cards, and
+   *                          now the Home.tsx/Chart.tsx card surfaces too
+   *   --panel-border-color   card/panel border, tuned for --panel-bg-color
+   *   --panel-bg-color-solid a much more opaque variant of the same
+   *                          surface, for the spots where legibility of
+   *                          the panel's OWN content matters more than the
+   *                          subtle see-through "lift" --panel-bg-color
+   *                          gives everywhere else: EntryTooltip.tsx's
+   *                          hover tooltip, EntryPanel.tsx's expanded
+   *                          sidebar panels, AddEntryForm.tsx's modal
+   *                          card, and the ResetButton/ResetToast/
+   *                          TimeRangeSelector "floating chrome" surfaces
+   *   --field-tint-1         subtlest translucent UI lift - form field
+   *                          backgrounds (AddEntryForm inputs), inactive
+   *                          filter pills (FilterBar)
+   *   --field-tint-2         medium translucent lift - button hover
+   *                          states, the sort-toggle track, inactive step
+   *                          badges
+   *   --field-tint-3         strongest translucent lift - active hover on
+   *                          top of --field-tint-2 (e.g. a pill's own
+   *                          hover state)
+   *   --field-border-strong  a more visible translucent border than
+   *                          --panel-border-color - color swatch preview,
+   *                          checkbox, dashed upload dropzone
+   *   --chrome-hover-bg-color hover background for a SOLID floating chrome
+   *                          button (ResetButton) - one step off
+   *                          --panel-bg-color-solid, not a translucent tint
+   *                          (the button has nothing solid behind it to
+   *                          tint)
+   *   --indigo-accent-text   indigo text sitting on an indigo-tinted chip/
+   *                          background (Tags in EntryPanel, linkify.ts's
+   *                          link color, VizEmptyState's messages) - needs
+   *                          to be light indigo on dark backgrounds but a
+   *                          much DARKER indigo on light backgrounds to
+   *                          keep reading against a pale tint either way
+   *   --teal-accent-text     same idea as --indigo-accent-text, for Mood
+   *                          chips (EntryPanel.tsx)
+   *   --star-highlight-color the "opened entry" ring/glow color in
+   *                          StarMap/LinearTimeline/SpiralTimeline -
+   *                          deliberately not tied to any activityType
+   *                          color (see those files' own comments) so it
+   *                          reads clearly against every entry color AND
+   *                          against the canvas background itself
+   *   --viz-label-color      subtle overlay label text painted directly on
+   *                          a canvas with no backing box of its own -
+   *                          StarMap's category labels, SpiralTimeline's
+   *                          year labels
+   *   --viz-header-text-shadow a full text-shadow value (not a color) - the
+   *                          halo VizPageHeader.tsx's title/subtitle use to
+   *                          stay legible over whatever's directly behind
+   *                          them on the canvas
+   *   --starmap-vignette-start/-end the two radial-gradient stops behind
+   *                          StarMap's starfield
+   *   --scrollbar-thumb-color the .dark-scrollbar thumb color (see below)
+   *
+   * ──────────────────────────────────────────────────────────────────────
+   * DARK VALUES (default - see :root below)     LIGHT VALUES (:root[data-theme="light"])
+   * ──────────────────────────────────────────────────────────────────────
+   * --bg-color:              #0b1023            --bg-color:              #f5f1e8
+   * --text-color:            #f1f5f9            --text-color:            #1c1917
+   * --text-secondary-color:  #d1d5db            --text-secondary-color:  #44403c
+   * --text-muted-color:      #94a3b8            --text-muted-color:      #78716c
+   * --panel-bg-color:        rgba(255,255,255,.06)  --panel-bg-color:    rgba(17,24,39,.05)
+   * --panel-border-color:    rgba(255,255,255,.12)  --panel-border-color: rgba(17,24,39,.12)
+   * --panel-bg-color-solid:  rgba(11,16,35,.92)     --panel-bg-color-solid: rgba(245,241,232,.92)
+   * --field-tint-1:          rgba(255,255,255,.06)  --field-tint-1:      rgba(17,24,39,.05)
+   * --field-tint-2:          rgba(255,255,255,.12)  --field-tint-2:      rgba(17,24,39,.09)
+   * --field-tint-3:          rgba(255,255,255,.22)  --field-tint-3:      rgba(17,24,39,.16)
+   * --field-border-strong:   rgba(255,255,255,.22)  --field-border-strong: rgba(17,24,39,.22)
+   * --chrome-hover-bg-color: #16203d               --chrome-hover-bg-color: #ebe4d3
+   * --indigo-accent-text:    #a5b4fc               --indigo-accent-text: #4338ca
+   * --teal-accent-text:      #5eead4               --teal-accent-text:   #0f766e
+   * --star-highlight-color:  #ffffff               --star-highlight-color: #1c1917
+   * --viz-label-color:       rgba(255,255,255,.35)  --viz-label-color:   rgba(17,24,39,.4)
+   * --viz-header-text-shadow: 0 1px 3px rgba(0,0,0,.9), 0 2px 10px rgba(0,0,0,.7)
+   *                          --viz-header-text-shadow: 0 1px 3px rgba(245,241,232,.9), 0 2px 10px rgba(245,241,232,.8)
+   * --starmap-vignette-start: #141a35              --starmap-vignette-start: #fbf8f0
+   * --starmap-vignette-end:  #05070f               --starmap-vignette-end: #e8e0cc
+   * --scrollbar-thumb-color: rgba(255,255,255,.25)  --scrollbar-thumb-color: rgba(17,24,39,.25)
+   * ──────────────────────────────────────────────────────────────────────
    */
   --bg-color: #0b1023;
   --text-color: #f1f5f9; /* near-white: headings/primary text on --bg-color */
-  --text-muted-color: #94a3b8; /* slate-400: secondary/body text on --bg-color */
+  --text-secondary-color: #d1d5db; /* gray-300: body copy (descriptions/notes/labels) */
+  --text-muted-color: #94a3b8; /* slate-400: secondary/muted text on --bg-color */
   --panel-bg-color: rgba(255, 255, 255, 0.06);
   --panel-border-color: rgba(255, 255, 255, 0.12);
   /*
@@ -56,9 +142,66 @@
    * one. 0.92 (not 1) is deliberate - short of fully opaque, so a faint
    * hint of whatever's behind (stars, overlapping panels) still shows
    * through at the edges, rather than punching a flat opaque hole in the
-   * starfield.
+   * starfield. The light theme mirrors this exact reasoning with its own
+   * --bg-color instead (see the light block below).
    */
   --panel-bg-color-solid: rgba(11, 16, 35, 0.92);
+  --field-tint-1: rgba(255, 255, 255, 0.06);
+  --field-tint-2: rgba(255, 255, 255, 0.12);
+  --field-tint-3: rgba(255, 255, 255, 0.22);
+  --field-border-strong: rgba(255, 255, 255, 0.22);
+  --chrome-hover-bg-color: #16203d;
+  --indigo-accent-text: #a5b4fc; /* indigo-300 */
+  --teal-accent-text: #5eead4; /* teal-300 */
+  --star-highlight-color: #ffffff;
+  --viz-label-color: rgba(255, 255, 255, 0.35);
+  --viz-header-text-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.9), 0 2px 10px rgba(0, 0, 0, 0.7);
+  --starmap-vignette-start: #141a35;
+  --starmap-vignette-end: #05070f;
+  --scrollbar-thumb-color: rgba(255, 255, 255, 0.25);
+
+  /* Native form controls (checkboxes, date pickers, etc.) pick a light or
+     dark rendering from this - keeps them consistent with the rest of the
+     theme instead of always rendering as if on a light page. */
+  color-scheme: dark;
+}
+
+/*
+ * LIGHT THEME - "sketchbook paper": a warm, slightly cream off-white
+ * (#f5f1e8) rather than pure white, so the app still feels intentionally
+ * designed rather than like a default unstyled page. Applied via
+ * `data-theme="light"` on <html> - see useTheme.ts/ThemeToggle.tsx for how
+ * that attribute gets set, and the big table above for every value here
+ * next to its dark counterpart.
+ */
+:root[data-theme='light'] {
+  --bg-color: #f5f1e8;
+  --text-color: #1c1917; /* stone-900: near-black for strong contrast on cream */
+  --text-secondary-color: #44403c; /* stone-700 */
+  --text-muted-color: #78716c; /* stone-500 */
+  --panel-bg-color: rgba(17, 24, 39, 0.05);
+  --panel-border-color: rgba(17, 24, 39, 0.12);
+  /* Same --bg-color tone as the page itself, at 92% opacity - the exact
+     same "own background, not a black/white-tint formula" reasoning the
+     dark theme's own --panel-bg-color-solid comment explains above. */
+  --panel-bg-color-solid: rgba(245, 241, 232, 0.92);
+  --field-tint-1: rgba(17, 24, 39, 0.05);
+  --field-tint-2: rgba(17, 24, 39, 0.09);
+  --field-tint-3: rgba(17, 24, 39, 0.16);
+  --field-border-strong: rgba(17, 24, 39, 0.22);
+  --chrome-hover-bg-color: #ebe4d3;
+  --indigo-accent-text: #4338ca; /* indigo-700 - dark enough to read on a pale indigo tint */
+  --teal-accent-text: #0f766e; /* teal-700 */
+  --star-highlight-color: #1c1917;
+  --viz-label-color: rgba(17, 24, 39, 0.4);
+  --viz-header-text-shadow:
+    0 1px 3px rgba(245, 241, 232, 0.9), 0 2px 10px rgba(245, 241, 232, 0.8);
+  --starmap-vignette-start: #fbf8f0;
+  --starmap-vignette-end: #e8e0cc;
+  --scrollbar-thumb-color: rgba(17, 24, 39, 0.25);
+
+  color-scheme: light;
 }
 
 body {
@@ -68,28 +211,28 @@ body {
 }
 
 /*
- * Scrollbar styling for any scrollable container sitting on the dark
- * "night sky" theme (see --bg-color etc. above) - originally written just
- * for SidebarPanelStack.tsx's own `overflow-y-auto` panel stack (hence
- * the class name's history, back when it was named
+ * Scrollbar styling for any scrollable container sitting on the app's
+ * themed background (see the THEME TOKENS block above) - originally
+ * written just for SidebarPanelStack.tsx's own `overflow-y-auto` panel
+ * stack (hence the class name's history, back when it was named
  * `.constellation-sidebar-scroll`), but the styling itself was never
- * sidebar-specific - it only depends on sitting on a dark background, not
- * on anything about being a sidebar - so it's named generically and now
- * also applied to AddEntryForm.tsx's scrollable Step 1/Step 2 form
+ * sidebar-specific - it only depends on sitting on a themed background,
+ * not on anything about being a sidebar - so it's named generically and
+ * now also applied to AddEntryForm.tsx's scrollable Step 1/Step 2 form
  * content, for the same reason: the browser's default scrollbar track
- * renders white/opaque, which clashes with the dark theme any of these
- * containers sit in. Scoped to this one class (rather than a global
- * `*`/`body` scrollbar override) so it only affects containers that opt
- * in, not every scrollable element in the app. Only the TRACK (the
- * channel behind the thumb) is set to transparent, letting the
- * container's own background show through; the THUMB (the draggable
- * grip) is left visible, given a subtle translucent light color rather
- * than the browser default, since a transparent track alone would
- * otherwise leave nothing to indicate scroll position.
+ * renders opaque white, which clashes with either theme. Scoped to this
+ * one class (rather than a global `*`/`body` scrollbar override) so it
+ * only affects containers that opt in, not every scrollable element in
+ * the app. Only the TRACK (the channel behind the thumb) is set to
+ * transparent, letting the container's own background show through; the
+ * THUMB (the draggable grip) uses --scrollbar-thumb-color (a translucent
+ * white in dark mode, translucent ink in light mode) rather than the
+ * browser default, since a transparent track alone would otherwise leave
+ * nothing to indicate scroll position.
  */
 .dark-scrollbar {
   /* Firefox: `scrollbar-color: <thumb-color> <track-color>`. */
-  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  scrollbar-color: var(--scrollbar-thumb-color) transparent;
 }
 
 .dark-scrollbar::-webkit-scrollbar-track {
@@ -97,6 +240,6 @@ body {
 }
 
 .dark-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.25);
+  background-color: var(--scrollbar-thumb-color);
   border-radius: 9999px;
 }
