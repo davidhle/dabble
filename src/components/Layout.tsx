@@ -90,15 +90,17 @@ export default function Layout({ onAddEntry }: LayoutProps) {
   };
 
   return (
-    // bg-[var(--bg-color)]: this outer shell (not just the <nav> below,
-    // which already used this token) used to be a plain light bg-gray-50 -
-    // that would still show through behind/around Home.tsx/Chart.tsx/
-    // About.tsx's content (the padding around `main` below, and any
-    // shorter-than-viewport page) even after the navbar and those pages'
-    // own content went dark, since none of them set a background of their
-    // own. Same theme token as everything else - see index.css :root -
-    // so the whole shell now matches uniformly.
-    <div className="min-h-screen bg-[var(--bg-color)]">
+    // canvas-vignette-bg (see index.css): this outer shell (not just the
+    // <nav> below, which also uses this class) used to be a flat
+    // bg-[var(--bg-color)] - which would still show through behind/around
+    // Home.tsx/About.tsx's content (the padding around `main` below, and
+    // any shorter-than-viewport page) as a visibly FLATTER background than
+    // StarMap.tsx's own vignetted canvas on Constellation. Both this shell
+    // and the navbar below now paint the exact same radial vignette
+    // StarMap does - see .canvas-vignette-bg's own comment in index.css
+    // for why `background-attachment: fixed` is what keeps the two
+    // perfectly seamless with each other despite being separate elements.
+    <div className="canvas-vignette-bg min-h-screen">
       {/*
        * Navigation Bar
        * relative z-10: Constellation.tsx's StarMap now renders a `fixed`
@@ -110,14 +112,19 @@ export default function Layout({ onAddEntry }: LayoutProps) {
        * (also z-10); both stay below the sidebar overlay (z-30) and the
        * AddEntryForm modal (z-50).
        *
-       * bg-[var(--bg-color)]: same theme token as StarMap's canvas and
-       * the Constellation sidebar (see index.css :root), so the navbar
-       * matches rather than being a separate white bar - text-gray-500/
-       * hover:text-gray-700 (tuned for a white background) are adjusted
-       * to text-gray-400/hover:text-gray-200 below to stay legible
-       * against this now-dark background.
+       * canvas-vignette-bg: same class (and therefore the exact same
+       * fixed-attachment gradient) as the outer shell above, so the
+       * navbar matches rather than being a visibly flatter bar - see that
+       * class's own comment in index.css. Still fully OPAQUE (a gradient
+       * fill, not transparency) so it continues to hide the real
+       * StarMap/LinearTimeline/SpiralTimeline canvas rendering directly
+       * behind it on visualization pages, exactly as the old flat
+       * --bg-color did. text-[var(--text-muted-color)]/
+       * hover:text-[var(--text-color)] below stay legible against this
+       * background in either theme - see index.css's THEME TOKENS
+       * comment.
        */}
-      <nav className="relative z-10 bg-[var(--bg-color)] shadow-sm">
+      <nav className="canvas-vignette-bg relative z-10 shadow-sm">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 justify-between">
             {/* Left side: Logo and navigation links */}
@@ -144,6 +151,29 @@ export default function Layout({ onAddEntry }: LayoutProps) {
                   Home
                 </Link>
                 <Link
+                  to="/about"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
+                >
+                  About
+                </Link>
+                {/*
+                 * DIVIDER: a thin vertical rule separating the two
+                 * informational pages (Home, About) from the three
+                 * visualization views (Timeline, Spiral, Constellation) -
+                 * `self-center` + a fixed height keeps it vertically
+                 * centered against the links' own line-height rather than
+                 * stretching to the nav's full height. --panel-border-color
+                 * (same translucent token every other subtle border in the
+                 * app uses) so it stays a faint hairline against
+                 * --bg-color in both themes, not a jarring hardcoded gray.
+                 * aria-hidden since it's purely decorative, not a
+                 * navigable/announceable element.
+                 */}
+                <div
+                  aria-hidden="true"
+                  className="h-5 w-px self-center bg-[var(--panel-border-color)]"
+                />
+                <Link
                   to="/linear"
                   className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
@@ -160,12 +190,6 @@ export default function Layout({ onAddEntry }: LayoutProps) {
                   className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
                   Constellation
-                </Link>
-                <Link
-                  to="/about"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
-                >
-                  About
                 </Link>
               </div>
             </div>

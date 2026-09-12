@@ -40,9 +40,9 @@
  *     other two views already share.
  *   - The page layout (full-bleed canvas behind a floating z-10 header
  *     and a z-30 sidebar overlay, measured `headerLayout` for the
- *     sidebar's position, the same `w-fit`/`space-y-4` header wrapper,
- *     `sidebarWidth` measured off the sidebar's own DOM node) matches
- *     Constellation.tsx/Timeline.tsx's CSS approach exactly - see
+ *     sidebar's position, the same fixed-width/`space-y-4` header
+ *     wrapper, `sidebarWidth` measured off the sidebar's own DOM node)
+ *     matches Constellation.tsx/Timeline.tsx's CSS approach exactly - see
  *     Constellation.tsx's own top-of-file layout comment for the full
  *     reasoning behind each piece, not re-explained here to avoid the
  *     three files' comments drifting out of sync with each other.
@@ -224,19 +224,23 @@ export default function Spiral({ entries }: SpiralProps) {
     // edges by adding margin-top to it as a sibling.
     <>
       {/*
-       * A fixed width, NOT `w-fit`: Constellation.tsx/Timeline.tsx use
-       * `w-fit` here because it happens to work for THEIR subtitles -
-       * `w-fit` shrinks this wrapper down to the widest child's own
-       * intrinsic (max-content) width, and FilterBar's own root already
-       * has a fixed width matching the sidebar's (see FilterBar.tsx's
-       * `leftInset` prop comment), so as long as no OTHER child wants to
-       * be wider than that, the wrapper ends up that same width for free.
-       * Spiral's subtitle is two full sentences (longer than either other
-       * page's single sentence) - long enough that its unwrapped one-line
-       * intrinsic width exceeds FilterBar's own width, which made THIS
-       * wrapper's `w-fit` computation pick the subtitle's own (wider)
-       * intrinsic width instead, stretching the whole header out over the
-       * canvas and blocking clicks on points/arcs underneath it.
+       * A fixed width, NOT `w-fit`: an earlier version used `w-fit` here
+       * (shrinks this wrapper down to the widest child's own intrinsic
+       * max-content width) since FilterBar's own root already has a fixed
+       * width matching the sidebar's (see FilterBar.tsx's `leftInset` prop
+       * comment), so as long as no OTHER child wanted to be wider than
+       * that, the wrapper ended up that same width for free. Spiral's
+       * subtitle is two full sentences (longer than either other page's
+       * single sentence) - long enough that its unwrapped one-line
+       * intrinsic width exceeds FilterBar's own width, which made THAT
+       * `w-fit` computation pick the subtitle's own (wider) intrinsic
+       * width instead, stretching the whole header out over the canvas
+       * and blocking clicks on points/arcs underneath it. Constellation.tsx/
+       * Timeline.tsx now use this same fixed-width approach too (see
+       * Constellation.tsx's own comment), so the subtitle's wrap width is
+       * a deliberate match to FilterBar/the sidebar everywhere, not an
+       * incidental side effect of `w-fit` that happened to work for their
+       * shorter one-sentence subtitles.
        *
        * `calc(33vw - headerLayout.left)`, not a flat `33vw`: matches
        * FilterBar's own width exactly (see its `leftInset` prop comment

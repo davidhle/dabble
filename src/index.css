@@ -98,7 +98,12 @@
    *                          stay legible over whatever's directly behind
    *                          them on the canvas
    *   --starmap-vignette-start/-end the two radial-gradient stops behind
-   *                          StarMap's starfield
+   *                          StarMap's starfield - also the two stops the
+   *                          `.canvas-vignette-bg` CSS class further down
+   *                          uses, so every OTHER page/canvas/the navbar
+   *                          can paint the exact same vignette Constellation
+   *                          shows, instead of each defaulting back to a
+   *                          flat --bg-color that visibly doesn't match it
    *   --scrollbar-thumb-color the .dark-scrollbar thumb color (see below)
    *
    * ──────────────────────────────────────────────────────────────────────
@@ -242,4 +247,48 @@ body {
 .dark-scrollbar::-webkit-scrollbar-thumb {
   background-color: var(--scrollbar-thumb-color);
   border-radius: 9999px;
+}
+
+/*
+ * CANVAS-MATCHING VIGNETTE BACKGROUND
+ * ────────────────────────────────────────────────────────────────────
+ * StarMap.tsx paints its own starfield background as an SVG
+ * <radialGradient> (`--starmap-vignette-start` at its center fading to
+ * `--starmap-vignette-end` by 75% of the way to the edge, then held flat
+ * beyond that) rather than a flat --bg-color, "so the sky feels deeper
+ * toward the edges" (see StarMap.tsx's own comment). Every OTHER
+ * full-bleed surface - Layout.tsx's outer page shell + navbar, and
+ * LinearTimeline.tsx's/SpiralTimeline.tsx's own canvases - used to fall
+ * back to a flat --bg-color instead, which reads as a visibly different,
+ * flatter background the moment you navigate away from Constellation (or
+ * even just look at the navbar sitting above StarMap's own vignetted
+ * canvas). This class reproduces the same gradient in plain CSS so every
+ * one of those surfaces matches Constellation's canvas exactly, in both
+ * themes (the two stops are already theme tokens - see the THEME TOKENS
+ * comment above).
+ *
+ * `background-attachment: fixed` is what makes this look like ONE
+ * continuous gradient across separate elements (the navbar and the page
+ * body below it are different boxes) instead of each painting its own
+ * independently-centered gradient within its own bounds - `fixed`
+ * positions/sizes the gradient relative to the VIEWPORT, not the
+ * element's own box, so two fixed-attachment elements sharing this class
+ * line up seamlessly regardless of where either one's box starts/ends.
+ * It also keeps the vignette visually anchored to the screen (matching
+ * StarMap's own `fixed inset-0` canvas, which never scrolls) rather than
+ * scrolling away with a taller page's content on Home.tsx/About.tsx.
+ *
+ * `ellipse` (CSS's own default shape) rather than `circle`: SVG's
+ * `objectBoundingBox`-unit gradient (StarMap's own) is itself stretched
+ * to the bounding box's aspect ratio, i.e. an ellipse on any non-square
+ * viewport - so `ellipse` here is the closer match, not a plain circle.
+ */
+.canvas-vignette-bg {
+  background-color: var(--bg-color);
+  background-image: radial-gradient(
+    ellipse at center,
+    var(--starmap-vignette-start) 0%,
+    var(--starmap-vignette-end) 75%
+  );
+  background-attachment: fixed;
 }

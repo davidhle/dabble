@@ -109,12 +109,14 @@ const GAP = 16;
 
 /**
  * Minimum clearance (px) kept between this message and the viewport's
- * right edge. Sized to clear ResetButton.tsx's own reserved corner
- * (`fixed bottom-6 right-6 h-11 w-11` - 24px inset + 44px button = 68px),
- * plus a small gap - not just a flat screen-edge margin - since
- * ResetButton sits in that same bottom-right region on every page this
- * renders on, and without this the "beside" layout's right edge could
- * otherwise land underneath/overlapping it.
+ * right edge. Sized to clear the stacked ResetButton.tsx/ThemeToggle.tsx
+ * pair's shared reserved corner (both `fixed right-6 h-11 w-11` - 24px
+ * inset + 44px button = 68px), plus a small gap - not just a flat
+ * screen-edge margin - since that pair sits in the same bottom-right
+ * region on every page this renders on (only their relative bottom-6/
+ * bottom-20 stacking order differs, which doesn't affect this horizontal
+ * clearance), and without this the "beside" layout's right edge could
+ * otherwise land underneath/overlapping them.
  */
 const RIGHT_MARGIN = 90;
 

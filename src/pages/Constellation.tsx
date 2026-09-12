@@ -370,27 +370,41 @@ export default function Constellation({ entries }: ConstellationProps) {
        * of this file for why FilterBar lives in here (ordinary flow, no
        * background) instead of as an independently `fixed` element.
        *
-       * w-fit: without this, a plain block div stretches to its parent's
-       * full width (`main`'s max-w-7xl content box) by default, even
-       * though its actual content - the title, subtitle, and FilterBar's
-       * own (narrower-than-full-width) row - is narrower than that. Since
-       * this div sits above StarMap's starfield (z-10, transparent, no
-       * background of its own - see "TRANSPARENT CONTAINER, CONTRASTED
-       * CONTENT" above), that extra empty box-model width to the right of
-       * the visible text/buttons would still catch pointer events,
-       * silently blocking clicks on any star that happens to render
-       * underneath it. `w-fit` shrinks the div's own box down to its
-       * widest child (in practice, FilterBar's own row, unless a page's
-       * subtitle happens to render wider - see Spiral.tsx for that case)
-       * instead, so there's no invisible click-blocking area left over -
-       * only the CONTAINER's width behavior changes here; the children
-       * below still stack and left-align exactly as before via
-       * `space-y-4`, and this has no effect on the sidebar panel stack,
-       * sort toggle, or their own independent width-matching (see the
-       * top-of-file layout comment) - none of that is sized off this
-       * wrapper.
+       * A fixed width, NOT a plain block div (which stretches to its
+       * parent's full width - `main`'s max-w-7xl content box - by
+       * default, even though its actual content - the title, subtitle,
+       * and FilterBar's own row - is narrower than that): since this div
+       * sits above StarMap's starfield (z-10, transparent, no background
+       * of its own - see "TRANSPARENT CONTAINER, CONTRASTED CONTENT"
+       * above), that extra empty box-model width to the right of the
+       * visible text/buttons would still catch pointer events, silently
+       * blocking clicks on any star that happens to render underneath it.
+       *
+       * `calc(33vw - headerLayout.left)`, not `w-fit`: this used to be
+       * `w-fit` (shrinks to the widest child's own intrinsic width, which
+       * in practice meant FilterBar's own row, the widest child for this
+       * page's short one-sentence subtitle) - but that made the
+       * SUBTITLE's own rendered width follow whatever FilterBar happened
+       * to need, rather than deliberately matching FilterBar/
+       * SidebarPanelStack.tsx's shared width the way Spiral.tsx's header
+       * does (see that file's own comment on this exact width value, and
+       * FilterBar.tsx's `leftInset` prop comment for why a flat `33vw`
+       * would overshoot SidebarPanelStack's actual right edge). Matching
+       * that value directly here - instead of leaving it to fall out of a
+       * `w-fit` computation - keeps this wrapper (and therefore the
+       * subtitle's own wrap width) exactly as wide as the sidebar/
+       * FilterBar are, consistent with Spiral.tsx, rather than an
+       * incidental side effect of whichever child happens to be widest.
+       * The children below still stack and left-align exactly as before
+       * via `space-y-4`; this has no effect on the sidebar panel stack or
+       * sort toggle, which size themselves independently (see the
+       * top-of-file layout comment).
        */}
-      <div ref={headerRef} className="relative z-10 w-fit space-y-4">
+      <div
+        ref={headerRef}
+        className="relative z-10 space-y-4"
+        style={{ width: `calc(33vw - ${headerLayout.left}px)` }}
+      >
         <VizPageHeader
           title="Constellation"
           subtitle="Drag to pan, scroll to zoom, and click a star to see the entry behind it."

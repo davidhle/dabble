@@ -907,8 +907,12 @@ export default function SpiralTimeline({
     // `fixed inset-0` (not a layout child) - see the FULL-BLEED CANVAS
     // comment above. z-0, same base layer as StarMap.tsx/LinearTimeline.tsx:
     // Spiral.tsx's floating header and sidebar overlay both render above
-    // this with their own higher z-index.
-    <div ref={containerRef} className="fixed inset-0 z-0 bg-[var(--bg-color)]">
+    // this with their own higher z-index. canvas-vignette-bg (see
+    // index.css), not a flat bg-[var(--bg-color)] - the same radial
+    // vignette StarMap.tsx's own canvas paints, so this reads as the same
+    // background rather than a visibly flatter one just because this is a
+    // different view.
+    <div ref={containerRef} className="canvas-vignette-bg fixed inset-0 z-0">
       <svg
         ref={svgRef}
         width={size.width}

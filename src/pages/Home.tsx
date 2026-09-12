@@ -183,7 +183,7 @@ export default function Home() {
         Welcome to Dabble
       </h1>
 
-      <div className="max-w-2xl space-y-4">
+      <div className="space-y-4">
         <p className="text-lg text-[var(--text-muted-color)]">
           This project was inspired by my master's thesis project, where I
           prototyped an interactive system that would enable dance practitioners

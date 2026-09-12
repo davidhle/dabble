@@ -39,8 +39,8 @@
  *     `onStarClick`.
  *   - The page layout (full-bleed canvas behind a floating z-10 header
  *     and a z-30 sidebar overlay, measured `headerLayout` for the
- *     sidebar's position, the same `w-fit`/`space-y-4` header wrapper)
- *     matches Constellation.tsx's CSS approach exactly - see
+ *     sidebar's position, the same fixed-width/`space-y-4` header
+ *     wrapper) matches Constellation.tsx's CSS approach exactly - see
  *     Constellation.tsx's own top-of-file layout comment for the full
  *     reasoning behind each piece, which isn't re-explained here to
  *     avoid the two files' comments drifting out of sync with each
@@ -261,7 +261,11 @@ export default function Timeline({ entries }: TimelineProps) {
     // comment: `space-y-*` would misalign LinearTimeline's `fixed inset-0`
     // edges by adding margin-top to it as a sibling.
     <>
-      <div ref={headerRef} className="relative z-10 w-fit space-y-4">
+      <div
+        ref={headerRef}
+        className="relative z-10 space-y-4"
+        style={{ width: `calc(33vw - ${headerLayout.left}px)` }}
+      >
         <VizPageHeader
           title="Timeline"
           subtitle="Drag to pan, scroll to zoom, and click a point to see the entry behind it."
