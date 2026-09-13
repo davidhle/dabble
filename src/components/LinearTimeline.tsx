@@ -169,6 +169,7 @@ import { getActivityColor } from '../utils/colors';
 // of each visualization keeping its own copy of the markup.
 import EntryTooltip from './EntryTooltip';
 import VizEmptyState, { TimeRangeSelectorRect } from './VizEmptyState';
+import { assignLanes } from '../utils/laneAssignment';
 
 interface LinearTimelineProps {
   entries: Entry[];
@@ -716,60 +717,60 @@ export default function LinearTimeline({
    * making both illegible - exactly the same problem overlapping events
    * in a calendar's day view solve with side-by-side columns, or a video
    * editor solves by putting one clip per track. The fix here is the same
-   * "greedy interval scheduling" algorithm used for both of those: it's
-   * the textbook minimum-number-of-rooms/tracks solution for "assign each
-   * interval to the first row where it doesn't overlap anything already
-   * there," and it's optimal (uses the fewest lanes possible) BECAUSE of
-   * two properties of how it's applied:
+   * "greedy interval scheduling" algorithm used for both of those: "assign
+   * each interval to the first row where it doesn't overlap anything
+   * already placed there." Two properties of how it's applied matter:
    *
-   *   1. PROCESS IN CHRONOLOGICAL (START-DATE) ORDER: a capsule can only
-   *      ever conflict with capsules that started before it (nothing
-   *      later has been placed yet when it's its turn), so checking
-   *      "does this fit in lane 0? lane 1? ..." against only
-   *      already-placed capsules is always checking against the complete
-   *      relevant set - there's no already-processed capsule this one
-   *      could still collide with that hasn't already been considered.
+   *   1. PROCESSING ORDER DECIDES WHICH CAPSULE WINS A GIVEN LANE, NOT
+   *      WHETHER THE RESULT IS COLLISION-FREE: placement safety holds
+   *      regardless of the order capsules are considered in - see
+   *      utils/laneAssignment.ts's own header comment for why
+   *      `laneEnd[lane]` is always the true max end assigned to that lane
+   *      so far no matter what order items arrive in. What DOES depend on
+   *      order is which capsule gets first crack at lane 0 (and each lane
+   *      after it) whenever several overlap: that function sorts by
+   *      DURATION DESCENDING rather than by start date, specifically so a
+   *      long-spanning capsule reliably wins the base lane instead of
+   *      whichever capsule merely happened to start first - see that
+   *      file's "WHY DURATION-DESCENDING PROCESSING ORDER" comment for the
+   *      full reasoning, and the trade-off against the guaranteed-minimum-
+   *      lane-count result start-date order would otherwise give.
    *   2. TAKE THE FIRST (LOWEST-INDEX) NON-OVERLAPPING LANE, not just any
-   *      open one: this keeps every lane's capsules packed as far left
-   *      as possible over time, so a lane freed up by an earlier capsule
-   *      ending gets reused by the next available capsule instead of
-   *      lanes growing unboundedly - the number of lanes in use at any
-   *      point equals the number of capsules whose date ranges are
-   *      simultaneously "in progress," which is the true minimum needed
-   *      for a collision-free layout.
+   *      open one: this keeps lanes reused rather than growing
+   *      unboundedly - a lane freed up by an earlier-ending capsule (in
+   *      xScale position, not processing order) gets reclaimed by the
+   *      next capsule that fits there.
    *
-   * Each lane tracks only the rightmost `cxEnd` (in xScale pixel units,
-   * which preserves chronological order since xScale is monotonic) it has
-   * placed so far - a new capsule fits in that lane once its own `cxStart`
-   * clears that value by `LANE_GAP_PX`, and the search always starts back
-   * at lane 0 for every capsule (not "continue from the last lane used"),
-   * which is what lets an early-ending capsule's lane be reclaimed later.
+   * Each lane tracks only the rightmost `cxEnd` (in xScale pixel units) it
+   * has placed so far - a new capsule fits in that lane once its own
+   * `cxStart` clears that value by `LANE_GAP_PX`, and the search always
+   * starts back at lane 0 for every capsule (not "continue from the last
+   * lane used"), which is what lets an early-ending capsule's lane be
+   * reclaimed later.
+   *
+   * The actual assignment loop lives in utils/laneAssignment.ts's
+   * `assignLanes` now, shared verbatim with SpiralTimeline.tsx - see that
+   * file's own header comment for why the ALGORITHM (which lane number
+   * each range gets) is identical between the two views, and its
+   * "RADIAL LANE OFFSET" comment for the one thing that differs: what a
+   * "lane" is offset BY visually.
    */
   const ranges = useMemo(() => {
-    const sortedByStart = entries
+    const items = entries
       .filter(entry => entry.endTimestamp)
       .map(entry => ({
         entry,
         cxStart: xScale(new Date(entry.timestamp)),
         cxEnd: xScale(new Date(entry.endTimestamp as string)),
         color: getActivityColor(entry.activityType),
-      }))
-      .sort((a, b) => a.cxStart - b.cxStart);
+      }));
 
-    // laneEndX[lane] = the rightmost cxEnd already placed in that lane.
-    const laneEndX: number[] = [];
-
-    return sortedByStart.map(range => {
-      let lane = 0;
-      while (
-        laneEndX[lane] !== undefined &&
-        range.cxStart < laneEndX[lane] + LANE_GAP_PX
-      ) {
-        lane++;
-      }
-      laneEndX[lane] = range.cxEnd;
-      return { ...range, lane };
-    });
+    return assignLanes(
+      items,
+      item => item.cxStart,
+      item => item.cxEnd,
+      LANE_GAP_PX
+    );
   }, [entries, xScale]);
 
   // How many lanes are actually in use - drives the y-position of the

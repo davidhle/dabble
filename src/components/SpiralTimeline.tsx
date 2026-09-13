@@ -68,20 +68,33 @@
  *      then convert polar -> cartesian (x, y) to actually plot it:
  *
  *        theta  = t * totalRotations * 2*PI   (angle, in radians)
- *        radius = minRadius + t * (maxRadius - minRadius)
+ *        radius = t * maxRadius
  *        x = centerX + radius * cos(theta)
  *        y = centerY + radius * sin(theta)
  *
  *      `theta` sweeps around `totalRotations` full turns as `t` goes from
  *      0 to 1 (turning entries strung out along a "line" of time into a
- *      coil), while `radius` grows linearly from `minRadius` (near the
- *      center, t=0, the oldest entry) out to `maxRadius` (the outer edge,
- *      t=1, the most recent entry). A radius that's a LINEAR function of
- *      `theta` (as it is here, since both are linear functions of the
- *      same `t`) is the definition of an Archimedean spiral - the "coil
- *      of rope" spiral, with each successive loop the same distance
- *      further out than the last, as opposed to a logarithmic spiral
- *      (nautilus shell) whose loops grow multiplicatively.
+ *      coil), while `radius` grows linearly from `0` (dead center, t=0,
+ *      the oldest entry) out to `maxRadius` (the outer edge, t=1, the
+ *      most recent entry) - ZERO, not a fixed `minRadius` offset this
+ *      used to add: an earlier version reserved a small center "hole"
+ *      (`minRadius = maxRadius * 0.15`) on the reasoning that entries
+ *      right at t=0 would otherwise pile up unreadably at a single point,
+ *      but that baked a permanently empty ring into the middle of the
+ *      canvas for every dataset, whether or not it actually had multiple
+ *      entries competing for that exact spot. Starting at true radius 0
+ *      instead means the earliest entry sits exactly at the spiral's own
+ *      center, matching what "this point in time is the very beginning of
+ *      the timeline" should look like, with no reserved dead space - see
+ *      the YEAR GLYPHS comment below for how the innermost year marker
+ *      still avoids sitting exactly on top of that same center point. A
+ *      radius that's
+ *      a LINEAR function of `theta` (as it is here, since both are linear
+ *      functions of the same `t`) is the definition of an Archimedean
+ *      spiral - the "coil of rope" spiral, with each successive loop the
+ *      same distance further out than the last, as opposed to a
+ *      logarithmic spiral (nautilus shell) whose loops grow
+ *      multiplicatively.
  *
  * `totalRotations` is set to roughly the number of years the entries
  * span (see the `domain` useMemo), so each loop of the spiral reads
@@ -101,7 +114,7 @@
  * the moment the view mounts, before the user pans or zooms at all.
  *
  * ──────────────────────────────────────────────────────────────────────
- * DRAWING THE SPIRAL LINE + <textPath> YEAR LABELS
+ * DRAWING THE SPIRAL LINE
  * ──────────────────────────────────────────────────────────────────────
  * The visible spiral curve is just a densely-sampled polyline: `t` is
  * walked from 0 to 1 in many small steps (`spiralSamples`), each mapped
@@ -110,23 +123,62 @@
  * every segment is a straight line, the path's total length is EXACTLY
  * the sum of each segment's Euclidean length (no curve-length
  * approximation needed) - that sum, `cumulativeLengths`, is what lets
- * `tToArcLength` convert a `t` value into the matching `startOffset`
- * (in the same px units as the path itself) for a `<textPath>`.
+ * `tToArcLength`/`arcLengthToT` convert between a `t` value and its
+ * matching arc-length position along the path (both directions - see
+ * YEAR GLYPHS below for what the inverse direction is used for).
  *
- * A `<textPath href="#...">` lays its text starting at `startOffset`
- * along the *referenced path's own curvature* - the browser handles
- * bending each glyph to follow the spiral, which is exactly the "curve
- * along the spiral path" effect year labels need, with no manual
- * per-glyph rotation math. The one case this doesn't handle well is a
- * label whose `startOffset` lands too close to the path's very end (the
- * outermost loop, near the most recent entries): there's no path left
- * for the text to run along, so it would render compressed or cut off.
- * `hasRoomForTextPath` below guards for exactly that case; when it's
- * false, `spiralTangentAngleDeg` computes the spiral's tangent direction
- * at that `t` analytically (the derivative of the polar parametrization),
- * and the label falls back to a single plain `<text>` rotated to match
- * that tangent instead - visually consistent with the curved labels
- * even though it isn't bending letter-by-letter.
+ * ──────────────────────────────────────────────────────────────────────
+ * YEAR GLYPHS: A MINIMAL, HOVER-BASED MARKER, NOT ALWAYS-VISIBLE CURVED
+ * TEXT
+ * ──────────────────────────────────────────────────────────────────────
+ * An earlier version drew each year's boundary as a `<textPath>` label
+ * bending along the spiral's own curvature - legible along most of the
+ * curve, but an Archimedean spiral's tangent direction rotates a full
+ * 360° every loop, and on roughly the "lower half" of each loop (where
+ * the tangent points more than 90° off horizontal) a `<textPath>` lays
+ * glyphs out rotated to match that leftward-pointing tangent, which reads
+ * as the whole label rendering upside-down and right-to-left. A follow-up
+ * fix (building a small locally-reversed path per label to flip the
+ * upside-down cases upright, the same technique amCharts and other
+ * radial/circular chart libraries use) made the text legible everywhere,
+ * but "four-digit text permanently bending around a spiral, at some
+ * angle, forever" is still a lot of visual weight and reading effort for
+ * what's ultimately just a boundary marker, not primary content the way
+ * an entry's own title is.
+ *
+ * This replaces that entirely: each year boundary is now a single small
+ * glyph (a Unicode "✦" four-pointed star, rendered as SVG `<text>` rather
+ * than a hand-drawn `<path>` star shape - a system font renders a crisp,
+ * properly-anti-aliased star at 9px far more reliably than a handful of
+ * short line segments would at that size) sitting exactly on the gridline
+ * at that year's position, styled at a low, muted opacity against the
+ * SAME `currentColor` the gridline itself already uses (see
+ * `YEAR_GLYPH_OPACITY`/`YEAR_GLYPH_HOVER_OPACITY`) - a quiet waypoint
+ * marker along the gridline, not a fourth kind of "star" competing with
+ * the colored, full-opacity entry stars. This also matches the app's
+ * broader night-sky/constellation visual language (see StarMap.tsx) far
+ * more naturally than rotated text ever did: a small dim star marking a
+ * point in time, brightening slightly and showing a plain "2021"-style
+ * tooltip on hover (via the SAME shared `EntryTooltip` entries already
+ * use - see that component's own "ENTRY vs. LABEL VARIANT" comment for
+ * how it renders a bare label instead of a title+date pair), rather than
+ * always-on decoration the user has to read past.
+ *
+ * COLLISION AVOIDANCE: because `radius = t * maxRadius` now starts at
+ * true 0 (see the SPIRAL FORMULA comment above), the earliest years'
+ * glyphs sit in the densest, smallest-radius part of the spiral, right
+ * alongside whatever entries happen to fall in that same tight inner
+ * region - exactly where a glyph is most likely to land on top of (or
+ * within a few px of) an actual entry marker. Before rendering each
+ * glyph, its raw position is checked against the ALREADY-COMPUTED
+ * `points`/`ranges` marker positions (their `x`/`y`, and each range's
+ * `start`/`end`/`midpoint`) within `YEAR_GLYPH_COLLISION_RADIUS_PX`; if
+ * one is too close, the glyph is nudged `YEAR_GLYPH_NUDGE_ARC_PX` further
+ * ALONG THE CURVE (via `arcLengthToT`, first forward, then backward if
+ * forward is still colliding) rather than off the gridline entirely - it
+ * still marks essentially the same point in time, just shifted enough
+ * along the ring to read as two distinct shapes instead of one fused
+ * blob.
  *
  * ──────────────────────────────────────────────────────────────────────
  * RANGE ENTRIES: ARCS THAT FOLLOW THE SPIRAL, NOT STRAIGHT CHORDS
@@ -194,16 +246,79 @@
  * through its span) rather than a single point - the 2D equivalent of
  * LinearTimeline's own "midpoint of a range entry's start/end" choice for
  * its 1D axis.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * OVERLAPPING ARCS (AND POINTS): SAME LANE-ASSIGNMENT ALGORITHM AS
+ * LinearTimeline, RADIAL OFFSET INSTEAD OF VERTICAL
+ * ──────────────────────────────────────────────────────────────────────
+ * Two range entries whose date spans overlap would draw as two arcs
+ * tracing the exact same stretch of the spiral, indistinguishable from one
+ * another - the identical problem LinearTimeline.tsx solves for its
+ * capsules with greedy interval scheduling (see that file's own
+ * "LANE-BASED LAYOUT FOR CAPSULES" comment for the full algorithm
+ * explanation: place each in the first lane that doesn't conflict). The
+ * ALGORITHM deciding arc lane NUMBERS is reused exactly, via
+ * utils/laneAssignment.ts's `assignLanes` (duration-descending, same as
+ * LinearTimeline - see that function's own header comment) - just fed
+ * arc-length distance along `spiralPathD` (from `tToArcLength`) as its 1D
+ * "position" measure instead of LinearTimeline's xScale pixel position.
+ * Arc length is the right substitute because, like an xScale pixel
+ * position, it's a single monotonically-increasing-with-time number -
+ * exactly what the algorithm needs to reason about "does this one start
+ * far enough past where that one ends" - even though the underlying
+ * geometry is a 2D curve rather than a straight line.
+ *
+ * LANE 0 = ZERO OFFSET, UNLIKE LinearTimeline: LinearTimeline's lane 0
+ * capsule still sits one `LANE_HEIGHT` below its baseline (`BASELINE_Y +
+ * (lane+1)*LANE_HEIGHT`) because points and capsules already live on
+ * physically separate rows there - a capsule directly on the baseline
+ * would visually collide with the point row regardless of lane logic. The
+ * spiral has no such separate row: `spiralPoint`'s own curve IS the
+ * "home" position for both a point entry and a lane-0 arc, so lane 0 here
+ * gets radiusOffset `0 * RADIAL_LANE_OFFSET_PX` - literally zero, sitting
+ * exactly on the spiral's own drawn path - and only lane 1, 2, 3, ...
+ * nudge outward by `lane * RADIAL_LANE_OFFSET_PX`. This is what makes the
+ * longest-duration arc in a cluster of overlaps (see laneAssignment.ts's
+ * duration-descending comment - it wins lane 0) visibly trace the same
+ * gridline path a viewer would see if that arc were the only entry on the
+ * timeline, rather than every arc always appearing detached from the
+ * curve regardless of whether it actually overlaps anything.
+ *
+ * POINT ENTRIES NOW PARTICIPATE IN OVERLAP DETECTION TOO: a point sitting
+ * at a date that falls inside an already-laned arc's span would render
+ * right on top of that arc's lane-0 curve if left alone - previously
+ * points always rendered at radiusOffset 0 unconditionally, regardless of
+ * what arcs might cover their date. `points`/`ranges` below are computed
+ * together (ranges/arcs first, then points checked against them) so each
+ * point can look up whether ANY lane-0-or-above arc's span covers its own
+ * arc-length position via `assignLaneAroundRanges` (laneAssignment.ts) -
+ * if one does, the point is bumped to the next lane up (checked again
+ * against arcs in THAT lane, and so on) exactly like an arc that can't
+ * fit lane 0 moves to lane 1. A point is deliberately only ever checked
+ * against ARCS, never against other points - two coincident points
+ * sitting at the same spot is not the problem this solves, an arc's whole
+ * lane-length span silently swallowing a point that happens to fall
+ * inside it is. A point with no conflicting arc anywhere keeps its
+ * original always-lane-0 behavior, sitting directly on the curve.
+ *
+ * `spiralPoint`/`sampleArcPoints` both take a `radiusOffset` parameter
+ * (default 0) to make a lane number a small additive term in the same
+ * `radius = t*maxRadius` formula the top-of-file SPIRAL FORMULA comment
+ * already describes, at the SAME theta it would
+ * otherwise use - nudging only the radius leaves a point/arc's angular
+ * position (and therefore which year-ring it reads against) completely
+ * unchanged, just as LinearTimeline's vertical nudge leaves an entry's x
+ * position (and therefore which axis tick it reads against) unchanged.
+ *
+ * Because `start`/`end`/`midpoint`/`pathD` (for ranges) and `x`/`y` (for
+ * points) below are all computed WITH each entry's own lane offset
+ * already baked in, hover/click/highlight code downstream (which reads
+ * those same fields) automatically targets the lane-adjusted position -
+ * there's no separate "un-offset" position left anywhere that could get
+ * hovered/highlighted instead by mistake.
  */
 
-import {
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
 import { DateRange } from '../context/TimeRangeContext';
@@ -213,6 +328,7 @@ import { getActivityColor } from '../utils/colors';
 // across every visualization view rather than duplicated per-component.
 import EntryTooltip from './EntryTooltip';
 import VizEmptyState, { TimeRangeSelectorRect } from './VizEmptyState';
+import { assignLanes, assignLaneAroundRanges } from '../utils/laneAssignment';
 
 interface SpiralTimelineProps {
   entries: Entry[];
@@ -375,13 +491,33 @@ const OPENED_ARC_ENDPOINT_GLOW_RADIUS_EXTRA = 3; // was POINT_RADIUS + 5
 const OPENED_ARC_ENDPOINT_GLOW_STROKE_WIDTH = 3; // was 4
 
 /**
- * How far the spiral's innermost loop (t=0, the oldest entry) sits from
- * dead-center, as a fraction of `maxRadius`. Zero would pile the very
- * earliest entries on top of each other at a single point; a small
- * positive gap (like a vinyl record's center hole) keeps them
- * distinguishable.
+ * Radial spacing (px) between stacked arc lanes - the spiral's equivalent
+ * of LinearTimeline.tsx's `LANE_HEIGHT`. Lane 0's arc renders at
+ * `radius + RADIAL_LANE_OFFSET_PX`, lane 1 at `radius + 2 *
+ * RADIAL_LANE_OFFSET_PX`, and so on - see the top-of-file "OVERLAPPING
+ * ARCS" comment for why this is a radius nudge rather than a vertical one.
+ *
+ * Originally 10px (an 8-12px range, matched down from LANE_HEIGHT's 26px
+ * on the assumption that the spiral's loops were already spaced far
+ * enough apart radially that a small per-lane nudge would read clearly).
+ * In practice that was too tight once several overlapping arcs stacked up:
+ * outer lanes sat close enough to each other - and to the next loop of the
+ * main spiral curve/year gridlines - that telling two nearby lanes apart,
+ * or a lane apart from the underlying spiral, took real effort. Bumped to
+ * roughly 1.8x that (18px) for comfortable, unambiguous separation between
+ * stacked lanes and between the outermost lane and the next year's loop.
  */
-const MIN_RADIUS_RATIO = 0.15;
+const RADIAL_LANE_OFFSET_PX = 18;
+
+/**
+ * Extra arc-length clearance (px, along the spiral's own path) required
+ * between one arc's end and the next arc's start before they're allowed to
+ * share a lane - the spiral's equivalent of LinearTimeline.tsx's
+ * `LANE_GAP_PX`, using the same value: both measure "how much straight-line
+ * clearance in px reads as clearly separated," just along a straight axis
+ * there and along the spiral's curve here.
+ */
+const LANE_GAP_PX = 6;
 
 /**
  * Clearance (px) reserved between the spiral's outermost loop
@@ -402,12 +538,42 @@ const MIN_ARC_SAMPLES = 6;
 const MAX_ARC_SAMPLES = 200;
 
 /**
- * Minimum remaining path length (px) a year label's `startOffset` needs
- * for its `<textPath>` to have room to render - see the "DRAWING THE
- * SPIRAL LINE" comment above for why labels near the very end of the
- * spiral fall back to a plain rotated `<text>` instead.
+ * Font size (px) of a year glyph - see the top-of-file "YEAR GLYPHS"
+ * comment. Small and quiet by design: this marks a waypoint on the
+ * gridline, not an entry, so it should never compete with the larger,
+ * colored `POINT_RADIUS`-sized entry stars.
  */
-const YEAR_LABEL_MIN_PATH_ROOM = 28;
+const YEAR_GLYPH_FONT_SIZE_PX = 9;
+
+/**
+ * Resting / hovered opacity of a year glyph, against the SAME
+ * `currentColor` (`--text-muted-color`) the gridline itself already uses
+ * - see the top-of-file "YEAR GLYPHS" comment for why a glyph should read
+ * as part of the gridline's own quiet visual language rather than as a
+ * distinct, attention-grabbing marker.
+ */
+const YEAR_GLYPH_OPACITY = 0.45;
+const YEAR_GLYPH_HOVER_OPACITY = 0.85;
+
+/**
+ * How close (px, on screen) a year glyph's raw position needs to be to an
+ * actual entry marker before it's considered "colliding" and gets nudged
+ * - see the top-of-file "YEAR GLYPHS" comment's "COLLISION AVOIDANCE"
+ * section. Sized a bit larger than `POINT_RADIUS` so the nudge kicks in
+ * before the two shapes visually touch, not only once they'd fully
+ * overlap.
+ */
+const YEAR_GLYPH_COLLISION_RADIUS_PX = 10;
+
+/**
+ * How far (px, along the curve's own arc length) a colliding year glyph
+ * is nudged - see the top-of-file "YEAR GLYPHS" comment's "COLLISION
+ * AVOIDANCE" section. Large enough to clear a typical entry marker's own
+ * radius/glow at `YEAR_GLYPH_COLLISION_RADIUS_PX`, small enough that the
+ * glyph still reads as marking essentially the same point on the
+ * gridline, not a different year boundary.
+ */
+const YEAR_GLYPH_NUDGE_ARC_PX = 14;
 
 /** How far the user can zoom in/out - same range StarMap.tsx uses for its own 2D pannable canvas. */
 const ZOOM_SCALE_EXTENT: [number, number] = [0.5, 8];
@@ -434,43 +600,50 @@ const OPENED_HIGHLIGHT_COLOR = 'var(--star-highlight-color)';
 interface SpiralParams {
   centerX: number;
   centerY: number;
-  minRadius: number;
   maxRadius: number;
   totalRotations: number;
 }
 
-/** Polar -> cartesian mapping for a normalized time fraction `t` - see the top-of-file "SPIRAL FORMULA" comment. */
+/**
+ * Polar -> cartesian mapping for a normalized time fraction `t` - see the
+ * top-of-file "SPIRAL FORMULA" comment. `radius = t * maxRadius` - ZERO
+ * at t=0, no `minRadius` floor (see that comment for why the earlier
+ * fixed-center-hole version was replaced) - so the earliest entry sits
+ * exactly at the spiral's own center.
+ *
+ * `radiusOffset` (default 0) adds a constant to the computed radius before
+ * converting to cartesian, at the SAME theta `t` would otherwise use - this
+ * is the one hook lane-assigned arcs use to push themselves outward; see
+ * the top-of-file "OVERLAPPING ARCS" comment for why a radius nudge (not a
+ * theta nudge) is the spiral's equivalent of LinearTimeline's vertical lane
+ * offset. Every other caller (the main spiral path, year labels, and point
+ * entries - none of which are ever lane-assigned) leaves this at its
+ * default and is completely unaffected.
+ */
+/**
+ * The raw polar angle (radians) at `t` - `theta` in the SPIRAL FORMULA
+ * comment, before it's converted to cartesian. Pulled out of `spiralPoint`
+ * so the YEAR LABEL TICKS mark (which needs the "from center outward to
+ * this point" direction, not `spiralPoint`'s own (x, y) output) can reuse
+ * the exact same formula rather than a second, possibly-drifting copy of
+ * it.
+ */
+function spiralPolarAngle(t: number, params: SpiralParams): number {
+  return SPIRAL_START_ANGLE + t * params.totalRotations * Math.PI * 2;
+}
+
 function spiralPoint(
   t: number,
-  params: SpiralParams
+  params: SpiralParams,
+  radiusOffset = 0
 ): { x: number; y: number } {
-  const { centerX, centerY, minRadius, maxRadius, totalRotations } = params;
-  const radius = minRadius + t * (maxRadius - minRadius);
-  const theta = SPIRAL_START_ANGLE + t * totalRotations * Math.PI * 2;
+  const { centerX, centerY, maxRadius } = params;
+  const radius = t * maxRadius + radiusOffset;
+  const theta = spiralPolarAngle(t, params);
   return {
     x: centerX + radius * Math.cos(theta),
     y: centerY + radius * Math.sin(theta),
   };
-}
-
-/**
- * Analytic tangent direction (in degrees, for an SVG `rotate()`) of the
- * spiral curve at `t` - the derivative of the polar parametrization used
- * by `spiralPoint`, via the standard product rule for a curve traced by
- * (r(t)*cos(theta(t)), r(t)*sin(theta(t))). Both r(t) and theta(t) are
- * linear in `t` here, so dr/dt and dtheta/dt are just constants. Used
- * only for the plain-<text> fallback label - see the top-of-file
- * "<textPath> YEAR LABELS" comment.
- */
-function spiralTangentAngleDeg(t: number, params: SpiralParams): number {
-  const { minRadius, maxRadius, totalRotations } = params;
-  const radius = minRadius + t * (maxRadius - minRadius);
-  const theta = SPIRAL_START_ANGLE + t * totalRotations * Math.PI * 2;
-  const dRadius = maxRadius - minRadius;
-  const dTheta = totalRotations * Math.PI * 2;
-  const dx = dRadius * Math.cos(theta) - radius * Math.sin(theta) * dTheta;
-  const dy = dRadius * Math.sin(theta) + radius * Math.cos(theta) * dTheta;
-  return (Math.atan2(dy, dx) * 180) / Math.PI;
 }
 
 /** Stitches a list of points into one straight-segmented SVG path `d` string. */
@@ -486,11 +659,18 @@ function buildPolylinePath(points: { x: number; y: number }[]): string {
  * draw a range entry's arc. See the top-of-file "RANGE ENTRIES" comment
  * for why this (walking the same parametric curve over a short span)
  * rather than a straight line between the two endpoints.
+ *
+ * `radiusOffset` is forwarded to every sampled `spiralPoint` call - see
+ * that function's own comment - so a lane-assigned arc's ENTIRE path (not
+ * just its endpoints) follows the same outward-shifted curve, rather than
+ * only its start/end points moving while the arc between them still traces
+ * the un-offset spiral.
  */
 function sampleArcPoints(
   tStart: number,
   tEnd: number,
-  params: SpiralParams
+  params: SpiralParams,
+  radiusOffset = 0
 ): { x: number; y: number }[] {
   const t0 = Math.min(tStart, tEnd);
   const t1 = Math.max(tStart, tEnd);
@@ -506,7 +686,7 @@ function sampleArcPoints(
   const points: { x: number; y: number }[] = [];
   for (let i = 0; i <= segmentCount; i++) {
     const t = t0 + (span * i) / segmentCount;
-    points.push(spiralPoint(t, params));
+    points.push(spiralPoint(t, params, radiusOffset));
   }
   return points;
 }
@@ -535,11 +715,6 @@ export default function SpiralTimeline({
     SVGSVGElement,
     unknown
   > | null>(null);
-
-  // Unique per mounted instance, so the <path id="..."> the year labels'
-  // <textPath> elements reference can never collide if this component
-  // were ever rendered more than once on the same page.
-  const spiralPathId = useId();
 
   // ─── Responsive sizing ───
   // Same ResizeObserver-on-a-container-ref pattern as StarMap.tsx/
@@ -586,9 +761,11 @@ export default function SpiralTimeline({
   // `totalRotations` is roughly the number of years the domain spans
   // (see the top-of-file SPIRAL FORMULA comment), floored at 1 full loop
   // so even a short-lived history still reads as a spiral rather than a
-  // single tight arc. `maxRadius`/`minRadius` are scaled off the
-  // container's own measured size - see the "FITTING THE WHOLE SPIRAL"
-  // comment above.
+  // single tight arc. `maxRadius` is scaled off the container's own
+  // measured size - see the "FITTING THE WHOLE SPIRAL" comment above. No
+  // `minRadius` - see the "SPIRAL FORMULA" comment's own explanation of
+  // why the spiral now starts at true radius 0 instead of a reserved
+  // center hole.
   const spiralParams = useMemo<SpiralParams>(() => {
     const yearsSpanned = (maxDate.getTime() - minDate.getTime()) / MS_PER_YEAR;
     const totalRotations = Math.max(1, yearsSpanned);
@@ -600,7 +777,6 @@ export default function SpiralTimeline({
     return {
       centerX: size.width / 2,
       centerY: size.height / 2,
-      minRadius: maxRadius * MIN_RADIUS_RATIO,
       maxRadius,
       totalRotations,
     };
@@ -630,7 +806,7 @@ export default function SpiralTimeline({
 
   // Cumulative Euclidean distance up to each sample - since every
   // segment is straight, this sum IS the path's exact length at that
-  // sample, in the same units `<textPath startOffset>` expects.
+  // sample, the same units `tToArcLength`/`arcLengthToT` both work in.
   const cumulativeLengths = useMemo(() => {
     const lengths = [0];
     for (let i = 1; i < spiralSamples.length; i++) {
@@ -656,12 +832,50 @@ export default function SpiralTimeline({
     return len0 + (len1 - len0) * frac;
   };
 
-  // ─── Year labels ───
-  // One label per calendar year the domain touches, positioned at that
+  /**
+   * The inverse of `tToArcLength` - given an arc-length distance along
+   * `spiralPathD`, finds the `t` (0-1) it corresponds to. Used to nudge a
+   * year glyph along the gridline when it would otherwise land on top of
+   * an entry marker - see the top-of-file "YEAR GLYPHS" comment's
+   * "COLLISION AVOIDANCE" section: `arcLengthToT(tToArcLength(t) +
+   * YEAR_GLYPH_NUDGE_ARC_PX)` finds the `t` a fixed PIXEL distance past a
+   * glyph's own position, which is what lets the nudge stay visually
+   * consistent regardless of how much arc length a given `t` step covers
+   * at that point in the spiral (outer loops cover far more arc length
+   * per unit `t` than inner ones).
+   *
+   * `cumulativeLengths` is monotonically non-decreasing (each segment
+   * adds a non-negative length), so a binary search for the bracketing
+   * sample index is valid, then linear interpolation WITHIN that bracket
+   * mirrors `tToArcLength`'s own interpolation exactly (same source
+   * array, same units), just solved in the opposite direction.
+   */
+  const arcLengthToT = (targetLength: number): number => {
+    const clamped = Math.max(0, Math.min(targetLength, totalPathLength));
+    let lo = 0;
+    let hi = cumulativeLengths.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (cumulativeLengths[mid] < clamped) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    const i1 = lo;
+    const i0 = Math.max(0, i1 - 1);
+    const len0 = cumulativeLengths[i0] ?? 0;
+    const len1 = cumulativeLengths[i1] ?? len0;
+    const frac = len1 > len0 ? (clamped - len0) / (len1 - len0) : 0;
+    return (i0 + frac) / spiralSampleCount;
+  };
+
+  // ─── Year boundaries ───
+  // One glyph per calendar year the domain touches, positioned at that
   // year's Jan 1 (clamped into [minDate, maxDate] for the first/last
-  // partial years) - see "DRAWING THE SPIRAL LINE" above for the
-  // textPath/fallback split.
-  const yearLabels = useMemo(() => {
+  // partial years) - see the top-of-file "YEAR GLYPHS" comment for how
+  // each one is actually rendered.
+  const yearBoundaries = useMemo(() => {
     const startYear = minDate.getFullYear();
     const endYear = maxDate.getFullYear();
     const span = maxDate.getTime() - minDate.getTime();
@@ -716,47 +930,167 @@ export default function SpiralTimeline({
     [openedEntryIds]
   );
 
-  // ─── Single-point entries (no endTimestamp) ───
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * RANGE ENTRIES (with endTimestamp): LANE-ASSIGNED ARCS, LANE 0 = 0
+   * RADIAL OFFSET
+   * ──────────────────────────────────────────────────────────────────────
+   * See the top-of-file "OVERLAPPING ARCS (AND POINTS)" comment for the
+   * full reasoning. In short: `assignLanes` (utils/laneAssignment.ts,
+   * shared verbatim with LinearTimeline.tsx) decides lane NUMBERS from
+   * each entry's arc-length span along the spiral path (`tToArcLength`,
+   * the spiral's stand-in for LinearTimeline's xScale pixel position, and
+   * processed duration-descending, so a solitary or longest-overlapping
+   * arc lands in lane 0); `radiusOffset` then turns a lane number into an
+   * outward radial nudge, re-sampling that entry's arc (and its
+   * start/end/midpoint) at the larger radius via `spiralPoint`/
+   * `sampleArcPoints`'s `radiusOffset` parameter - `lane * RADIAL_LANE_OFFSET_PX`,
+   * so lane 0 is exactly 0: it sits directly on the spiral's own drawn
+   * curve, not nudged outward at all.
+   *
+   * `start`/`end`/`midpoint`/`pathD` below all already have this offset
+   * baked in - the hover/click/highlight JSX further down reads these same
+   * fields, so it automatically targets the lane-adjusted arc position, not
+   * the original un-offset spiral curve.
+   *
+   * `lanedRangeItems` (the pre-radiusOffset `assignLanes` output, still
+   * carrying `arcStart`/`arcEnd`) is kept alongside the final `ranges` list
+   * so the POINT ENTRIES computation just below can look up which lane
+   * each arc landed in and what span it covers, without recomputing any of
+   * this from scratch.
+   */
+  const { ranges, lanedRangeItems } = useMemo(() => {
+    const items = sortedEntries
+      .filter(entry => entry.endTimestamp)
+      .map(entry => {
+        const tStart = normalize(new Date(entry.timestamp));
+        const tEnd = normalize(new Date(entry.endTimestamp as string));
+        return {
+          entry,
+          tStart,
+          tEnd,
+          arcStart: tToArcLength(Math.min(tStart, tEnd)),
+          arcEnd: tToArcLength(Math.max(tStart, tEnd)),
+          color: getActivityColor(entry.activityType),
+        };
+      });
+
+    const laned = assignLanes(
+      items,
+      item => item.arcStart,
+      item => item.arcEnd,
+      LANE_GAP_PX
+    );
+
+    const ranges = laned.map(({ entry, tStart, tEnd, color, lane }) => {
+      const radiusOffset = lane * RADIAL_LANE_OFFSET_PX;
+      const arcPoints = sampleArcPoints(
+        tStart,
+        tEnd,
+        spiralParams,
+        radiusOffset
+      );
+      return {
+        entry,
+        pathD: buildPolylinePath(arcPoints),
+        start: arcPoints[0],
+        end: arcPoints[arcPoints.length - 1],
+        midpoint: spiralPoint((tStart + tEnd) / 2, spiralParams, radiusOffset),
+        color,
+        lane,
+      };
+    });
+
+    return { ranges, lanedRangeItems: laned };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedEntries, spiralParams, minDate, maxDate, cumulativeLengths]);
+
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * SINGLE-POINT ENTRIES (no endTimestamp): LANE-BUMPED AROUND ARCS THAT
+   * COVER THEIR DATE
+   * ──────────────────────────────────────────────────────────────────────
+   * See the top-of-file "POINT ENTRIES NOW PARTICIPATE IN OVERLAP
+   * DETECTION TOO" comment for the full reasoning. In short: a point whose
+   * date falls within an already-laned arc's span (`lanedRangeItems`,
+   * computed just above) would render right on top of that arc's curve if
+   * left at lane 0 - `assignLaneAroundRanges` (utils/laneAssignment.ts)
+   * finds the first lane (0, 1, 2, ...) where no arc assigned to that lane
+   * covers this point's own arc-length position, checking only against
+   * ARCS (never other points - see that function's own comment for why).
+   * A point with no conflicting arc anywhere stays at lane 0, i.e.
+   * `radiusOffset` 0, unchanged from its original always-on-the-curve
+   * behavior.
+   */
   const points = useMemo(
     () =>
       sortedEntries
         .filter(entry => !entry.endTimestamp)
-        .map(entry => ({
-          entry,
-          ...spiralPoint(normalize(new Date(entry.timestamp)), spiralParams),
-          color: getActivityColor(entry.activityType),
-        })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sortedEntries, spiralParams, minDate, maxDate]
-  );
-
-  // ─── Range entries (with endTimestamp) ───
-  // Each becomes an arc following the spiral's own curvature between its
-  // start and end t - see the top-of-file "RANGE ENTRIES" comment.
-  // `midpoint` (the point halfway along the arc's own span, by `t`) is
-  // used only by the CLICK-TO-CENTER effect below - the 2D equivalent of
-  // LinearTimeline's "center a range entry on the midpoint of its
-  // start/end timestamps" choice.
-  const ranges = useMemo(
-    () =>
-      sortedEntries
-        .filter(entry => entry.endTimestamp)
         .map(entry => {
-          const tStart = normalize(new Date(entry.timestamp));
-          const tEnd = normalize(new Date(entry.endTimestamp as string));
-          const arcPoints = sampleArcPoints(tStart, tEnd, spiralParams);
+          const t = normalize(new Date(entry.timestamp));
+          const position = tToArcLength(t);
+          const lane = assignLaneAroundRanges(
+            position,
+            lanedRangeItems,
+            item => item.arcStart,
+            item => item.arcEnd,
+            LANE_GAP_PX
+          );
+          const radiusOffset = lane * RADIAL_LANE_OFFSET_PX;
           return {
             entry,
-            pathD: buildPolylinePath(arcPoints),
-            start: arcPoints[0],
-            end: arcPoints[arcPoints.length - 1],
-            midpoint: spiralPoint((tStart + tEnd) / 2, spiralParams),
+            ...spiralPoint(t, spiralParams, radiusOffset),
             color: getActivityColor(entry.activityType),
           };
         }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sortedEntries, spiralParams, minDate, maxDate]
+    [sortedEntries, spiralParams, minDate, maxDate, lanedRangeItems]
   );
+
+  // ─── Entry marker positions (for year-glyph collision avoidance) ───
+  // See the top-of-file "YEAR GLYPHS" comment's "COLLISION AVOIDANCE"
+  // section - a flat list of every rendered entry marker's on-screen
+  // position (a point's own (x, y), or a range arc's start/end/midpoint),
+  // checked against each year glyph's raw position before it's drawn.
+  const entryMarkerPositions = useMemo(
+    () => [
+      ...points.map(point => ({ x: point.x, y: point.y })),
+      ...ranges.flatMap(range => [range.start, range.end, range.midpoint]),
+    ],
+    [points, ranges]
+  );
+
+  /**
+   * Finds a `t` for a year glyph that doesn't land on top of an entry
+   * marker - see the top-of-file "YEAR GLYPHS" comment's "COLLISION
+   * AVOIDANCE" section. Tries the glyph's own raw position first, then
+   * nudges forward along the curve, then backward; if even that's still
+   * colliding (an extreme edge case - entries densely packed on both
+   * sides), just accepts the forward-nudged position rather than
+   * searching indefinitely for a perfectly clear spot.
+   */
+  const findNonCollidingYearGlyphT = (t: number, arcLength: number): number => {
+    const collidesAt = (candidateT: number): boolean => {
+      const candidate = spiralPoint(candidateT, spiralParams);
+      return entryMarkerPositions.some(
+        marker =>
+          Math.hypot(marker.x - candidate.x, marker.y - candidate.y) <
+          YEAR_GLYPH_COLLISION_RADIUS_PX
+      );
+    };
+
+    if (!collidesAt(t)) return t;
+
+    const forwardT = arcLengthToT(
+      Math.min(totalPathLength, arcLength + YEAR_GLYPH_NUDGE_ARC_PX)
+    );
+    if (!collidesAt(forwardT)) return forwardT;
+
+    const backwardT = arcLengthToT(
+      Math.max(0, arcLength - YEAR_GLYPH_NUDGE_ARC_PX)
+    );
+    return collidesAt(backwardT) ? forwardT : backwardT;
+  };
 
   // ─── Pan/zoom behavior ───
   // Same mechanism as StarMap.tsx: attached once, and the 'zoom' handler
@@ -893,12 +1227,18 @@ export default function SpiralTimeline({
 
   // ─── Hover tooltip ───
   // Same shape/tracking as LinearTimeline.tsx/StarMap.tsx - see the
-  // "Hover tooltip" comment in LinearTimeline.tsx.
-  const [hovered, setHovered] = useState<{
-    entry: Entry;
-    x: number;
-    y: number;
-  } | null>(null);
+  // "Hover tooltip" comment in LinearTimeline.tsx - EXTENDED with a
+  // `kind` discriminant so the SAME piece of state can also track a
+  // hovered YEAR GLYPH (see the "YEAR GLYPHS" comment below), not just a
+  // hovered entry point/arc. `EntryTooltip` below is rendered with either
+  // its `entry` prop (unchanged behavior) or its `label` prop (the bare
+  // year), depending on which branch is set - see EntryTooltip.tsx's own
+  // "ENTRY vs. LABEL VARIANT" comment.
+  const [hovered, setHovered] = useState<
+    | { kind: 'entry'; entry: Entry; x: number; y: number }
+    | { kind: 'year'; year: number; x: number; y: number }
+    | null
+  >(null);
 
   const isReady =
     size.width > 0 && size.height > 0 && spiralParams.maxRadius > 0;
@@ -947,7 +1287,6 @@ export default function SpiralTimeline({
           {isReady && (
             <>
               <path
-                id={spiralPathId}
                 d={spiralPathD}
                 fill="none"
                 stroke="currentColor"
@@ -974,6 +1313,7 @@ export default function SpiralTimeline({
                     className="cursor-pointer transition-opacity duration-200"
                     onMouseEnter={event =>
                       setHovered({
+                        kind: 'entry',
                         entry,
                         x: event.clientX,
                         y: event.clientY,
@@ -981,7 +1321,9 @@ export default function SpiralTimeline({
                     }
                     onMouseMove={event =>
                       setHovered(current =>
-                        current && current.entry.id === entry.id
+                        current &&
+                        current.kind === 'entry' &&
+                        current.entry.id === entry.id
                           ? { ...current, x: event.clientX, y: event.clientY }
                           : current
                       )
@@ -1147,6 +1489,7 @@ export default function SpiralTimeline({
                       className="cursor-pointer"
                       onMouseEnter={event =>
                         setHovered({
+                          kind: 'entry',
                           entry,
                           x: event.clientX,
                           y: event.clientY,
@@ -1154,7 +1497,9 @@ export default function SpiralTimeline({
                       }
                       onMouseMove={event =>
                         setHovered(current =>
-                          current && current.entry.id === entry.id
+                          current &&
+                          current.kind === 'entry' &&
+                          current.entry.id === entry.id
                             ? {
                                 ...current,
                                 x: event.clientX,
@@ -1181,46 +1526,48 @@ export default function SpiralTimeline({
                 );
               })}
 
-              {yearLabels.map(({ year, t }) => {
-                const arcLength = tToArcLength(t);
-                const hasRoomForTextPath =
-                  totalPathLength > 0 &&
-                  arcLength <= totalPathLength - YEAR_LABEL_MIN_PATH_ROOM;
+              {yearBoundaries.map(({ year, t }) => {
+                // Nudged away from any colliding entry marker (see the
+                // top-of-file "YEAR GLYPHS" comment's "COLLISION
+                // AVOIDANCE" section) before computing its final position.
+                const glyphT = findNonCollidingYearGlyphT(t, tToArcLength(t));
+                const { x, y } = spiralPoint(glyphT, spiralParams);
+                const isHovered =
+                  hovered?.kind === 'year' && hovered.year === year;
 
-                if (hasRoomForTextPath) {
-                  return (
-                    <text
-                      key={year}
-                      fill="var(--viz-label-color)"
-                      className="pointer-events-none select-none text-[10px] uppercase tracking-widest"
-                    >
-                      <textPath
-                        href={`#${spiralPathId}`}
-                        startOffset={arcLength}
-                      >
-                        {year}
-                      </textPath>
-                    </text>
-                  );
-                }
-
-                // Fallback: textPath has no room to run (this year's
-                // label lands too close to the spiral's outer end) -
-                // see the top-of-file "<textPath> YEAR LABELS" comment.
-                const { x, y } = spiralPoint(t, spiralParams);
-                const angle = spiralTangentAngleDeg(t, spiralParams);
                 return (
                   <text
                     key={year}
                     x={x}
                     y={y}
-                    dy={-6}
                     textAnchor="middle"
-                    transform={`rotate(${angle}, ${x}, ${y})`}
-                    fill="var(--viz-label-color)"
-                    className="pointer-events-none select-none text-[10px] uppercase tracking-widest"
+                    dominantBaseline="central"
+                    fill="currentColor"
+                    fontSize={YEAR_GLYPH_FONT_SIZE_PX}
+                    opacity={
+                      isHovered ? YEAR_GLYPH_HOVER_OPACITY : YEAR_GLYPH_OPACITY
+                    }
+                    className="cursor-default select-none transition-opacity duration-150"
+                    onMouseEnter={event =>
+                      setHovered({
+                        kind: 'year',
+                        year,
+                        x: event.clientX,
+                        y: event.clientY,
+                      })
+                    }
+                    onMouseMove={event =>
+                      setHovered(current =>
+                        current &&
+                        current.kind === 'year' &&
+                        current.year === year
+                          ? { ...current, x: event.clientX, y: event.clientY }
+                          : current
+                      )
+                    }
+                    onMouseLeave={() => setHovered(null)}
                   >
-                    {year}
+                    ✦
                   </text>
                 );
               })}
@@ -1229,9 +1576,16 @@ export default function SpiralTimeline({
         </g>
       </svg>
 
-      {hovered && (
-        <EntryTooltip entry={hovered.entry} x={hovered.x} y={hovered.y} />
-      )}
+      {hovered &&
+        (hovered.kind === 'entry' ? (
+          <EntryTooltip entry={hovered.entry} x={hovered.x} y={hovered.y} />
+        ) : (
+          <EntryTooltip
+            label={String(hovered.year)}
+            x={hovered.x}
+            y={hovered.y}
+          />
+        ))}
 
       {isEmpty && (
         <VizEmptyState

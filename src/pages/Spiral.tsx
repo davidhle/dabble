@@ -123,7 +123,10 @@ export default function Spiral({ entries }: SpiralProps) {
     resetPending,
     resetAll,
   } = useEntrySelection({
-    categories,
+    // `categories` is no longer passed here - see Constellation.tsx's
+    // identical comment: the shared EntrySelectionProvider (App.tsx) now
+    // derives its own categories from `entries` directly.
+    //
     // RESET INCLUDES THE BRUSH: same pattern as Constellation.tsx/
     // Timeline.tsx's own `onFullReset` - bump `resetViewSignal` (this
     // page's canvas-specific pan/zoom reset) AND call

@@ -152,7 +152,10 @@ export default function Timeline({ entries }: TimelineProps) {
     resetPending,
     resetAll,
   } = useEntrySelection({
-    categories,
+    // `categories` is no longer passed here - see Constellation.tsx's
+    // identical comment: the shared EntrySelectionProvider (App.tsx) now
+    // derives its own categories from `entries` directly.
+    //
     // RESET INCLUDES THE BRUSH: the hook's own `resetAll` (fired by the
     // bottom-right ResetButton, or Escape's second press - see
     // useEntrySelection.ts's ESCAPE KEY comment) already clears the panel

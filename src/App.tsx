@@ -54,6 +54,7 @@ import { Entry } from './types/Entry';
 import { loadEntries, saveEntries } from './utils/entriesStorage';
 import { initializeDefaultDataForFirstVisit } from './utils/initializeFirstVisit';
 import { TimeRangeProvider } from './context/TimeRangeContext';
+import { EntrySelectionProvider } from './context/EntrySelectionContext';
 
 function App() {
   /**
@@ -215,60 +216,65 @@ function App() {
    * 3. Use a state management library
    */
   return (
-    // TimeRangeProvider wraps EVERYTHING that follows, including
-    // HashRouter itself - see TimeRangeContext.tsx's top-of-file "WHY THIS
-    // LIVES ABOVE THE ROUTER" comment for why: a provider that's a PARENT
-    // of the router never unmounts when routes change (only the router's
-    // own children do), so `selectedRange` survives navigating between
-    // Constellation/Timeline/Spiral instead of resetting every time.
-    // Passed the same `entries` state this component already owns - see
-    // TimeRangeContext.tsx for how `fullRange` is computed from it.
+    // TimeRangeProvider AND EntrySelectionProvider both wrap EVERYTHING
+    // that follows, including HashRouter itself - see TimeRangeContext.tsx's
+    // top-of-file "WHY THIS LIVES ABOVE THE ROUTER" comment (and
+    // EntrySelectionContext.tsx's own, identical-in-spirit comment) for
+    // why: a provider that's a PARENT of the router never unmounts when
+    // routes change (only the router's own children do), so
+    // `selectedRange` AND the sidebar's selection/filter/sort state both
+    // survive navigating between Constellation/Timeline/Spiral instead of
+    // resetting every time. Both are passed the same `entries` state this
+    // component already owns - see each context file for what it derives
+    // from that (fullRange; categories).
     <TimeRangeProvider entries={entries}>
-      {/* HashRouter (URLs like /dabble/#/constellation) instead of BrowserRouter
-        is a deliberate trade-off for static GitHub Pages hosting: Pages has no
-        server-side rewrite rule, so a direct load or refresh of a BrowserRouter
-        path like /dabble/constellation would 404. The hash portion of the URL
-        never reaches the server, so GitHub Pages just serves index.html and
-        React Router handles the rest client-side. Given the deployment
-        timeline, this was chosen over adding a 404.html redirect workaround. */}
-      <HashRouter>
-        <Routes>
-          {/**
-           * Parent route with Layout
-           *
-           * The Layout component wraps all child routes, providing:
-           * - Consistent navbar across all pages
-           * - AddEntry modal accessible from any page
-           * - Main content container
-           *
-           * The onAddEntry prop enables the Layout (and its AddEntryForm)
-           * to add entries to the state managed here.
-           */}
-          <Route path="/" element={<Layout onAddEntry={addEntry} />}>
+      <EntrySelectionProvider entries={entries}>
+        {/* HashRouter (URLs like /dabble/#/constellation) instead of BrowserRouter
+          is a deliberate trade-off for static GitHub Pages hosting: Pages has no
+          server-side rewrite rule, so a direct load or refresh of a BrowserRouter
+          path like /dabble/constellation would 404. The hash portion of the URL
+          never reaches the server, so GitHub Pages just serves index.html and
+          React Router handles the rest client-side. Given the deployment
+          timeline, this was chosen over adding a 404.html redirect workaround. */}
+        <HashRouter>
+          <Routes>
             {/**
-             * Child routes render inside Layout's <Outlet />
+             * Parent route with Layout
              *
-             * These components could receive entries as props if needed.
-             * Currently they don't need entries, but here's how you'd do it:
+             * The Layout component wraps all child routes, providing:
+             * - Consistent navbar across all pages
+             * - AddEntry modal accessible from any page
+             * - Main content container
              *
-             * <Route
-             *   index
-             *   element={<Home entries={entries} />}
-             * />
-             *
-             * Or use Outlet context in Layout to pass data.
+             * The onAddEntry prop enables the Layout (and its AddEntryForm)
+             * to add entries to the state managed here.
              */}
-            <Route index element={<Home />} />
-            <Route path="linear" element={<Timeline entries={entries} />} />
-            <Route path="spiral" element={<Spiral entries={entries} />} />
-            <Route
-              path="constellation"
-              element={<Constellation entries={entries} />}
-            />
-            <Route path="about" element={<About />} />
-          </Route>
-        </Routes>
-      </HashRouter>
+            <Route path="/" element={<Layout onAddEntry={addEntry} />}>
+              {/**
+               * Child routes render inside Layout's <Outlet />
+               *
+               * These components could receive entries as props if needed.
+               * Currently they don't need entries, but here's how you'd do it:
+               *
+               * <Route
+               *   index
+               *   element={<Home entries={entries} />}
+               * />
+               *
+               * Or use Outlet context in Layout to pass data.
+               */}
+              <Route index element={<Home />} />
+              <Route path="linear" element={<Timeline entries={entries} />} />
+              <Route path="spiral" element={<Spiral entries={entries} />} />
+              <Route
+                path="constellation"
+                element={<Constellation entries={entries} />}
+              />
+              <Route path="about" element={<About />} />
+            </Route>
+          </Routes>
+        </HashRouter>
+      </EntrySelectionProvider>
     </TimeRangeProvider>
   );
 }

@@ -118,7 +118,7 @@
  * onClick handler normally.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
 import { Category } from '../types/Category';
@@ -327,9 +327,35 @@ export default function StarMap({
   // the sidebar overlay opens. Still tracked via ResizeObserver (rather
   // than reading window.innerWidth/Height directly) so window resizes
   // continue to update it live, same as before.
+  //
+  // `useLayoutEffect`, NOT `useEffect`: this used to be a plain
+  // `useEffect`, which meant `size` (and therefore `stars`/
+  // `categoryCenters`, and the CLICK-TO-CENTER effect's own zero-size
+  // guard below) stayed at its initial `{0, 0}` for the entire first
+  // passive-effect flush after mount - LinearTimeline.tsx's own MISSING
+  // DATA POINTS comment (cause #2) already documents this exact "size
+  // effect runs too late" failure mode for that view. It went unnoticed
+  // here as long as CLICK-TO-CENTER only ever ran in response to a live
+  // click (by which point a later render had long since corrected
+  // `size`) - but now that `expandedEntryId` can already be non-null the
+  // very first time StarMap mounts (an entry expanded on a different
+  // page, persisted via EntrySelectionContext - see that file's
+  // "RECENTERING ON MOUNT" comment), CLICK-TO-CENTER's FIRST guaranteed
+  // run happens inside that same first effect flush, when `size` was
+  // still `{0, 0}` under the old `useEffect` - its own zero-size guard
+  // would then skip the recenter, permanently, since `expandedEntryId`
+  // doesn't change again just because `size` is corrected in a following
+  // render (unlike `sidebarWidth` - see CLICK-TO-CENTER's own comment on
+  // its dependency array - `size` isn't one of this effect's
+  // dependencies, so there's no later re-fire to fall back on the way
+  // there is for a late-arriving `sidebarWidth`). `useLayoutEffect`
+  // measures (and corrects) `size` synchronously before that first
+  // passive-effect flush ever runs, matching LinearTimeline.tsx's/
+  // SpiralTimeline.tsx's own responsive-sizing effects, so
+  // CLICK-TO-CENTER's mount-time run already sees the correct size.
   const [size, setSize] = useState({ width: 0, height: 0 });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
@@ -462,11 +488,35 @@ export default function StarMap({
    * The y target is untouched (`height / 2`) since the sidebar overlay
    * only covers the left edge, not the top or bottom.
    *
-   * This effect intentionally depends on `expandedEntryId` alone, not on
-   * `stars`/`size`/`sidebarWidth` too - those are read from whatever the
-   * latest render happened to close over, but the pan should only ever be
-   * *triggered* by the expanded entry actually changing, not by e.g. a
-   * window resize recomputing `stars` while the same entry stays expanded.
+   * `stars`/`size` are deliberately left OUT of the dependency array -
+   * they're read from whatever the latest render happened to close over,
+   * but the pan should only ever be *triggered* by the expanded entry
+   * actually changing, not by e.g. a window resize recomputing `stars`
+   * while the same entry stays expanded.
+   *
+   * `sidebarWidth` IS a dependency, though (unlike `stars`/`size`) - this
+   * used to intentionally exclude it too, on the reasoning above, but that
+   * has a race condition on the very FIRST entry a page mounts with
+   * already expanded (either the first-ever click on THIS page, or now -
+   * see EntrySelectionContext.tsx's "RECENTERING ON MOUNT" comment -
+   * arriving already-expanded from a DIFFERENT page via the shared
+   * selection context): `expandedEntryId` and `hasSelection` both flip to
+   * their new values in the SAME render, but Constellation.tsx's own
+   * `sidebarWidth` state is still 0 at that point - a real measurement
+   * only lands in a LATER, separate commit, once its ResizeObserver
+   * callback fires against the now-mounted SidebarPanelStack DOM node.
+   * Since `targetX` reads `sidebarWidth` directly, this effect firing on
+   * that render would center against the stale value (0) - i.e. the
+   * canvas's full-width center, which sits partly UNDER the sidebar
+   * overlay - instead of the correct sidebar-excluded center, and
+   * (without `sidebarWidth` as a dependency) never get a second chance to
+   * correct itself, since `expandedEntryId` doesn't change again just
+   * because `sidebarWidth` later does. SpiralTimeline.tsx's own identical
+   * effect already documents this exact race and fixes it the same way -
+   * see its "CLICK-TO-CENTER" comment for the full reasoning (including
+   * why d3's `.transition()` makes the correction read as one smooth pan
+   * converging on the right spot, not a visible double jump, once the
+   * real width lands and this effect re-fires).
    */
   useEffect(() => {
     const svgNode = svgRef.current;
@@ -496,7 +546,7 @@ export default function StarMap({
       .duration(650) // 500-750ms: smooth, not sluggish
       .call(zoomBehavior.transform, centeredTransform);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedEntryId]);
+  }, [expandedEntryId, sidebarWidth]);
 
   /**
    * ─── RESET-VIEW: PROGRAMMATIC PAN/ZOOM RESET, TIED TO `resetViewSignal` ───

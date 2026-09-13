@@ -26,6 +26,19 @@
  * never drift out of sync with the panel/modal again, no matter what
  * date-formatting rule changes in the future.
  *
+ * ENTRY vs. LABEL VARIANT: originally always took a full `Entry` (title +
+ * formatted date). SpiralTimeline.tsx's year-glyph markers (see that
+ * file's own "YEAR GLYPHS" comment) need the exact same floating-card
+ * look and edge-aware positioning for a hover target that ISN'T an entry
+ * at all - just a bare year number, with no second date line to show.
+ * Rather than duplicate this whole component for that one simpler case,
+ * `entry` and `label` are mutually exclusive optional props: passing
+ * `entry` keeps the original title+date rendering byte-for-byte
+ * unchanged (every existing call site - StarMap.tsx, LinearTimeline.tsx,
+ * and SpiralTimeline.tsx's own entry/arc hover - is untouched); passing
+ * `label` instead renders just that single line, no `formatEntryDate`
+ * call and no second line, for a lightweight non-entry hover target.
+ *
  * EDGE-AWARE POSITIONING: `x`/`y` are just the raw cursor/star position,
  * not a final on-screen box origin - if placed at a flat `x + OFFSET`,
  * `y + OFFSET` unconditionally, the tooltip would render partly (or
@@ -44,13 +57,15 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { Entry } from '../types/Entry';
 import { formatEntryDate } from '../utils/formatEntryDate';
 
-interface EntryTooltipProps {
-  entry: Entry;
+type EntryTooltipProps = {
   /** Viewport (clientX) position to anchor near - typically the triggering mouse event's coordinates. */
   x: number;
   /** Viewport (clientY) position to anchor near. */
   y: number;
-}
+} & (
+  | { entry: Entry; label?: undefined }
+  | { entry?: undefined; label: string }
+);
 
 /** Default offset (px) from the anchor point, before edge-avoidance kicks in. */
 const OFFSET = 12;
@@ -58,7 +73,12 @@ const OFFSET = 12;
 /** Minimum gap (px) kept between the tooltip and the viewport edge. */
 const EDGE_MARGIN = 8;
 
-export default function EntryTooltip({ entry, x, y }: EntryTooltipProps) {
+export default function EntryTooltip({
+  entry,
+  label,
+  x,
+  y,
+}: EntryTooltipProps) {
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({
     left: x + OFFSET,
@@ -99,8 +119,6 @@ export default function EntryTooltip({ entry, x, y }: EntryTooltipProps) {
     setPosition({ left, top });
   }, [x, y]);
 
-  const formattedDate = formatEntryDate(entry);
-
   return (
     // pointer-events-none: a hover tooltip should never itself be
     // hoverable/clickable - without this it could steal the mouseleave
@@ -120,10 +138,16 @@ export default function EntryTooltip({ entry, x, y }: EntryTooltipProps) {
       className="pointer-events-none fixed z-50 rounded-md border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] px-3 py-2 text-xs text-[var(--text-color)] shadow-lg"
       style={{ left: position.left, top: position.top }}
     >
-      <div className="font-medium">{entry.title}</div>
-      <div className="mt-0.5 text-[var(--text-muted-color)]">
-        {formattedDate}
-      </div>
+      {entry ? (
+        <>
+          <div className="font-medium">{entry.title}</div>
+          <div className="mt-0.5 text-[var(--text-muted-color)]">
+            {formatEntryDate(entry)}
+          </div>
+        </>
+      ) : (
+        <div className="font-medium">{label}</div>
+      )}
     </div>
   );
 }

@@ -206,7 +206,12 @@ export default function Constellation({ entries }: ConstellationProps) {
     resetPending,
     resetAll,
   } = useEntrySelection({
-    categories,
+    // `categories` is no longer passed here - the shared
+    // EntrySelectionProvider (see App.tsx) now derives its own categories
+    // directly from `entries`, the same computation this page's own
+    // `categories` above still runs locally for FilterBar/StarMap's props
+    // - see useEntrySelection.ts's top-of-file comment.
+    //
     // RESET INCLUDES THE BRUSH: bumping `resetViewSignal` (StarMap's own
     // pan/zoom reset) alongside `resetToFullRange()` (TimeRangeContext's
     // brush reset) is the exact same "onFullReset covers whatever ELSE a
