@@ -5,11 +5,26 @@
  * "star map" via StarMap.tsx. See StarMap.tsx for the pan/zoom,
  * clustering, and click handling implementation details.
  *
- * App.tsx currently keeps entries only in memory, so a fresh session has
- * an empty array. Rather than let the page render an empty void, we fall
- * back to a small set of mock entries (src/utils/mockEntries.ts) purely
- * so there's something to look at and click on while testing - real
- * entries added via the '+' button take over immediately once they exist.
+ * This used to fall back to a small set of mock entries
+ * (utils/mockEntries.ts) whenever `entries` was empty, purely so there was
+ * something to look at while testing before real data existed. That mock
+ * generator has been removed entirely now that a real bundled dataset
+ * exists as the actual first-visit default (see
+ * utils/initializeFirstVisit.ts) - an empty `entries` array here now only
+ * means a visitor deliberately reset to a blank slate (see the "Start
+ * Your Own Constellation" button in About.tsx), and just renders an empty
+ * star map rather than falling back to anything.
+ *
+ * SELECTION/FILTER/SORT STATE: this page used to own all of that directly
+ * (selectedEntries, filterCategories, sortMode, resetPending, the
+ * Escape-key handler, etc.) inline. It's now entirely delegated to
+ * useEntrySelection.ts - see that file's top-of-file comment for why it's
+ * the single source of truth for this state across all three
+ * visualization pages, and for the exact panel-stack/sort/filter/reset
+ * semantics. This page (and StarMap below) only consumes the hook's
+ * return value and renders it; Timeline.tsx (see its own top-of-file
+ * comment) is the second page built on the same hook, as a pilot for
+ * eventually doing the same for Spiral.tsx.
  *
  * ──────────────────────────────────────────────────────────────────────
  * FULL-BLEED CANVAS + FLOATING OVERLAY SIDEBAR
@@ -24,13 +39,12 @@
  *     height, regardless of `selectedEntries`. It is no longer a sized
  *     flex child of anything here; nothing in this file constrains its
  *     box.
- *   - The sidebar panel stack is a *separate*, absolutely-positioned
- *     overlay (`fixed left-0 bottom-0`, with a measured `top` and
- *     `paddingLeft` - see `headerLayout` below - plus a fixed `w-[33vw]`
- *     width), drawn on top of StarMap's canvas with a higher z-index. It
- *     only renders at all when `selectedEntries` is non-empty - there's
- *     still no separate "is the sidebar open" flag, "open" is still just
- *     derived from `selectedEntries.length > 0` - but unlike before,
+ *   - The sidebar panel stack (SidebarPanelStack.tsx - shared with
+ *     Timeline.tsx, see its own header comment) is a *separate*,
+ *     absolutely-positioned overlay drawn on top of StarMap's canvas with
+ *     a higher z-index. It only renders at all when `selectedEntries` is
+ *     non-empty (`hasSelection`, from the hook) - there's still no
+ *     separate "is the sidebar open" flag - but unlike before,
  *     mounting/unmounting it can't affect StarMap's size, because
  *     StarMap's size no longer depends on anything in this file's layout.
  *
@@ -38,97 +52,40 @@
  * *other* things, even though they don't affect StarMap's own size:
  *   - Width, for *visually* centering a clicked star - see `sidebarWidth`
  *     below (the overlay's own *actual rendered* width, currently a
- *     product of the fixed `w-[33vw]` class) and the CLICK-TO-CENTER
- *     comment in StarMap.tsx.
+ *     product of SidebarPanelStack's fixed `w-[33vw]` class) and the
+ *     CLICK-TO-CENTER comment in StarMap.tsx.
  *   - Header layout, so the overlay's content starts below the header
  *     stack (navbar + title/subtitle + FilterBar) and shares its left
  *     edge, instead of overlapping or misaligning with it - see
  *     `headerLayout` below.
- * FilterBar's own two rows (category filters, sort toggle) and this
- * sidebar overlay all share the SAME fixed `33vw` width (one third of
- * the viewport) - previously this was measured off the instructional
- * subtitle `<p>`'s own rendered width instead, so all three matched it
- * exactly; that matching has been intentionally replaced with a flat
- * viewport-relative proportion (see FilterBar.tsx and the sidebar's
- * className below), independent of the subtitle's width. `headerLayout`
- * still only measures `top`/`left` (position, not size) - see below - to
- * keep the sidebar's *left edge* aligned with the header, which is
- * unrelated to this width change.
- *
- * ──────────────────────────────────────────────────────────────────────
- * PANEL STACK: SORT ORDER, EXPAND/MINIMIZE, AND THE "OPENED" HIGHLIGHT
- * ──────────────────────────────────────────────────────────────────────
- * `selectedEntries` holds `{ entry, expanded }` pairs, always kept sorted
- * newest-first by `entry.timestamp` (see `insertSortedByTimestampDesc`).
- * That sort only runs when an entry is *added* - toggling which panel is
- * expanded, or removing one, never reorders the rest of the list, so a
- * panel doesn't jump around in the stack just because the user is
- * clicking through it.
- *
- * At most one panel is expanded at a time: opening a new star, or
- * re-clicking/re-selecting an already-open one, expands that entry and
- * collapses every other one. This mirrors a lot of "accordion" UIs and
- * keeps the sidebar from growing unboundedly tall as more stars are
- * opened - only the panel currently being looked at takes up full space,
- * the rest collapse to compact rows (see EntryPanel.tsx).
- *
- * `openedEntryIds` (passed to StarMap for the highlight ring/glow around
- * "opened" stars) is *every* id in `selectedEntries`, expanded or not -
- * "opened" means "has a panel in the sidebar at all", not "is currently
- * expanded". It's derived with `useMemo` rather than tracked as separate
- * state, so it can never drift out of sync with `selectedEntries` itself.
- *
- * ──────────────────────────────────────────────────────────────────────
- * SORT MODE: REORGANIZING, NOT FILTERING
- * ──────────────────────────────────────────────────────────────────────
- * `sortMode` ('date' | 'category') controls how `selectedEntries` is
- * *presented* - grouped under colored category headers, or as one flat
- * newest-first list - via `categoryGroups` below. It never touches
- * `selectedEntries` itself: every entry that's open stays open, and its
- * expanded/minimized state is unaffected, when the mode is switched.
- *
- * This is deliberately unlike a *filter* would be (e.g. "only show
- * Dance entries," a hypothetical future feature): a filter changes which
- * panels are visible at all - it can make a panel disappear. This sort
- * toggle only changes how the still-fully-visible set of panels is
- * arranged on screen. If filtering is added later, it should compose
- * with this (filter first, then apply whichever sort mode to what's left)
- * rather than being implemented as another case of this toggle.
- *
- * ──────────────────────────────────────────────────────────────────────
- * CATEGORY FILTER: DIMS STARS, NEVER TOUCHES THE SIDEBAR
- * ──────────────────────────────────────────────────────────────────────
- * `filterCategories` is the set of activityTypes currently "active" -
- * defaults to *all* of them, i.e. nothing filtered out. It's passed to
- * StarMap, which dims (not removes) any star whose activityType isn't in
- * the set - see the comment above `stars.map()` in StarMap.tsx for why
- * "dim, don't remove" matters (an opened star's highlight ring should
- * stay visible, just dimmed, even while filtered out).
- *
- * Crucially, `filterCategories` is completely independent of
- * `selectedEntries`: filtering a category out never closes, removes, or
- * even collapses that category's sidebar panels. The sidebar and the
- * star map's filter are two separate views over the same data - a panel
- * you opened stays open (and its star keeps its highlight ring) even if
- * you then filter its category out of the star map entirely.
- *
- * `sortMode` and `filterCategories` state lives here, but the controls
- * for them render via <FilterBar>, rendered as a normal-flow sibling of
- * the page title rather than inside the sidebar overlay - see
- * FilterBar.tsx's header comment for why: unlike the panel stack, those
- * controls need to stay usable even when `selectedEntries` is empty.
+ * FilterBar's own two rows (category filters, sort toggle) and
+ * SidebarPanelStack render the SAME effective width on screen - one third
+ * of the viewport, minus this header's own horizontal offset from the
+ * viewport's left edge (`headerLayout.left`, passed to FilterBar as its
+ * `leftInset` prop). A flat `33vw` on both used to be enough BY ITSELF
+ * (previously this was measured off the instructional subtitle `<p>`'s own
+ * rendered width, then intentionally replaced with a flat viewport-relative
+ * proportion instead) - but SidebarPanelStack.tsx is `fixed left-0` (so its
+ * `33vw` box is anchored to the VIEWPORT's left edge), while FilterBar
+ * renders in this normal-flow header instead, offset from the viewport by
+ * `headerLayout.left`. A flat `33vw` on FilterBar therefore overshot
+ * SidebarPanelStack's own right edge by exactly `headerLayout.left` pixels
+ * - see FilterBar.tsx's `leftInset` prop comment for the full math. So
+ * `headerLayout` measuring `left` (not just `top`) now matters for TWO
+ * things: keeping the sidebar's own left edge aligned with the header (as
+ * before), and letting FilterBar subtract that same offset from its width
+ * so its right edge lands exactly where the sidebar's does.
  *
  * ──────────────────────────────────────────────────────────────────────
  * HEADER STACKING: FLOW LAYOUT, NOT MANUAL OFFSETS
  * ──────────────────────────────────────────────────────────────────────
- * The title/subtitle text and <FilterBar> both need to render on top of
- * StarMap's `fixed inset-0` canvas (see StarMap.tsx) without overlapping
- * each other. An earlier version made FilterBar its own `fixed`,
- * hand-placed box (`top-20`) floating independently of the title/
- * subtitle block below it - which meant its position was a guess that
- * didn't account for the title block's actual (variable - the
- * "Showing example data" badge changes its height) rendered height, and
- * the two would visually overlap.
+ * The title/subtitle text (VizPageHeader.tsx) and <FilterBar> both need
+ * to render on top of StarMap's `fixed inset-0` canvas (see StarMap.tsx)
+ * without overlapping each other. An earlier version made FilterBar its
+ * own `fixed`, hand-placed box (`top-20`) floating independently of the
+ * title/subtitle block below it - which meant its position was a guess
+ * that didn't account for the title block's actual (variable) rendered
+ * height, and the two would visually overlap.
  *
  * The fix is to stop positioning them independently: both now live in
  * one normal-flow wrapper (`relative z-10`, below), stacked with
@@ -144,368 +101,143 @@
  * Neither the title/subtitle block nor <FilterBar> has an opaque
  * background of its own - both sit directly over the starfield so it
  * stays visible through them, per the design brief. Legibility instead
- * comes from styling each piece of *content* for contrast individually:
- * the title/subtitle text uses a light color plus `text-shadow` (a dark
- * halo that reads against bright stars or dark sky alike - see
- * `READABLE_TEXT_SHADOW` below), while FilterBar's buttons each carry
- * their own border/background (see FilterBar.tsx). Multiple small
- * contrasted elements instead of one big backing box.
+ * comes from styling each piece of *content* for contrast individually -
+ * see VizPageHeader.tsx and FilterBar.tsx. Multiple small contrasted
+ * elements instead of one big backing box.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * SHARED TIME-RANGE FILTER: SAME CONTEXT, SAME COMPONENT AS Timeline.tsx
+ * ──────────────────────────────────────────────────────────────────────
+ * This page now consumes TimeRangeContext exactly the way Timeline.tsx
+ * does (see that file's STAGE 3 comment and TimeRangeContext.tsx's own
+ * top-of-file comment for the full reasoning) - `selectedRange` is global/
+ * persistent state that lives above the router, so it's already whatever
+ * was last set on EITHER page: narrowing the brush here, then navigating
+ * to Timeline, shows the same narrowed window there, and vice versa,
+ * without either page needing to read or write anything Timeline/
+ * Constellation-specific.
+ *
+ * `timeFilteredEntries` (not `entries`) is what actually reaches StarMap -
+ * a hard filter via the SAME `isEntryWithinRange` overlap test
+ * Timeline.tsx uses for its own range/capsule entries, not the
+ * dim-don't-remove treatment `filterCategories` gets. Because StarMap's
+ * own star positions/jitter/CLICK-TO-CENTER math are all computed
+ * directly off its `entries` prop, handing it the already-time-filtered
+ * set means that recentering math (and everything else StarMap derives
+ * from `entries`) automatically operates on the FILTERED set too, with no
+ * separate wiring needed here.
+ *
+ * `<TimeRangeSelector>` below is the exact same component, same
+ * `sidebarWidth`-driven centering, and same fixed-bottom floating-chrome
+ * position Timeline.tsx renders - one shared brush control for both pages
+ * rather than a second copy. `onFullReset` (passed to useEntrySelection
+ * below) now also calls `resetToFullRange()` alongside this page's own
+ * `resetViewSignal` bump, so the bottom-right reset button / Escape's
+ * full reset puts the brush back to the full range here too, exactly like
+ * Timeline.tsx's own `resetAll` already does - confirmed by
+ * TimeRangeSelector's own SYNC EFFECT reacting to `selectedRange`
+ * changing from outside a drag, the same mechanism that already made this
+ * work on Timeline.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import EntryPanel from '../components/EntryPanel';
-import FilterBar, { SortMode } from '../components/FilterBar';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import FilterBar from '../components/FilterBar';
 import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
+import SidebarPanelStack from '../components/SidebarPanelStack';
 import StarMap from '../components/StarMap';
+import TimeRangeSelector from '../components/TimeRangeSelector';
+import VizPageHeader from '../components/VizPageHeader';
 import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
-import { generateMockEntries } from '../utils/mockEntries';
+import { isEntryWithinRange } from '../utils/entryDateRange';
+import { useEntrySelection } from '../hooks/useEntrySelection';
+import { useTimeRange } from '../context/TimeRangeContext';
 
 interface ConstellationProps {
   entries: Entry[];
 }
 
-interface SelectedEntry {
-  entry: Entry;
-  expanded: boolean;
-}
-
-/**
- * Dark halo behind light text, so it stays legible whether it's sitting
- * over a bright star or open dark sky - see the "TRANSPARENT CONTAINER,
- * CONTRASTED CONTENT" comment above. A tight shadow for edge definition
- * plus a softer, larger one for a subtle glow.
- */
-const READABLE_TEXT_SHADOW =
-  '0 1px 3px rgba(0, 0, 0, 0.9), 0 2px 10px rgba(0, 0, 0, 0.7)';
-
-/**
- * Inserts `selectedEntry` into `list` and returns a new array sorted
- * newest-first by timestamp. Used only when a *new* star is opened - see
- * the panel-stack comment above for why toggling/closing never re-sorts.
- */
-function insertSortedByTimestampDesc(
-  list: SelectedEntry[],
-  selectedEntry: SelectedEntry
-): SelectedEntry[] {
-  return [...list, selectedEntry].sort(
-    (a, b) =>
-      new Date(b.entry.timestamp).getTime() -
-      new Date(a.entry.timestamp).getTime()
-  );
-}
-
 export default function Constellation({ entries }: ConstellationProps) {
-  const usingMockData = entries.length === 0;
+  // The dynamic category list - recomputed whenever entries change, since
+  // that's exactly when a new category could have appeared (a fresh "+
+  // Add new category" in AddEntryForm always creates its new entry in the
+  // same action). Passed down to useEntrySelection, FilterBar, and StarMap
+  // rather than having each of them independently reload it.
+  const categories = useMemo(() => loadCategories(), [entries]);
 
-  // Only generate mock entries when they're actually needed (i.e. the user
-  // has no real entries yet) - not on every render, and not at all once
-  // real entries exist. This matters more now than it used to:
-  // generateMockEntries() creates its own dynamic categories via
-  // addCategory (see mockEntries.ts), a real localStorage write, so a user
-  // who already has their own entries/categories should never have that
-  // side effect run behind their back just because this page mounted.
-  const mockEntries = useMemo(
-    () => (usingMockData ? generateMockEntries() : []),
-    [usingMockData]
+  // See the SHARED TIME-RANGE FILTER comment above: `selectedRange` is the
+  // shared, cross-page time filter (same context Timeline.tsx reads);
+  // `timeFilteredEntries` is `entries` hard-cut down to only what's
+  // `isEntryWithinRange` of it - this (not `entries`) is what actually
+  // reaches StarMap below, identical in spirit to Timeline.tsx's own
+  // `timeFilteredEntries`/LinearTimeline wiring.
+  const { selectedRange, resetToFullRange } = useTimeRange();
+  const timeFilteredEntries = useMemo(
+    () => entries.filter(entry => isEntryWithinRange(entry, selectedRange)),
+    [entries, selectedRange]
   );
 
-  const displayedEntries = usingMockData ? mockEntries : entries;
-
-  // The dynamic category list - recomputed whenever the displayed entries
-  // change, since that's exactly when a new category could have appeared
-  // (mock data generation above, or a fresh "+ Add new category" in
-  // AddEntryForm, which always creates its new entry in the same action).
-  // Passed down to FilterBar and StarMap rather than having each of them
-  // independently reload it.
-  const categories = useMemo(
-    () => loadCategories(),
-    [displayedEntries]
-  );
-
-  // The sidebar's panel stack - see the panel-stack comment above for the
-  // sort-order and expand/collapse rules this state follows.
-  const [selectedEntries, setSelectedEntries] = useState<SelectedEntry[]>([]);
-
-  // How the (unchanged) panel stack is currently arranged - see the
-  // "SORT MODE" comment above for why this never removes/hides a panel.
-  const [sortMode, setSortMode] = useState<SortMode>('date');
-
-  // Which category ids are currently active (visible at normal opacity)
-  // in StarMap - see the "CATEGORY FILTER" comment above. Starts with
-  // every category active, i.e. nothing filtered out.
-  const [filterCategories, setFilterCategories] = useState<string[]>(() =>
-    loadCategories().map(category => category.id)
-  );
-
-  // Keeps a newly-appeared category (mock data generation, or a fresh
-  // "+ Add new category" in AddEntryForm) active by default, without
-  // clobbering any categories the user has already toggled off. Runs off
-  // `categories` rather than `displayedEntries` directly so it only fires
-  // when the category list itself actually grows.
-  useEffect(() => {
-    setFilterCategories(prev => {
-      const known = new Set(prev);
-      const newIds = categories
-        .map(category => category.id)
-        .filter(id => !known.has(id));
-      return newIds.length > 0 ? [...prev, ...newIds] : prev;
-    });
-  }, [categories]);
-
-  // Bumped every time the Escape-key full reset (below) actually fires -
-  // passed to StarMap as `resetViewSignal` so it can drive its own
-  // pan/zoom transform back to identity. A counter, not a boolean, so
-  // the effect that reacts to it (StarMap's RESET-VIEW effect) still
-  // fires even if two resets happen back to back - see that effect's
-  // comment for why a boolean/one-shot flag can't represent that.
+  // Bumped every time useEntrySelection's Escape-key full reset actually
+  // fires (via `onFullReset` below) - passed to StarMap as
+  // `resetViewSignal` so it can drive its own pan/zoom transform back to
+  // identity. A counter, not a boolean, so the effect that reacts to it
+  // (StarMap's RESET-VIEW effect) still fires even if two resets happen
+  // back to back - see that effect's comment for why a boolean/one-shot
+  // flag can't represent that. This is the one piece of "full reset"
+  // behavior that stays canvas-specific rather than living in the hook -
+  // see useEntrySelection.ts's top-of-file comment for why.
   const [resetViewSignal, setResetViewSignal] = useState(0);
 
-  /**
-   * ──────────────────────────────────────────────────────────────────────
-   * ESCAPE KEY: COLLAPSE THE EXPANDED PANEL, OR TWO-PRESS FULL RESET
-   * ──────────────────────────────────────────────────────────────────────
-   * Escape means one of two very different things depending on whether a
-   * panel is currently expanded:
-   *
-   *   - A panel IS expanded (`expandedEntryId` is set): Escape just
-   *     collapses it back to minimized, mirroring the "closes the
-   *     expanded panel" behavior - immediate, no confirmation, since it's
-   *     trivially undone by re-expanding the same panel.
-   *   - NO panel is expanded: Escape instead drives a destructive "full
-   *     reset" - every open panel, the category filter, the sort mode,
-   *     AND the star map's pan/zoom all get cleared/reset at once. That's
-   *     too easy to trigger by accident (Escape is an easy key to hit
-   *     reflexively) to fire on a single press, so it's gated behind a
-   *     TWO-PRESS CONFIRMATION instead of a blocking modal (a modal would
-   *     interrupt the star map itself, which this is meant to avoid):
-   *       1. First Escape press while nothing is armed: arm
-   *          `resetPending` (which renders <ResetToast> below) and start
-   *          a timer. This press does NOT reset anything by itself.
-   *       2. Second Escape press while `resetPending` is still true:
-   *          treated as confirmation - perform the actual reset and
-   *          disarm.
-   *     If the second press doesn't come before the timer fires, the
-   *     arming just silently expires (`resetPending` -> false, toast
-   *     disappears) rather than resetting. The other handlers below
-   *     (star click, filter toggle, expand/close panel, sort mode) each
-   *     also call `cancelResetPending()` as their first action, so any
-   *     OTHER interaction disarms a pending reset early too - without
-   *     that, a stray Escape days- or minutes-later, arriving after the
-   *     user has moved on to doing something else entirely, could land
-   *     on an still-armed `resetPending` left over from an unrelated
-   *     earlier press and reset the view out from under them
-   *     unexpectedly.
-   */
-  const [resetPending, setResetPending] = useState(false);
-  const resetPendingTimeoutRef = useRef<number | null>(null);
-
-  const cancelResetPending = () => {
-    if (resetPendingTimeoutRef.current !== null) {
-      window.clearTimeout(resetPendingTimeoutRef.current);
-      resetPendingTimeoutRef.current = null;
-    }
-    setResetPending(false);
-  };
-
-  // The actual full reset - clears the sidebar's panel stack, the
-  // category filter, the sort mode, and (via `resetViewSignal`) StarMap's
-  // pan/zoom. Shared by both triggers that can cause a full reset: the
-  // Escape key's two-press confirmation flow below, and <ResetButton>'s
-  // onClick (rendered further down) - the button skips `resetPending`
-  // entirely and calls this directly, since a deliberate click on an
-  // always-visible, clearly-labeled button doesn't need the same
-  // accidental-press safeguard a bare keypress does - see
-  // ResetButton.tsx's header comment for the full reasoning.
-  const resetAll = () => {
-    if (resetPendingTimeoutRef.current !== null) {
-      window.clearTimeout(resetPendingTimeoutRef.current);
-      resetPendingTimeoutRef.current = null;
-    }
-    setSelectedEntries([]);
-    setFilterCategories(categories.map(category => category.id));
-    setSortMode('date');
-    setResetViewSignal(signal => signal + 1);
-    setResetPending(false);
-  };
-
-  // Clears any in-flight timer on unmount only (not on every
-  // resetPending/expandedEntryId change - the effect above re-attaching
-  // its listener isn't a reason to drop a timer that's still legitimately
-  // pending), so a late timeout callback can never fire against an
-  // unmounted component.
-  useEffect(() => {
-    return () => {
-      if (resetPendingTimeoutRef.current !== null) {
-        window.clearTimeout(resetPendingTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  const handleStarClick = (entry: Entry) => {
-    cancelResetPending();
-    setSelectedEntries(prev => {
-      const alreadyOpen = prev.some(selected => selected.entry.id === entry.id);
-
-      if (alreadyOpen) {
-        // Already in the stack: just switch which panel is expanded.
-        // No duplicate, no reorder.
-        return prev.map(selected => ({
-          ...selected,
-          expanded: selected.entry.id === entry.id,
-        }));
-      }
-
-      // A newly opened star: collapse every existing panel, then insert
-      // this one (expanded) back into chronological order.
-      const collapsedRest = prev.map(selected => ({
-        ...selected,
-        expanded: false,
-      }));
-      return insertSortedByTimestampDesc(collapsedRest, {
-        entry,
-        expanded: true,
-      });
-    });
-  };
-
-  // Also used when a minimized panel row in the sidebar is clicked - same
-  // "expand this one, collapse the rest, don't reorder" rule as re-clicking
-  // an already-open star.
-  const handleExpandPanel = (entryId: string) => {
-    cancelResetPending();
-    setSelectedEntries(prev =>
-      prev.map(selected => ({
-        ...selected,
-        expanded: selected.entry.id === entryId,
-      }))
-    );
-  };
-
-  const handleClosePanel = (entryId: string) => {
-    cancelResetPending();
-    setSelectedEntries(prev =>
-      prev.filter(selected => selected.entry.id !== entryId)
-    );
-  };
-
-  const handleToggleFilterCategory = (category: string) => {
-    cancelResetPending();
-    setFilterCategories(prev =>
-      prev.includes(category)
-        ? prev.filter(active => active !== category)
-        : [...prev, category]
-    );
-  };
-
-  const handleResetFilters = () => {
-    cancelResetPending();
-    setFilterCategories(categories.map(category => category.id));
-  };
-
-  const handleSortModeChange = (mode: SortMode) => {
-    cancelResetPending();
-    setSortMode(mode);
-  };
-
-  // Every entry currently represented by a sidebar panel (expanded or
-  // minimized) - see the panel-stack comment above for why this covers
-  // both, and why it's derived rather than separately tracked.
-  const openedEntryIds = useMemo(
-    () => selectedEntries.map(selected => selected.entry.id),
-    [selectedEntries]
-  );
-
-  // The single entry (if any) whose panel is currently expanded, or
-  // `null` if none is - passed to StarMap so it can tell "expand a
-  // minimized panel" clicks apart from "deselect an already-expanded
-  // panel" clicks on the same star, and so it can drive its
-  // click-to-center pan off this changing rather than off the click event
-  // itself - see StarMap.tsx's STAR CLICK OUTCOMES and CLICK-TO-CENTER
-  // comments. Derived, like `openedEntryIds` above, so it can't drift out
-  // of sync with `selectedEntries`.
-  const expandedEntryId = useMemo(
-    () => selectedEntries.find(selected => selected.expanded)?.entry.id ?? null,
-    [selectedEntries]
-  );
-
-  // The actual Escape-key listener - see the "ESCAPE KEY" comment above
-  // (near `resetPending`) for the two-press confirmation pattern this
-  // implements. Declared here (rather than up next to `resetPending`)
-  // because it closes over `expandedEntryId`, which isn't defined until
-  // just above this point.
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-
-      if (expandedEntryId) {
-        // Unchanged "closes expanded panel" behavior - just collapse it,
-        // no confirmation flow involved.
-        setSelectedEntries(prev =>
-          prev.map(selected => ({ ...selected, expanded: false }))
-        );
-        return;
-      }
-
-      if (!resetPending) {
-        // First press: arm, don't reset yet.
-        setResetPending(true);
-        resetPendingTimeoutRef.current = window.setTimeout(() => {
-          resetPendingTimeoutRef.current = null;
-          setResetPending(false);
-        }, 3500);
-        return;
-      }
-
-      // Second press while armed: this is the confirmation - do the
-      // actual full reset.
-      resetAll();
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [expandedEntryId, resetPending]);
-
-  // `selectedEntries` -> one bucket per activityType, for 'category' sort
-  // mode. Buckets are populated by scanning `selectedEntries` in its
-  // existing newest-first order, so each bucket comes out newest-first
-  // too, with no separate per-group sort needed. Only non-empty buckets
-  // are kept, then ordered alphabetically by label (per spec, "for now" -
-  // a fixed/custom category order could replace this later).
-  const categoryGroups = useMemo(() => {
-    const buckets = new Map<string, SelectedEntry[]>();
-    for (const selected of selectedEntries) {
-      const key = selected.entry.activityType;
-      const bucket = buckets.get(key);
-      if (bucket) {
-        bucket.push(selected);
-      } else {
-        buckets.set(key, [selected]);
-      }
-    }
-
-    return categories
-      .map(category => ({
-        category,
-        entries: buckets.get(category.id) ?? [],
-      }))
-      .filter(group => group.entries.length > 0)
-      .sort((a, b) => a.category.name.localeCompare(b.category.name));
-  }, [selectedEntries, categories]);
-
-  const hasSelection = selectedEntries.length > 0;
+  const {
+    selectedEntries,
+    openedEntryIds,
+    expandedEntryId,
+    handleEntryClick,
+    handleExpandPanel,
+    handleClosePanel,
+    sortMode,
+    handleSortModeChange,
+    categoryGroups,
+    filterCategories,
+    handleToggleFilterCategory,
+    handleResetFilters,
+    hasSelection,
+    resetPending,
+    resetAll,
+  } = useEntrySelection({
+    // `categories` is no longer passed here - the shared
+    // EntrySelectionProvider (see App.tsx) now derives its own categories
+    // directly from `entries`, the same computation this page's own
+    // `categories` above still runs locally for FilterBar/StarMap's props
+    // - see useEntrySelection.ts's top-of-file comment.
+    //
+    // RESET INCLUDES THE BRUSH: bumping `resetViewSignal` (StarMap's own
+    // pan/zoom reset) alongside `resetToFullRange()` (TimeRangeContext's
+    // brush reset) is the exact same "onFullReset covers whatever ELSE a
+    // page wants a full reset to also cover" pattern Timeline.tsx uses for
+    // its own `resetAll` - see useEntrySelection.ts's `onFullReset` comment
+    // and TimeRangeContext.tsx's `resetToFullRange` comment for why this
+    // (not `setSelectedRange(fullRange)`) is the right call for a FULL
+    // reset specifically. This confirms the bottom-right reset button/
+    // Escape's full reset snaps the brush back to the full range from THIS
+    // page too, not just from Timeline.
+    onFullReset: () => {
+      setResetViewSignal(signal => signal + 1);
+      resetToFullRange();
+    },
+  });
 
   // The sidebar overlay's live rendered width, passed to StarMap so it
   // can keep its click-to-center math accurate - see the layout comment
   // above and StarMap.tsx's CLICK-TO-CENTER comment. Measured off the DOM
-  // node directly (rather than assumed from the fixed `w-[33vw]` class
-  // below) because the overlay's actual rendered pixel width still needs
-  // an actual measurement to convert that viewport-relative unit into
-  // the pixel coordinates StarMap's zoom math works in. Resets to 0
-  // whenever the overlay unmounts (`hasSelection` false), since there's
-  // no node to measure - matching StarMap's `sidebarWidth: 0` "canvas is
-  // fully visible" case.
+  // node directly (rather than assumed from SidebarPanelStack's fixed
+  // `w-[33vw]` class) because the overlay's actual rendered pixel width
+  // still needs an actual measurement to convert that viewport-relative
+  // unit into the pixel coordinates StarMap's zoom math works in. Resets
+  // to 0 whenever the overlay unmounts (`hasSelection` false), since
+  // there's no node to measure - matching StarMap's `sidebarWidth: 0`
+  // "canvas is fully visible" case.
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [sidebarWidth, setSidebarWidth] = useState(0);
 
@@ -523,13 +255,57 @@ export default function Constellation({ entries }: ConstellationProps) {
     return () => observer.disconnect();
   }, [hasSelection]);
 
+  // TimeRangeSelector's own CARD's live rendered position - forwarded via
+  // TimeRangeSelector.tsx's `forwardRef` (see its own comment) - so
+  // VizEmptyState's "filtered" message (below, via StarMap) can position
+  // itself immediately to the card's right, on the same row, instead of
+  // guessing at a fixed offset. Re-measured whenever `sidebarWidth`
+  // changes (a dependency, not just mount) because TimeRangeSelector
+  // re-centers its card within a narrower `[sidebarWidth, viewport
+  // right]` box as the sidebar opens/closes - a pure horizontal
+  // TRANSLATION of the same-sized card, which a ResizeObserver alone
+  // would miss (it only fires on size changes, not position). The window
+  // resize listener alongside it catches the OTHER way this position can
+  // change: the viewport itself resizing. `useLayoutEffect` (not
+  // `useEffect`) so this is measured before the first paint the message
+  // could appear in, avoiding a one-frame flash at the wrong position.
+  const timeRangeSelectorCardRef = useRef<HTMLDivElement>(null);
+  const [timeRangeSelectorRect, setTimeRangeSelectorRect] = useState({
+    top: 0,
+    right: 0,
+    height: 0,
+  });
+
+  useLayoutEffect(() => {
+    const el = timeRangeSelectorCardRef.current;
+    if (!el) return;
+
+    const updateRect = () => {
+      const rect = el.getBoundingClientRect();
+      setTimeRangeSelectorRect({
+        top: rect.top,
+        right: rect.right,
+        height: rect.height,
+      });
+    };
+    updateRect();
+
+    const observer = new ResizeObserver(updateRect);
+    observer.observe(el);
+    window.addEventListener('resize', updateRect);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateRect);
+    };
+  }, [sidebarWidth]);
+
   // Where the header stack (title/subtitle + FilterBar) actually sits in
-  // the viewport, so the sidebar overlay below can start just past its
+  // the viewport, so SidebarPanelStack below can start just past its
   // bottom edge and share its left edge, instead of overlapping or
-  // misaligning with it. This is position only, NOT size/width - see the
+  // misaligning with it. `left` ALSO now feeds FilterBar's own `leftInset`
+  // prop, so its width can subtract this same offset - see the
   // "FULL-BLEED CANVAS + FLOATING OVERLAY SIDEBAR" comment at the top of
-  // this file for why width is now a flat 33vw instead of being derived
-  // from anything measured here.
+  // this file for the full width-matching reasoning.
   //
   // Neither top nor left can be a hardcoded guess:
   //   - top: the navbar's height lives in Layout.tsx (not this file), and
@@ -599,47 +375,45 @@ export default function Constellation({ entries }: ConstellationProps) {
        * of this file for why FilterBar lives in here (ordinary flow, no
        * background) instead of as an independently `fixed` element.
        *
-       * w-fit: without this, a plain block div stretches to its parent's
-       * full width (`main`'s max-w-7xl content box) by default, even
-       * though its actual content - the title, subtitle, and the
-       * `w-[33vw]` FilterBar - is narrower than that. Since this div sits
-       * above StarMap's starfield (z-10, transparent, no background of
-       * its own - see "TRANSPARENT CONTAINER, CONTRASTED CONTENT" above),
-       * that extra empty box-model width to the right of the visible
-       * text/buttons would still catch pointer events, silently blocking
-       * clicks on any star that happens to render underneath it. `w-fit`
-       * shrinks the div's own box down to its widest child (in practice,
-       * FilterBar's `w-[33vw]`) instead, so there's no invisible
-       * click-blocking area left over - only the CONTAINER's width
-       * behavior changes here; the children below still stack and
-       * left-align exactly as before via `space-y-4`, and this has no
-       * effect on the sidebar panel stack, sort toggle, or their own
-       * independent `w-[33vw]` width-matching (see the top-of-file
-       * layout comment) - none of that is sized off this wrapper.
+       * A fixed width, NOT a plain block div (which stretches to its
+       * parent's full width - `main`'s max-w-7xl content box - by
+       * default, even though its actual content - the title, subtitle,
+       * and FilterBar's own row - is narrower than that): since this div
+       * sits above StarMap's starfield (z-10, transparent, no background
+       * of its own - see "TRANSPARENT CONTAINER, CONTRASTED CONTENT"
+       * above), that extra empty box-model width to the right of the
+       * visible text/buttons would still catch pointer events, silently
+       * blocking clicks on any star that happens to render underneath it.
+       *
+       * `calc(33vw - headerLayout.left)`, not `w-fit`: this used to be
+       * `w-fit` (shrinks to the widest child's own intrinsic width, which
+       * in practice meant FilterBar's own row, the widest child for this
+       * page's short one-sentence subtitle) - but that made the
+       * SUBTITLE's own rendered width follow whatever FilterBar happened
+       * to need, rather than deliberately matching FilterBar/
+       * SidebarPanelStack.tsx's shared width the way Spiral.tsx's header
+       * does (see that file's own comment on this exact width value, and
+       * FilterBar.tsx's `leftInset` prop comment for why a flat `33vw`
+       * would overshoot SidebarPanelStack's actual right edge). Matching
+       * that value directly here - instead of leaving it to fall out of a
+       * `w-fit` computation - keeps this wrapper (and therefore the
+       * subtitle's own wrap width) exactly as wide as the sidebar/
+       * FilterBar are, consistent with Spiral.tsx, rather than an
+       * incidental side effect of whichever child happens to be widest.
+       * The children below still stack and left-align exactly as before
+       * via `space-y-4`; this has no effect on the sidebar panel stack or
+       * sort toggle, which size themselves independently (see the
+       * top-of-file layout comment).
        */}
-      <div ref={headerRef} className="relative z-10 w-fit space-y-4">
-        {/*
-         * The "showing example data" badge used to render here, next to
-         * the title - it now lives in Layout.tsx's navbar instead, next
-         * to the '+' button, so it's part of the top nav row rather than
-         * floating over the starfield near wherever a highlighted star
-         * happens to be. `usingMockData` above is still needed here
-         * regardless, to decide whether StarMap falls back to mock
-         * entries - see this file's top comment.
-         */}
-        <h1
-          className="text-3xl font-bold text-white"
-          style={{ textShadow: READABLE_TEXT_SHADOW }}
-        >
-          Constellation
-        </h1>
-        <p
-          className="text-gray-200"
-          style={{ textShadow: READABLE_TEXT_SHADOW }}
-        >
-          Drag to pan, scroll to zoom, and click a star to see the entry behind
-          it.
-        </p>
+      <div
+        ref={headerRef}
+        className="relative z-10 space-y-4"
+        style={{ width: `calc(33vw - ${headerLayout.left}px)` }}
+      >
+        <VizPageHeader
+          title="Constellation"
+          subtitle="Drag to pan, scroll to zoom, and click a star to see the entry behind it."
+        />
 
         <FilterBar
           sortMode={sortMode}
@@ -649,6 +423,7 @@ export default function Constellation({ entries }: ConstellationProps) {
           onToggleFilterCategory={handleToggleFilterCategory}
           onResetFilters={handleResetFilters}
           hasSelection={hasSelection}
+          leftInset={headerLayout.left}
         />
       </div>
 
@@ -657,22 +432,49 @@ export default function Constellation({ entries }: ConstellationProps) {
        * file. Not a layout child of anything here; StarMap sizes and
        * positions itself via `fixed inset-0`.
        */}
+      {/*
+       * onStarClick={handleEntryClick}: StarMap forwards every star click
+       * straight to this one hook function - open-new / expand-minimized
+       * / deselect-expanded is decided entirely inside
+       * useEntrySelection.ts now (see its CLICK OUTCOMES comment), not
+       * split across a separate onStarDeselect prop the way it used to
+       * be - see StarMap.tsx's own STAR CLICK OUTCOMES comment.
+       */}
       <StarMap
-        entries={displayedEntries}
+        entries={timeFilteredEntries}
+        hasAnyEntries={entries.length > 0}
         categories={categories}
-        onStarClick={handleStarClick}
+        onStarClick={handleEntryClick}
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}
-        onStarDeselect={entry => handleClosePanel(entry.id)}
         filterCategories={filterCategories}
         sidebarWidth={sidebarWidth}
         resetViewSignal={resetViewSignal}
+        topOffset={headerLayout.top}
+        timeRangeSelectorRect={timeRangeSelectorRect}
+      />
+
+      {/*
+       * Same component, same props shape, and same fixed-bottom
+       * sidebar-aware centering as Timeline.tsx's own <TimeRangeSelector> -
+       * see the SHARED TIME-RANGE FILTER comment at the top of this file.
+       * Passed the full, unfiltered `entries` (not `timeFilteredEntries`)
+       * for its density ticks - same reasoning as Timeline.tsx's own
+       * comment on this prop: the ticks need to show where data exists
+       * across the entire `fullRange`, not just within the current
+       * selection. `ref` is the new TimeRangeSelector.tsx forwardRef -
+       * see the `timeRangeSelectorRect` measurement above for why.
+       */}
+      <TimeRangeSelector
+        ref={timeRangeSelectorCardRef}
+        entries={entries}
+        sidebarWidth={sidebarWidth}
       />
 
       <ResetToast visible={resetPending} />
 
       {/*
-       * Always rendered - unlike the sidebar overlay above, this isn't
+       * Always rendered - unlike the sidebar overlay below, this isn't
        * gated on `hasSelection`/`expandedEntryId`: it's a distinct,
        * unambiguous action (reset EVERYTHING) from a panel's own ×
        * close button (which only removes that one panel), so it stays
@@ -689,108 +491,16 @@ export default function Constellation({ entries }: ConstellationProps) {
        * file for why that's the whole point of this restructure.
        */}
       {hasSelection && (
-        <div
+        <SidebarPanelStack
           ref={sidebarRef}
-          // z-30: above StarMap's canvas (z-0) and the header stack
-          // (z-10), below the AddEntryForm modal (z-50).
-          //
-          // top: headerLayout.top (not `inset-y-0`/top-0) so this starts
-          // just below the header stack instead of overlapping it.
-          // `bottom-0` still anchors the other edge, so this extends to
-          // the bottom of the viewport same as before - width (see
-          // w-[33vw] below) doesn't affect that vertical math at all, so
-          // the scrollable height (`bottom-0` minus `top`) and
-          // `overflow-y-auto` scroll behavior both keep working exactly
-          // as before at this new width.
-          //
-          // paddingLeft: headerLayout.left (this container is still
-          // `left-0`, an absolute x of 0) shifts content's left edge to
-          // headerLayout.left, matching the header's left edge - see the
-          // `headerLayout` comment above for why this is measured rather
-          // than a replicated padding class.
-          //
-          // w-[33vw]: a FIXED width - one third of the viewport - rather
-          // than derived from the header/subtitle's rendered width (the
-          // previous behavior; see the top-of-file layout comment). This
-          // is the same width FilterBar's own root uses (see
-          // FilterBar.tsx), so the category filter row, sort toggle, and
-          // this panel stack all still share one consistent width with
-          // each other - just no longer tied to the subtitle text.
-          //
-          // bg-transparent, no shadow/border: this outer stack container
-          // has NO surface styling of its own anymore - only the
-          // container, not the individual panel cards inside it (see
-          // EntryPanel.tsx, which still uses --panel-bg-color for its own
-          // surface so panel text stays readable against the stars). A
-          // shadow here (with nothing opaque to cast it from) would just
-          // read as an unexplained dark smudge over the starfield, so
-          // it's dropped along with the background - same "transparent
-          // container, contrasted content" approach as FilterBar.tsx. The
-          // starfield now shows through the gaps between/around panels
-          // instead of behind a solid sidebar-shaped box.
-          // constellation-sidebar-scroll (see index.css): overrides just
-          // this container's scrollbar TRACK to transparent - the
-          // browser default white track clashes with the dark theme -
-          // while keeping a visible THUMB. Scoped to this one class, so
-          // no other scrollable element in the app is affected.
-          className="constellation-sidebar-scroll fixed bottom-0 left-0 z-30 flex w-[33vw] flex-col gap-3 overflow-y-auto bg-transparent pb-3 pt-3"
-          style={{
-            top: headerLayout.top,
-            paddingLeft: headerLayout.left,
-          }}
-        >
-          {sortMode === 'date' ? (
-            <>
-              {/* Makes the (already-default) ordering explicit rather than silent. */}
-              <div className="flex flex-shrink-0 items-center gap-1.5 px-1 text-xs text-gray-500">
-                <svg
-                  className="h-3.5 w-3.5 flex-shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                <span>Sorted by date (newest first)</span>
-              </div>
-
-              {selectedEntries.map(({ entry, expanded }) => (
-                <EntryPanel
-                  key={entry.id}
-                  entry={entry}
-                  expanded={expanded}
-                  onExpand={() => handleExpandPanel(entry.id)}
-                  onClose={() => handleClosePanel(entry.id)}
-                />
-              ))}
-            </>
-          ) : (
-            categoryGroups.map(({ category, entries: groupEntries }) => (
-              <div key={category.id} className="flex flex-col gap-3">
-                <div
-                  className="flex-shrink-0 rounded px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-gray-900"
-                  style={{ backgroundColor: category.color }}
-                >
-                  {category.name}
-                </div>
-                {groupEntries.map(({ entry, expanded }) => (
-                  <EntryPanel
-                    key={entry.id}
-                    entry={entry}
-                    expanded={expanded}
-                    onExpand={() => handleExpandPanel(entry.id)}
-                    onClose={() => handleClosePanel(entry.id)}
-                  />
-                ))}
-              </div>
-            ))
-          )}
-        </div>
+          selectedEntries={selectedEntries}
+          sortMode={sortMode}
+          categoryGroups={categoryGroups}
+          onExpand={handleExpandPanel}
+          onClose={handleClosePanel}
+          top={headerLayout.top}
+          left={headerLayout.left}
+        />
       )}
     </>
   );

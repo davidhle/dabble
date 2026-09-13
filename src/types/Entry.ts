@@ -51,6 +51,31 @@ export interface MediaLink {
 }
 
 /**
+ * EntryLocation Interface
+ *
+ * STRUCTURED LOCATION (intentional groundwork, deliberately plain text):
+ * Splitting location into country/city/place - instead of one free-text
+ * string - is groundwork for future location-based connections between
+ * entries (e.g. "everything logged in Paris", or "everything logged at
+ * this venue"), which need some shared structure to group/match on.
+ * Every field is still a plain string, not a coordinate or place-ID -
+ * there's deliberately no geocoding, map, or external location API here,
+ * to avoid that cost/key-management overhead before it's actually
+ * needed. All three fields are optional and independent: an entry can
+ * have just a country, country+city, or all three.
+ */
+export interface EntryLocation {
+  /** Country name, picked from the bundled list in data/countries.ts. */
+  country?: string;
+
+  /** Free-text city name. */
+  city?: string;
+
+  /** Free-text specific place/venue/address name. */
+  place?: string;
+}
+
+/**
  * Entry Interface
  *
  * The core data structure for a single activity entry in Dabble.
@@ -85,6 +110,24 @@ export interface Entry {
    * Can be different from when the entry was created (backdating).
    */
   timestamp: string;
+
+  /**
+   * Whether `timestamp`'s time-of-day component is meaningful and should
+   * be shown to the user (vs. just a placeholder needed because a
+   * timestamp requires some time value).
+   *
+   * OPTIONAL & BACKWARD-COMPATIBLE:
+   * Defaults to `true` when absent - entries created before this field
+   * existed always had a real, user-picked time (the old single
+   * datetime-local input in AddEntryForm.tsx forced one), so their
+   * timestamp's time portion is meaningful and should keep being shown
+   * with no data migration needed. Set to `false` only when the user
+   * logs a past event via the date-only input and leaves the "Add
+   * specific time" toggle off - AddEntryForm.tsx then stores `timestamp`
+   * at a placeholder midnight UTC on the chosen date, and
+   * formatEntryDate.ts hides the time portion accordingly.
+   */
+  hasTime?: boolean;
 
   /**
    * Primary category of the activity.
@@ -133,10 +176,20 @@ export interface Entry {
 
   /**
    * Where the activity took place.
-   * Optional - useful for location-based patterns and memories.
-   * Could be enhanced with coordinates for mapping features.
+   * Optional - useful for location-based patterns and memories. See the
+   * EntryLocation comment above for why this is split into
+   * country/city/place rather than one free-text string.
+   *
+   * BACKWARD COMPATIBILITY:
+   * Entries created before this structured shape existed have a plain
+   * string here instead (AddEntryForm.tsx used to have a single
+   * "Location" text input). Those old string values are left exactly as
+   * they are - not parsed/migrated into { country, city, place } - and
+   * are simply displayed as a single unstructured line wherever location
+   * is shown (see utils/formatLocation.ts). New entries always get the
+   * structured object (or no location at all).
    */
-  location?: string;
+  location?: string | EntryLocation;
 
   /**
    * How long the activity lasted in minutes.
@@ -162,6 +215,31 @@ export interface Entry {
    * - Suggest activities based on desired mood
    */
   mood?: string[];
+
+  /**
+   * Human-readable, imprecise date label (e.g. "October - November 2021"),
+   * shown in place of `timestamp`'s exact formatted date wherever an entry's
+   * date is displayed. Optional - only set for entries whose real date is
+   * only known approximately (e.g. old data backfilled from memory), where
+   * `timestamp` still holds a best-guess exact date for sorting/positioning
+   * but isn't precise enough to show to the user as-is.
+   */
+  dateDisplay?: string;
+
+  /**
+   * Optional end of a multi-day activity, ISO string format like `timestamp`.
+   *
+   * OPTIONAL & BACKWARD-COMPATIBLE:
+   * This is iCal-style - an entry is a single point in time by default, and
+   * only becomes a date range when this is explicitly set (via the "This
+   * spans multiple days" toggle in AddEntryForm.tsx). Existing entries
+   * created before this field existed simply don't have it, and continue
+   * to render as single-point-in-time events with no data migration
+   * needed. When present, `timestamp` is the range's start and this is its
+   * (inclusive) end - see EntryDetailModal.tsx / EntryPanel.tsx for how the
+   * range is displayed.
+   */
+  endTimestamp?: string;
 }
 
 /**

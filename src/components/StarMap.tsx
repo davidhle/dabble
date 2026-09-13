@@ -104,8 +104,10 @@
  * Each star is a plain SVG <circle> with a React `onClick` handler that
  * calls `onStarClick(star.entry)`. StarMap itself holds no notion of
  * "selected" entries - that state (an array, so multiple stars can be
- * open at once) lives in the parent (Constellation.tsx), which decides
- * what to do with a clicked entry (currently: add it to a sidebar list).
+ * open at once) lives in useEntrySelection.ts, and `onStarClick` is that
+ * hook's `handleEntryClick` passed straight through by Constellation.tsx -
+ * see its CLICK OUTCOMES comment for what a click actually does (open,
+ * expand, or deselect, depending on the entry's current state).
  *
  * This works cleanly alongside d3-zoom's drag-to-pan because d3.zoom's
  * default `clickDistance` is 0: if the pointer moves at all between
@@ -116,7 +118,7 @@
  * onClick handler normally.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
 import { Category } from '../types/Category';
@@ -125,9 +127,22 @@ import { Category } from '../types/Category';
 // activity's color) always matches a star's color in this view - see the
 // comment in colors.ts for why that mapping isn't duplicated per-component.
 import { getActivityColor } from '../utils/colors';
+// Shared with LinearTimeline.tsx's own hover tooltip - see
+// EntryTooltip.tsx's header comment for why this is a shared pattern
+// across both visualization views rather than duplicated per-component.
+import EntryTooltip from './EntryTooltip';
+import VizEmptyState, { TimeRangeSelectorRect } from './VizEmptyState';
 
 interface StarMapProps {
   entries: Entry[];
+  /**
+   * Whether the RAW, unfiltered dataset (Constellation.tsx's own
+   * `entries.length > 0`, not the time-filtered `entries` prop above) has
+   * any entries at all - passed straight through to VizEmptyState.tsx so
+   * it can distinguish "no data exists" from "filtered to nothing" - see
+   * that component's own top-of-file comment for the full reasoning.
+   */
+  hasAnyEntries: boolean;
   /**
    * The dynamic category list - one "constellation anchor" is laid out per
    * category here (see categoryCenters below), rather than per fixed
@@ -135,7 +150,14 @@ interface StarMapProps {
    * it) so it isn't independently reloaded here.
    */
   categories: Category[];
-  /** Called with the clicked entry when a star is clicked. */
+  /**
+   * Called with the clicked entry when a star is clicked - wired by
+   * Constellation.tsx directly to useEntrySelection.ts's
+   * `handleEntryClick`, which already implements the full open-new /
+   * expand-minimized / deselect-expanded decision (see that hook's CLICK
+   * OUTCOMES comment) - StarMap forwards every click to it unconditionally
+   * and holds no click-branching logic of its own anymore.
+   */
   onStarClick: (entry: Entry) => void;
   /**
    * IDs of entries currently "opened" (i.e. represented by a panel,
@@ -147,24 +169,16 @@ interface StarMapProps {
   openedEntryIds: string[];
   /**
    * The id of the single entry whose panel is currently expanded (not
-   * minimized) in Constellation.tsx's sidebar, or `null` if none is. This
-   * is what lets `handleStarClick` below tell an "expand a minimized
-   * panel" click apart from a "deselect an already-expanded panel" click
-   * on the same star - see the STAR CLICK OUTCOMES comment on
-   * `handleStarClick`. It's also the trigger for the CLICK-TO-CENTER
-   * effect below: centering runs off *this prop changing*, not off the
-   * click event itself, so it fires the same way whether the expand was
-   * caused by clicking the star directly or by clicking its minimized row
-   * in the sidebar.
+   * minimized) in Constellation.tsx's sidebar, or `null` if none is. Used
+   * here only to drive the CLICK-TO-CENTER effect below - centering runs
+   * off *this prop changing*, not off the click event itself, so it fires
+   * the same way whether the expand was caused by clicking the star
+   * directly or by clicking its minimized row in the sidebar. (The
+   * open-new/expand/deselect decision that changes this prop in the first
+   * place is useEntrySelection.ts's `handleEntryClick` - see its CLICK
+   * OUTCOMES comment - not anything StarMap itself computes.)
    */
   expandedEntryId: string | null;
-  /**
-   * Called instead of `onStarClick` when the clicked star's entry is
-   * already opened AND already expanded - see STAR CLICK OUTCOMES below.
-   * Constellation.tsx wires this to the same removal path as a panel's
-   * × close button.
-   */
-  onStarDeselect: (entry: Entry) => void;
   /**
    * activityTypes currently "active" (Constellation.tsx's sidebar filter
    * toggles). Stars whose activityType is NOT in this list are dimmed to
@@ -195,6 +209,23 @@ interface StarMapProps {
    * just happened" rather than "a value changed."
    */
   resetViewSignal: number;
+  /**
+   * The page's measured header bottom edge (Constellation.tsx's own
+   * `headerLayout.top`) - used only to position VizEmptyState.tsx below
+   * the header when there's nothing to show; StarMap's own star
+   * positions/layout don't need this (see the FULL-BLEED CANVAS comment
+   * above for why StarMap, unlike LinearTimeline, has never needed a
+   * vertical exclusion of its own).
+   */
+  topOffset: number;
+  /**
+   * TimeRangeSelector's own card's live rendered position
+   * (Constellation.tsx's own `timeRangeSelectorRect`) - passed straight
+   * through to VizEmptyState.tsx so it can position its "filtered"
+   * message immediately beside that card. See VizEmptyState.tsx's own
+   * POSITIONING comment.
+   */
+  timeRangeSelectorRect: TimeRangeSelectorRect;
 }
 
 /** Opacity applied to a star whose category is filtered out. */
@@ -216,8 +247,13 @@ const LABEL_CLEARANCE = 16;
  * it needs to read clearly against *every* star color, including the
  * LanguageLearning category's own gold (#facc15), so a warm gold
  * highlight would blend into that one category instead of standing out.
+ * A theme token (--star-highlight-color, see index.css), not a fixed hex
+ * value - white glows brightly against the dark theme's night sky but
+ * would nearly vanish against the light theme's cream canvas, so this
+ * flips to a dark ink color in light mode instead, preserving the same
+ * "reads clearly against every star color AND the canvas itself" goal.
  */
-const OPENED_HIGHLIGHT_COLOR = '#ffffff';
+const OPENED_HIGHLIGHT_COLOR = 'var(--star-highlight-color)';
 
 /**
  * Tiny deterministic string hash (djb2 variant) -> 32-bit seed.
@@ -262,21 +298,24 @@ function randomPointInDisc(random: () => number, radius: number) {
 
 export default function StarMap({
   entries,
+  hasAnyEntries,
   categories,
   onStarClick,
   openedEntryIds,
   expandedEntryId,
-  onStarDeselect,
   filterCategories,
   sidebarWidth,
   resetViewSignal,
+  topOffset,
+  timeRangeSelectorRect,
 }: StarMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomLayerRef = useRef<SVGGElement>(null);
   // Holds the same zoom *behavior* instance attached to the <svg> below, so
-  // click-to-center (see handleStarClick) can programmatically drive it
-  // later, outside of the 'zoom' event handler that normally drives it.
+  // click-to-center (see the CLICK-TO-CENTER effect below) can
+  // programmatically drive it later, outside of the 'zoom' event handler
+  // that normally drives it.
   const zoomBehaviorRef = useRef<d3.ZoomBehavior<
     SVGSVGElement,
     unknown
@@ -288,9 +327,35 @@ export default function StarMap({
   // the sidebar overlay opens. Still tracked via ResizeObserver (rather
   // than reading window.innerWidth/Height directly) so window resizes
   // continue to update it live, same as before.
+  //
+  // `useLayoutEffect`, NOT `useEffect`: this used to be a plain
+  // `useEffect`, which meant `size` (and therefore `stars`/
+  // `categoryCenters`, and the CLICK-TO-CENTER effect's own zero-size
+  // guard below) stayed at its initial `{0, 0}` for the entire first
+  // passive-effect flush after mount - LinearTimeline.tsx's own MISSING
+  // DATA POINTS comment (cause #2) already documents this exact "size
+  // effect runs too late" failure mode for that view. It went unnoticed
+  // here as long as CLICK-TO-CENTER only ever ran in response to a live
+  // click (by which point a later render had long since corrected
+  // `size`) - but now that `expandedEntryId` can already be non-null the
+  // very first time StarMap mounts (an entry expanded on a different
+  // page, persisted via EntrySelectionContext - see that file's
+  // "RECENTERING ON MOUNT" comment), CLICK-TO-CENTER's FIRST guaranteed
+  // run happens inside that same first effect flush, when `size` was
+  // still `{0, 0}` under the old `useEffect` - its own zero-size guard
+  // would then skip the recenter, permanently, since `expandedEntryId`
+  // doesn't change again just because `size` is corrected in a following
+  // render (unlike `sidebarWidth` - see CLICK-TO-CENTER's own comment on
+  // its dependency array - `size` isn't one of this effect's
+  // dependencies, so there's no later re-fire to fall back on the way
+  // there is for a late-arriving `sidebarWidth`). `useLayoutEffect`
+  // measures (and corrects) `size` synchronously before that first
+  // passive-effect flush ever runs, matching LinearTimeline.tsx's/
+  // SpiralTimeline.tsx's own responsive-sizing effects, so
+  // CLICK-TO-CENTER's mount-time run already sees the correct size.
   const [size, setSize] = useState({ width: 0, height: 0 });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
@@ -335,40 +400,30 @@ export default function StarMap({
 
   /**
    * ──────────────────────────────────────────────────────────────────────
-   * STAR CLICK OUTCOMES: OPEN NEW / EXPAND MINIMIZED / DESELECT EXPANDED
+   * STAR CLICK OUTCOMES: NOW OWNED BY useEntrySelection.ts
    * ──────────────────────────────────────────────────────────────────────
-   * Clicking a star means one of three different things depending on that
-   * entry's current state in the sidebar, distinguished using the
-   * `openedEntryIds` / `expandedEntryId` props:
+   * Clicking a star used to mean one of three different things -
+   * open/expand/deselect - decided HERE, via a local `handleStarClick`
+   * wrapper that compared `entry.id` against `expandedEntryId` and called
+   * either `onStarClick` or a separate `onStarDeselect` prop. That
+   * three-way decision is now made entirely inside
+   * useEntrySelection.ts's `handleEntryClick` (see its own CLICK OUTCOMES
+   * comment for the full open-new / expand-minimized / deselect-expanded
+   * breakdown) - Constellation.tsx passes that single function straight
+   * through as `onStarClick`, so every star click here forwards to it
+   * unconditionally (see the `onClick` below), with no branching left in
+   * this file. This is also what LinearTimeline.tsx's points/capsules
+   * call for their own clicks, via the same hook - one shared
+   * implementation instead of two copies of this logic drifting apart.
    *
-   *   1. Not opened at all -> open it: forwarded to `onStarClick`, which
-   *      Constellation.tsx uses to add a new (expanded) panel to the
-   *      stack.
-   *   2. Opened but minimized (in `openedEntryIds`, but its id isn't
-   *      `expandedEntryId`) -> expand it: also forwarded to `onStarClick`,
-   *      which Constellation.tsx's existing handler already treats the
-   *      same as case 1's "make this one the expanded panel" outcome.
-   *   3. Opened AND already expanded (`entry.id === expandedEntryId`) ->
-   *      deselect it: clicking a star that's already front-and-center is
-   *      read as "close this," not "reopen this," so it's forwarded to
-   *      `onStarDeselect` instead, which removes the panel entirely (same
-   *      as its × button) rather than re-expanding it.
-   *
-   * Cases 1 and 2 both result in this entry becoming (or staying) the
-   * expanded panel, so both should pan/center the canvas on it. Case 3 is
-   * a close, not an open, so it must NOT trigger that pan - see the
-   * CLICK-TO-CENTER effect below for why centering is wired to react to
-   * that shared "becomes expanded" outcome directly, rather than being
-   * called from here.
+   * Cases 1 and 2 (open new / expand minimized) both result in this
+   * entry becoming (or staying) the expanded panel, so both should
+   * pan/center the canvas on it. Case 3 (deselect) is a close, not an
+   * open, so it must NOT trigger that pan - see the CLICK-TO-CENTER
+   * effect below for why centering is wired to react to that shared
+   * "becomes expanded" outcome (`expandedEntryId` changing) directly,
+   * rather than being triggered from the click itself.
    */
-  const handleStarClick = (entry: Entry) => {
-    const isAlreadyExpanded = entry.id === expandedEntryId;
-    if (isAlreadyExpanded) {
-      onStarDeselect(entry);
-      return;
-    }
-    onStarClick(entry);
-  };
 
   /**
    * ──────────────────────────────────────────────────────────────────────
@@ -433,11 +488,35 @@ export default function StarMap({
    * The y target is untouched (`height / 2`) since the sidebar overlay
    * only covers the left edge, not the top or bottom.
    *
-   * This effect intentionally depends on `expandedEntryId` alone, not on
-   * `stars`/`size`/`sidebarWidth` too - those are read from whatever the
-   * latest render happened to close over, but the pan should only ever be
-   * *triggered* by the expanded entry actually changing, not by e.g. a
-   * window resize recomputing `stars` while the same entry stays expanded.
+   * `stars`/`size` are deliberately left OUT of the dependency array -
+   * they're read from whatever the latest render happened to close over,
+   * but the pan should only ever be *triggered* by the expanded entry
+   * actually changing, not by e.g. a window resize recomputing `stars`
+   * while the same entry stays expanded.
+   *
+   * `sidebarWidth` IS a dependency, though (unlike `stars`/`size`) - this
+   * used to intentionally exclude it too, on the reasoning above, but that
+   * has a race condition on the very FIRST entry a page mounts with
+   * already expanded (either the first-ever click on THIS page, or now -
+   * see EntrySelectionContext.tsx's "RECENTERING ON MOUNT" comment -
+   * arriving already-expanded from a DIFFERENT page via the shared
+   * selection context): `expandedEntryId` and `hasSelection` both flip to
+   * their new values in the SAME render, but Constellation.tsx's own
+   * `sidebarWidth` state is still 0 at that point - a real measurement
+   * only lands in a LATER, separate commit, once its ResizeObserver
+   * callback fires against the now-mounted SidebarPanelStack DOM node.
+   * Since `targetX` reads `sidebarWidth` directly, this effect firing on
+   * that render would center against the stale value (0) - i.e. the
+   * canvas's full-width center, which sits partly UNDER the sidebar
+   * overlay - instead of the correct sidebar-excluded center, and
+   * (without `sidebarWidth` as a dependency) never get a second chance to
+   * correct itself, since `expandedEntryId` doesn't change again just
+   * because `sidebarWidth` later does. SpiralTimeline.tsx's own identical
+   * effect already documents this exact race and fixes it the same way -
+   * see its "CLICK-TO-CENTER" comment for the full reasoning (including
+   * why d3's `.transition()` makes the correction read as one smooth pan
+   * converging on the right spot, not a visible double jump, once the
+   * real width lands and this effect re-fires).
    */
   useEffect(() => {
     const svgNode = svgRef.current;
@@ -467,7 +546,7 @@ export default function StarMap({
       .duration(650) // 500-750ms: smooth, not sluggish
       .call(zoomBehavior.transform, centeredTransform);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedEntryId]);
+  }, [expandedEntryId, sidebarWidth]);
 
   /**
    * ─── RESET-VIEW: PROGRAMMATIC PAN/ZOOM RESET, TIED TO `resetViewSignal` ───
@@ -613,6 +692,34 @@ export default function StarMap({
     [filterCategories]
   );
 
+  // Whether there's anything actually visible to plot right now - "of the
+  // entries inside the current time window (already time-filtered by
+  // Constellation.tsx before reaching this `entries` prop), is at least
+  // one ALSO in an active category?" See VizEmptyState.tsx's own
+  // top-of-file comment for why this single check covers both the time
+  // filter and the category filter as a possible cause, and why
+  // `hasAnyEntries` (the RAW, pre-time-filter count) is threaded in
+  // separately to decide which of its two messages to show.
+  const isEmpty = useMemo(
+    () => !entries.some(entry => activeCategorySet.has(entry.activityType)),
+    [entries, activeCategorySet]
+  );
+
+  // ─── Hover tooltip ───
+  // Same shape and same viewport-clientX/clientY-based tracking
+  // LinearTimeline.tsx uses for its own hover state - see the "Hover
+  // tooltip" comment there. This is entirely independent of
+  // `openedEntryIds`/`expandedEntryId` (the click-to-open-panel highlight
+  // ring below) and of `onStarClick` - hovering never opens or closes a
+  // panel, and opening/closing a panel doesn't touch this state, so the
+  // tooltip layers on top of the existing click/highlight behavior rather
+  // than interacting with it at all.
+  const [hovered, setHovered] = useState<{
+    entry: Entry;
+    x: number;
+    y: number;
+  } | null>(null);
+
   return (
     // `fixed inset-0` (not a layout child) - see "FULL-BLEED CANVAS"
     // above. z-0 is the base layer: Layout.tsx's navbar, Constellation's
@@ -623,17 +730,18 @@ export default function StarMap({
         ref={svgRef}
         width={size.width}
         height={size.height}
-        // Shared theme token (see index.css :root) rather than a hardcoded
-        // hex value - lets the sidebar match this exactly, and centralizes
-        // both for a future dark/light mode toggle.
-        className="cursor-grab bg-[var(--bg-color)] active:cursor-grabbing"
+        // canvas-vignette-bg (see index.css): a plain CSS background, not
+        // an SVG <radialGradient>/<rect> pair (which this used to paint
+        // itself) - so this canvas's vignette is generated by the EXACT
+        // same code path as Layout.tsx's shell/navbar and
+        // LinearTimeline.tsx's/SpiralTimeline.tsx's own canvases, instead
+        // of a second, separately-defined gradient that could (and did:
+        // SVG's objectBoundingBox-unit gradient doesn't map to CSS's
+        // radial-gradient() the same way) drift out of visual sync with
+        // theirs. See that class's own comment in index.css.
+        className="canvas-vignette-bg cursor-grab active:cursor-grabbing"
       >
         <defs>
-          {/* Subtle radial vignette so the sky feels deeper toward the edges. */}
-          <radialGradient id="sky-vignette" cx="50%" cy="50%" r="75%">
-            <stop offset="0%" stopColor="#141a35" />
-            <stop offset="100%" stopColor="#05070f" />
-          </radialGradient>
           {/*
            * Soft blur used behind opened stars' highlight ring, so it
            * reads as a glow rather than a hard-edged circle. Combined
@@ -650,11 +758,6 @@ export default function StarMap({
             <feGaussianBlur stdDeviation="3" />
           </filter>
         </defs>
-        <rect
-          width={size.width}
-          height={size.height}
-          fill="url(#sky-vignette)"
-        />
 
         {/*
          * The "zoom layer": the single group whose transform is rewritten
@@ -696,7 +799,8 @@ export default function StarMap({
                   x={labelX}
                   y={labelY}
                   textAnchor="middle"
-                  className="pointer-events-none select-none fill-white/30 text-xs uppercase tracking-widest"
+                  fill="var(--viz-label-color)"
+                  className="pointer-events-none select-none text-xs uppercase tracking-widest"
                 >
                   {category.name}
                 </text>
@@ -742,10 +846,28 @@ export default function StarMap({
                   strokeOpacity={0.35}
                   strokeWidth={4}
                   className="cursor-pointer"
-                  onClick={() => handleStarClick(entry)}
-                >
-                  <title>{entry.title}</title>
-                </circle>
+                  onClick={() => onStarClick(entry)}
+                  // Same hover handlers (and the EDIT: no more native
+                  // <title> element - see the "Hover tooltip" comment
+                  // above) as LinearTimeline.tsx's points: track the
+                  // hovered entry + cursor position in state, cleared on
+                  // mouse leave, and let <EntryTooltip> below render from
+                  // it. The old <title>{entry.title}</title> child (the
+                  // browser's own delayed tooltip) is removed - it would
+                  // now just duplicate this richer tooltip's title/date,
+                  // popping up a second, plainer one on top of it.
+                  onMouseEnter={event =>
+                    setHovered({ entry, x: event.clientX, y: event.clientY })
+                  }
+                  onMouseMove={event =>
+                    setHovered(current =>
+                      current && current.entry.id === entry.id
+                        ? { ...current, x: event.clientX, y: event.clientY }
+                        : current
+                    )
+                  }
+                  onMouseLeave={() => setHovered(null)}
+                />
                 {isOpened && (
                   // Crisp thin ring on top, for a defined edge against the glow.
                   <circle
@@ -763,6 +885,25 @@ export default function StarMap({
           })}
         </g>
       </svg>
+
+      {/*
+       * Rendered outside the <svg> - EntryTooltip positions itself via
+       * `fixed` + viewport clientX/clientY (see its header comment), so it
+       * doesn't need to live inside the zoomed/panned SVG coordinate
+       * space, only above it (z-50, same as LinearTimeline.tsx's).
+       */}
+      {hovered && (
+        <EntryTooltip entry={hovered.entry} x={hovered.x} y={hovered.y} />
+      )}
+
+      {isEmpty && (
+        <VizEmptyState
+          hasAnyEntries={hasAnyEntries}
+          topOffset={topOffset}
+          sidebarWidth={sidebarWidth}
+          timeRangeSelectorRect={timeRangeSelectorRect}
+        />
+      )}
     </div>
   );
 }

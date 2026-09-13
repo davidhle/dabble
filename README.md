@@ -141,6 +141,24 @@ The application will be available at `http://localhost:5173`
 - **Type Safety**: Full TypeScript coverage for components and D3 interactions
 - **Code Quality**: Pre-configured linting and formatting
 
+## Deployment (GitHub Pages)
+
+This project is configured to deploy as a static site to GitHub Pages via the `gh-pages` package.
+
+```bash
+npm run deploy
+```
+
+This runs `predeploy` (`npm run build`) automatically, then publishes the contents of `dist/` to the `gh-pages` branch of the repo.
+
+Once the first deployment completes, the live site will be available at:
+
+```
+https://[username].github.io/dabble/
+```
+
+(replace `[username]` with the GitHub account/org the repo lives under). Note the app uses `HashRouter` (URLs like `/dabble/#/constellation`) since GitHub Pages can't be configured with server-side rewrites for a `BrowserRouter`-style SPA.
+
 ## Adding New Features
 
 ### Adding a New Page

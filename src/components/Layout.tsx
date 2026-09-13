@@ -8,14 +8,8 @@
  *
  * STATE MANAGEMENT ARCHITECTURE:
  *
- * The Layout receives entries-related props from App.tsx:
+ * The Layout receives one entries-related prop from App.tsx:
  * - onAddEntry: Callback to add new entries to the app state
- * - entries: The full entries array. Layout doesn't render or transform
- *   this itself - it only needs `entries.length` (via `showMockDataBanner`
- *   below) to decide whether to show the "showing example data" badge
- *   next to the '+' button, which only makes sense on the Constellation
- *   route (checked via `useLocation()`) since that's the only page that
- *   falls back to mock data when entries is empty (see Constellation.tsx).
  *
  * Local state managed here:
  * - isModalOpen: Controls visibility of the AddEntryForm modal
@@ -40,40 +34,18 @@
  */
 
 import { useState } from 'react';
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet } from 'react-router-dom';
 import AddEntryForm from './AddEntryForm';
+import ThemeToggle from './ThemeToggle';
 import { Entry } from '../types/Entry';
 
-/**
- * Props interface for Layout component
- *
- * DESIGN NOTE:
- * Layout doesn't transform or render `entries` itself - it's here only
- * so Layout can read `entries.length` for the mock-data navbar badge
- * (see `showMockDataBanner` below). Everything else about entries
- * (creating them) still flows one-way through `onAddEntry`.
- */
+/** Props interface for Layout component */
 interface LayoutProps {
   /** Callback to add a new entry to the app state (defined in App.tsx) */
   onAddEntry: (entry: Entry) => void;
-  /** The full entries array (defined in App.tsx) - see DESIGN NOTE above. */
-  entries: Entry[];
 }
 
-export default function Layout({ onAddEntry, entries }: LayoutProps) {
-  const location = useLocation();
-
-  /**
-   * Whether to show the "showing example data" badge next to the '+'
-   * button. Moved here from Constellation.tsx so it renders as part of
-   * the navbar's flex row instead of floating over the starfield (see
-   * Constellation.tsx's `usingMockData`, which still separately decides
-   * whether the star map itself falls back to mock entries - the two are
-   * the same underlying condition, just each component reading `entries`
-   * for its own purpose, not shared state).
-   */
-  const showMockDataBanner =
-    location.pathname === '/constellation' && entries.length === 0;
+export default function Layout({ onAddEntry }: LayoutProps) {
   /**
    * LOCAL STATE: Modal visibility
    *
@@ -118,15 +90,17 @@ export default function Layout({ onAddEntry, entries }: LayoutProps) {
   };
 
   return (
-    // bg-[var(--bg-color)]: this outer shell (not just the <nav> below,
-    // which already used this token) used to be a plain light bg-gray-50 -
-    // that would still show through behind/around Home.tsx/Chart.tsx/
-    // About.tsx's content (the padding around `main` below, and any
-    // shorter-than-viewport page) even after the navbar and those pages'
-    // own content went dark, since none of them set a background of their
-    // own. Same theme token as everything else - see index.css :root -
-    // so the whole shell now matches uniformly.
-    <div className="min-h-screen bg-[var(--bg-color)]">
+    // canvas-vignette-bg (see index.css): this outer shell (not just the
+    // <nav> below, which also uses this class) used to be a flat
+    // bg-[var(--bg-color)] - which would still show through behind/around
+    // Home.tsx/About.tsx's content (the padding around `main` below, and
+    // any shorter-than-viewport page) as a visibly FLATTER background than
+    // StarMap.tsx's own vignetted canvas on Constellation. Both this shell
+    // and the navbar below now paint the exact same radial vignette
+    // StarMap does - see .canvas-vignette-bg's own comment in index.css
+    // for why `background-attachment: fixed` is what keeps the two
+    // perfectly seamless with each other despite being separate elements.
+    <div className="canvas-vignette-bg min-h-screen">
       {/*
        * Navigation Bar
        * relative z-10: Constellation.tsx's StarMap now renders a `fixed`
@@ -138,14 +112,19 @@ export default function Layout({ onAddEntry, entries }: LayoutProps) {
        * (also z-10); both stay below the sidebar overlay (z-30) and the
        * AddEntryForm modal (z-50).
        *
-       * bg-[var(--bg-color)]: same theme token as StarMap's canvas and
-       * the Constellation sidebar (see index.css :root), so the navbar
-       * matches rather than being a separate white bar - text-gray-500/
-       * hover:text-gray-700 (tuned for a white background) are adjusted
-       * to text-gray-400/hover:text-gray-200 below to stay legible
-       * against this now-dark background.
+       * canvas-vignette-bg: same class (and therefore the exact same
+       * fixed-attachment gradient) as the outer shell above, so the
+       * navbar matches rather than being a visibly flatter bar - see that
+       * class's own comment in index.css. Still fully OPAQUE (a gradient
+       * fill, not transparency) so it continues to hide the real
+       * StarMap/LinearTimeline/SpiralTimeline canvas rendering directly
+       * behind it on visualization pages, exactly as the old flat
+       * --bg-color did. text-[var(--text-muted-color)]/
+       * hover:text-[var(--text-color)] below stay legible against this
+       * background in either theme - see index.css's THEME TOKENS
+       * comment.
        */}
-      <nav className="relative z-10 bg-[var(--bg-color)] shadow-sm">
+      <nav className="canvas-vignette-bg relative z-10 shadow-sm">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 justify-between">
             {/* Left side: Logo and navigation links */}
@@ -156,40 +135,67 @@ export default function Layout({ onAddEntry, entries }: LayoutProps) {
                 </span>
               </div>
               <div className="ml-6 flex space-x-8">
+                {/*
+                 * text-[var(--text-muted-color)]/hover:text-[var(--text-color)]:
+                 * these used to be fixed text-gray-400/hover:text-gray-200 -
+                 * tuned for the dark theme only, and effectively invisible
+                 * (near-white on near-white) once --bg-color switches to the
+                 * light theme's cream - see index.css's THEME TOKENS
+                 * comment. hover:border-[var(--panel-border-color)]
+                 * replaces hover:border-gray-500 for the same reason.
+                 */}
                 <Link
                   to="/"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
                   Home
                 </Link>
                 <Link
-                  to="/chart"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                  to="/about"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
-                  Chart
+                  About
                 </Link>
+                {/*
+                 * DIVIDER: a thin vertical rule separating the two
+                 * informational pages (Home, About) from the three
+                 * visualization views (Timeline, Spiral, Constellation) -
+                 * `self-center` + a fixed height keeps it vertically
+                 * centered against the links' own line-height rather than
+                 * stretching to the nav's full height. --panel-border-color
+                 * (same translucent token every other subtle border in the
+                 * app uses) so it stays a faint hairline against
+                 * --bg-color in both themes, not a jarring hardcoded gray.
+                 * aria-hidden since it's purely decorative, not a
+                 * navigable/announceable element.
+                 */}
+                <div
+                  aria-hidden="true"
+                  className="h-5 w-px self-center bg-[var(--panel-border-color)]"
+                />
                 <Link
                   to="/constellation"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
                   Constellation
                 </Link>
                 <Link
-                  to="/about"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-gray-400 hover:border-gray-500 hover:text-gray-200"
+                  to="/linear"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
-                  About
+                  Linear Timeline
+                </Link>
+                <Link
+                  to="/spiral"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
+                >
+                  Spiral Timeline
                 </Link>
               </div>
             </div>
 
-            {/* Right side: mock-data badge (Constellation only) + Add Entry button */}
+            {/* Right side: Add Entry button */}
             <div className="flex items-center gap-3">
-              {showMockDataBanner && (
-                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
-                  Showing example data - add an entry to see your own
-                </span>
-              )}
               {/**
                * ADD ENTRY BUTTON
                *
@@ -234,7 +240,7 @@ export default function Layout({ onAddEntry, entries }: LayoutProps) {
          *
          * This renders the component for the current route:
          * - "/" renders Home
-         * - "/chart" renders Chart
+         * - "/linear" renders Timeline
          * - "/about" renders About
          *
          * The Layout wraps all routes, so the navbar persists
@@ -261,6 +267,14 @@ export default function Layout({ onAddEntry, entries }: LayoutProps) {
         onClose={handleCloseModal}
         onSubmit={handleAddEntry}
       />
+
+      {/*
+       * Rendered here (not per-page like ResetButton) so the toggle is
+       * available on every page, including Home/About - see
+       * ThemeToggle.tsx's own header comment for its positioning relative
+       * to ResetButton's bottom-right corner.
+       */}
+      <ThemeToggle />
     </div>
   );
 }

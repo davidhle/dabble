@@ -43,20 +43,26 @@
  */
 
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import Home from './pages/Home';
-import Chart from './pages/Chart';
+import Timeline from './pages/Timeline';
+import Spiral from './pages/Spiral';
 import Constellation from './pages/Constellation';
 import About from './pages/About';
 import { Entry } from './types/Entry';
+import { loadEntries, saveEntries } from './utils/entriesStorage';
+import { initializeDefaultDataForFirstVisit } from './utils/initializeFirstVisit';
+import { TimeRangeProvider } from './context/TimeRangeContext';
+import { EntrySelectionProvider } from './context/EntrySelectionContext';
 
 function App() {
   /**
    * ENTRIES STATE
    *
    * This is the primary application state - an array of Entry objects.
-   * Initialized as an empty array.
+   * Initialized lazily from localStorage (see PERSISTENCE below) rather
+   * than an empty array, so a returning user's entries survive a refresh.
    *
    * STATE IMMUTABILITY:
    * We always create new arrays when updating (via spread or concat)
@@ -65,14 +71,40 @@ function App() {
    * - Makes state changes predictable and traceable
    * - Enables potential future optimizations (memoization)
    *
-   * PERSISTENCE NOTE:
-   * Currently entries are stored only in memory and lost on refresh.
-   * To persist entries, you could:
-   * - Save to localStorage in useEffect
-   * - Initialize from localStorage in useState
-   * - Sync with a backend API
+   * PERSISTENCE:
+   * Entries are persisted to localStorage under 'dabble-entries' (see
+   * utils/entriesStorage.ts) - initialized here via useState's lazy
+   * initializer form (a function, not a call) so loadEntries() only runs
+   * once on mount rather than on every render, and saved back via the
+   * dedicated useEffect below whenever `entries` changes.
+   *
+   * FIRST-VISIT DEFAULT:
+   * initializeDefaultDataForFirstVisit() runs first, inside this same
+   * lazy initializer - see utils/initializeFirstVisit.ts for the full
+   * first-visit-default-vs-localStorage-source-of-truth explanation. In
+   * short: on a visitor's first-ever load (no 'dabble-entries' key yet)
+   * it persists a bundled real dataset (and matching categories) into
+   * localStorage before loadEntries() below ever reads it; on every
+   * subsequent load it's a no-op and loadEntries() just returns whatever
+   * is actually stored - the visitor's own data, or a deliberately empty
+   * array from an explicit reset (see the "Start Your Own Constellation"
+   * button in About.tsx).
    */
-  const [entries, setEntries] = useState<Entry[]>([]);
+  const [entries, setEntries] = useState<Entry[]>(() => {
+    initializeDefaultDataForFirstVisit();
+    return loadEntries();
+  });
+
+  /**
+   * EFFECT: Persist entries to localStorage whenever they change
+   *
+   * Separate from the logging effect below (different concern: this one
+   * has an actual side effect other code depends on, not just debugging
+   * output) even though both key off the same `entries` dependency.
+   */
+  useEffect(() => {
+    saveEntries(entries);
+  }, [entries]);
 
   /**
    * EFFECT: Log entries whenever they change
@@ -144,7 +176,7 @@ function App() {
    * }, []);
    */
   const addEntry = (entry: Entry) => {
-    setEntries((prevEntries) => {
+    setEntries(prevEntries => {
       const newEntries = [...prevEntries, entry];
 
       // Additional logging at the point of update
@@ -160,13 +192,15 @@ function App() {
    *
    * The component tree structure:
    *
-   * BrowserRouter (enables client-side routing)
-   *   └── Routes (route matching container)
-   *         └── Route path="/" (matches all routes starting with /)
-   *               └── Layout (navbar + outlet, receives onAddEntry)
-   *                     ├── Route index (/) → Home
-   *                     ├── Route /chart → Chart
-   *                     └── Route /about → About
+   * TimeRangeProvider (shared time-range filter - see its own top-of-file
+   *   comment for why it wraps the router rather than living inside a page)
+   *   └── HashRouter (enables client-side routing)
+   *         └── Routes (route matching container)
+   *               └── Route path="/" (matches all routes starting with /)
+   *                     └── Layout (navbar + outlet, receives onAddEntry)
+   *                           ├── Route index (/) → Home
+   *                           ├── Route /linear → Timeline
+   *                           └── Route /about → About
    *
    * PASSING PROPS TO LAYOUT:
    * We pass onAddEntry to Layout via the element prop.
@@ -176,54 +210,72 @@ function App() {
    * FUTURE CONSIDERATIONS:
    * If more components need access to entries, we could:
    * 1. Pass entries to Layout and use Outlet context
-   * 2. Create an EntriesContext provider here
+   * 2. Create an EntriesContext provider here (TimeRangeProvider below is
+   *    exactly this pattern already, just scoped to the time-range slice
+   *    of state rather than `entries` itself - see its own comment)
    * 3. Use a state management library
    */
   return (
-    <BrowserRouter>
-      <Routes>
-        {/**
-         * Parent route with Layout
-         *
-         * The Layout component wraps all child routes, providing:
-         * - Consistent navbar across all pages
-         * - AddEntry modal accessible from any page
-         * - Main content container
-         *
-         * The onAddEntry prop enables the Layout (and its AddEntryForm)
-         * to add entries to the state managed here. `entries` itself is
-         * also passed down so Layout can show the "showing example data"
-         * navbar badge on the Constellation route (see Layout.tsx) -
-         * Layout needs to know entries.length even though it doesn't
-         * otherwise use the entries array itself.
-         */}
-        <Route
-          path="/"
-          element={<Layout onAddEntry={addEntry} entries={entries} />}
-        >
-          {/**
-           * Child routes render inside Layout's <Outlet />
-           *
-           * These components could receive entries as props if needed.
-           * Currently they don't need entries, but here's how you'd do it:
-           *
-           * <Route
-           *   index
-           *   element={<Home entries={entries} />}
-           * />
-           *
-           * Or use Outlet context in Layout to pass data.
-           */}
-          <Route index element={<Home />} />
-          <Route path="chart" element={<Chart />} />
-          <Route
-            path="constellation"
-            element={<Constellation entries={entries} />}
-          />
-          <Route path="about" element={<About />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    // TimeRangeProvider AND EntrySelectionProvider both wrap EVERYTHING
+    // that follows, including HashRouter itself - see TimeRangeContext.tsx's
+    // top-of-file "WHY THIS LIVES ABOVE THE ROUTER" comment (and
+    // EntrySelectionContext.tsx's own, identical-in-spirit comment) for
+    // why: a provider that's a PARENT of the router never unmounts when
+    // routes change (only the router's own children do), so
+    // `selectedRange` AND the sidebar's selection/filter/sort state both
+    // survive navigating between Constellation/Timeline/Spiral instead of
+    // resetting every time. Both are passed the same `entries` state this
+    // component already owns - see each context file for what it derives
+    // from that (fullRange; categories).
+    <TimeRangeProvider entries={entries}>
+      <EntrySelectionProvider entries={entries}>
+        {/* HashRouter (URLs like /dabble/#/constellation) instead of BrowserRouter
+          is a deliberate trade-off for static GitHub Pages hosting: Pages has no
+          server-side rewrite rule, so a direct load or refresh of a BrowserRouter
+          path like /dabble/constellation would 404. The hash portion of the URL
+          never reaches the server, so GitHub Pages just serves index.html and
+          React Router handles the rest client-side. Given the deployment
+          timeline, this was chosen over adding a 404.html redirect workaround. */}
+        <HashRouter>
+          <Routes>
+            {/**
+             * Parent route with Layout
+             *
+             * The Layout component wraps all child routes, providing:
+             * - Consistent navbar across all pages
+             * - AddEntry modal accessible from any page
+             * - Main content container
+             *
+             * The onAddEntry prop enables the Layout (and its AddEntryForm)
+             * to add entries to the state managed here.
+             */}
+            <Route path="/" element={<Layout onAddEntry={addEntry} />}>
+              {/**
+               * Child routes render inside Layout's <Outlet />
+               *
+               * These components could receive entries as props if needed.
+               * Currently they don't need entries, but here's how you'd do it:
+               *
+               * <Route
+               *   index
+               *   element={<Home entries={entries} />}
+               * />
+               *
+               * Or use Outlet context in Layout to pass data.
+               */}
+              <Route index element={<Home />} />
+              <Route path="about" element={<About />} />
+              <Route
+                path="constellation"
+                element={<Constellation entries={entries} />}
+              />
+              <Route path="linear" element={<Timeline entries={entries} />} />
+              <Route path="spiral" element={<Spiral entries={entries} />} />
+            </Route>
+          </Routes>
+        </HashRouter>
+      </EntrySelectionProvider>
+    </TimeRangeProvider>
   );
 }
 

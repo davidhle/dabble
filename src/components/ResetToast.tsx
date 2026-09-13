@@ -24,9 +24,9 @@ export default function ResetToast({ visible }: ResetToastProps) {
     // header (z-10), and the sidebar overlay (z-30) - see Constellation.tsx
     // - but below the AddEntryForm modal (z-50).
     <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center">
-      <div className="flex items-center gap-2 rounded-full border border-white/10 bg-gray-900/90 px-4 py-2 text-sm text-gray-100 shadow-lg backdrop-blur">
+      <div className="flex items-center gap-2 rounded-full border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] px-4 py-2 text-sm text-[var(--text-color)] shadow-lg backdrop-blur">
         <span>Press</span>
-        <kbd className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-xs">
+        <kbd className="rounded bg-[var(--field-tint-2)] px-1.5 py-0.5 font-mono text-xs">
           Esc
         </kbd>
         <span>again to reset the view</span>

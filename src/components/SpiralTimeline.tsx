@@ -1,0 +1,1600 @@
+/**
+ * SpiralTimeline.tsx - Chronological Spiral Visualization of Entries
+ *
+ * A third way to look at `entries`, alongside StarMap.tsx's clustered
+ * "constellation" and LinearTimeline.tsx's straight time axis: entries are
+ * laid out along an outward-growing spiral, ordered by time the same way
+ * LinearTimeline orders them along a line, but coiled into a spiral so a
+ * long history still fits inside a compact canvas instead of stretching
+ * off-screen. Follows the same overall shape as LinearTimeline.tsx
+ * (responsive sizing, a `[0,1]`-normalized time domain, hover tooltip) and
+ * the same pan/zoom MECHANISM as StarMap.tsx (a single zoomed `<g>` whose
+ * `transform` is written imperatively by d3-zoom, since - like StarMap,
+ * and unlike LinearTimeline - there's no axis that needs to be
+ * regenerated against a rescaled domain on every zoom tick).
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * PARITY WITH StarMap.tsx / LinearTimeline.tsx (VIA Spiral.tsx)
+ * ──────────────────────────────────────────────────────────────────────
+ * This used to be a self-contained card (`rounded-lg border ... p-6`)
+ * with its own local `selectedEntry` state and a read-only
+ * <EntryDetailModal> popup on click - the odd one out among the three
+ * visualization views, which otherwise all shared selection/filter/sort
+ * state (useEntrySelection.ts) and a sidebar panel stack
+ * (SidebarPanelStack.tsx). It's now been refactored to match
+ * StarMap.tsx/LinearTimeline.tsx exactly, completing parity across all
+ * three views - see Spiral.tsx's own top-of-file comment for the full
+ * page-level wiring (FilterBar, SidebarPanelStack, TimeRangeSelector,
+ * Reset button/toast) this component now plugs into:
+ *
+ *   - `onEntryClick`/`openedEntryIds`/`expandedEntryId` replace the local
+ *     `selectedEntry` state + <EntryDetailModal> - a click here forwards
+ *     straight to useEntrySelection's `handleEntryClick`, the exact same
+ *     shared open-new/expand-minimized/deselect-expanded callback
+ *     StarMap's `onStarClick` and LinearTimeline's `onEntryClick` already
+ *     use - see useEntrySelection.ts's CLICK OUTCOMES comment.
+ *   - `filterCategories` dims (never removes) points/arcs whose
+ *     activityType isn't active, the same FILTERED_OUT_OPACITY treatment
+ *     StarMap/LinearTimeline give their own entries.
+ *   - The OPENED-ENTRY HIGHLIGHT (glow + ring) below mirrors StarMap's
+ *     stars for points, and LinearTimeline's capsules (traced along the
+ *     arc's own path instead of an inflated rect, since an arc isn't a
+ *     straight capsule shape) for range entries.
+ *   - `sidebarWidth`/`resetViewSignal` and the CLICK-TO-CENTER/RESET-VIEW
+ *     effects below are adapted directly from StarMap.tsx (not
+ *     LinearTimeline's `contentOriginX` shift) - see the "FULL-BLEED
+ *     CANVAS" and "CLICK-TO-CENTER" comments further down for why
+ *     StarMap's approach, not LinearTimeline's, is the right fit for this
+ *     view's 2D coordinate system.
+ *   - `domainRange` (TimeRangeContext's `selectedRange`, via Spiral.tsx)
+ *     replaces the old "extent over whatever entries I was handed" domain
+ *     calculation - see the "DOMAIN COMES FROM domainRange" comment below,
+ *     the same fix LinearTimeline.tsx already made for the identical
+ *     structural problem.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * THE SPIRAL FORMULA (ARCHIMEDEAN SPIRAL) + POLAR-TO-CARTESIAN CONVERSION
+ * ──────────────────────────────────────────────────────────────────────
+ * Every entry (and every sample point along the spiral's own path, and
+ * every year label) is positioned by the same two-step recipe, in
+ * `spiralPoint` below:
+ *
+ *   1. Normalize its date to `t` in [0, 1]: 0 = the earliest date across
+ *      all entries, 1 = the latest (see `normalize`/`domain` below - this
+ *      is the exact same "normalize to a [0,1] fraction of the full date
+ *      range" idea as LinearTimeline's `baseXScale`, just not expressed as
+ *      a d3 scale since what follows isn't a linear pixel mapping).
+ *   2. Map `t` to a point in POLAR coordinates (an angle and a radius),
+ *      then convert polar -> cartesian (x, y) to actually plot it:
+ *
+ *        theta  = t * totalRotations * 2*PI   (angle, in radians)
+ *        radius = t * maxRadius
+ *        x = centerX + radius * cos(theta)
+ *        y = centerY + radius * sin(theta)
+ *
+ *      `theta` sweeps around `totalRotations` full turns as `t` goes from
+ *      0 to 1 (turning entries strung out along a "line" of time into a
+ *      coil), while `radius` grows linearly from `0` (dead center, t=0,
+ *      the oldest entry) out to `maxRadius` (the outer edge, t=1, the
+ *      most recent entry) - ZERO, not a fixed `minRadius` offset this
+ *      used to add: an earlier version reserved a small center "hole"
+ *      (`minRadius = maxRadius * 0.15`) on the reasoning that entries
+ *      right at t=0 would otherwise pile up unreadably at a single point,
+ *      but that baked a permanently empty ring into the middle of the
+ *      canvas for every dataset, whether or not it actually had multiple
+ *      entries competing for that exact spot. Starting at true radius 0
+ *      instead means the earliest entry sits exactly at the spiral's own
+ *      center, matching what "this point in time is the very beginning of
+ *      the timeline" should look like, with no reserved dead space - see
+ *      the YEAR GLYPHS comment below for how the innermost year marker
+ *      still avoids sitting exactly on top of that same center point. A
+ *      radius that's
+ *      a LINEAR function of `theta` (as it is here, since both are linear
+ *      functions of the same `t`) is the definition of an Archimedean
+ *      spiral - the "coil of rope" spiral, with each successive loop the
+ *      same distance further out than the last, as opposed to a
+ *      logarithmic spiral (nautilus shell) whose loops grow
+ *      multiplicatively.
+ *
+ * `totalRotations` is set to roughly the number of years the entries
+ * span (see the `domain` useMemo), so each loop of the spiral reads
+ * approximately as "one year" - which is also what makes the year-label
+ * placement below land at one label per loop rather than piling up
+ * unevenly.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * FITTING THE WHOLE SPIRAL IN THE CANVAS WITHOUT ZOOMING OUT
+ * ──────────────────────────────────────────────────────────────────────
+ * `maxRadius` is derived from the container's OWN measured size (see the
+ * `spiralParams` useMemo): half the smaller of width/height, minus a
+ * fixed clearance for point radii and label text so nothing right at the
+ * outer edge gets clipped. Since this is computed from the untransformed
+ * canvas size and used at zoom identity (`k = 1`, no pan), the entire
+ * spiral - oldest entry at the center to newest at the rim - is visible
+ * the moment the view mounts, before the user pans or zooms at all.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * DRAWING THE SPIRAL LINE
+ * ──────────────────────────────────────────────────────────────────────
+ * The visible spiral curve is just a densely-sampled polyline: `t` is
+ * walked from 0 to 1 in many small steps (`spiralSamples`), each mapped
+ * through `spiralPoint`, and stitched into one SVG path `d` string of
+ * `M x,y L x,y L x,y ...` segments - see `buildPolylinePath`. Because
+ * every segment is a straight line, the path's total length is EXACTLY
+ * the sum of each segment's Euclidean length (no curve-length
+ * approximation needed) - that sum, `cumulativeLengths`, is what lets
+ * `tToArcLength`/`arcLengthToT` convert between a `t` value and its
+ * matching arc-length position along the path (both directions - see
+ * YEAR GLYPHS below for what the inverse direction is used for).
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * YEAR GLYPHS: A MINIMAL, HOVER-BASED MARKER, NOT ALWAYS-VISIBLE CURVED
+ * TEXT
+ * ──────────────────────────────────────────────────────────────────────
+ * An earlier version drew each year's boundary as a `<textPath>` label
+ * bending along the spiral's own curvature - legible along most of the
+ * curve, but an Archimedean spiral's tangent direction rotates a full
+ * 360° every loop, and on roughly the "lower half" of each loop (where
+ * the tangent points more than 90° off horizontal) a `<textPath>` lays
+ * glyphs out rotated to match that leftward-pointing tangent, which reads
+ * as the whole label rendering upside-down and right-to-left. A follow-up
+ * fix (building a small locally-reversed path per label to flip the
+ * upside-down cases upright, the same technique amCharts and other
+ * radial/circular chart libraries use) made the text legible everywhere,
+ * but "four-digit text permanently bending around a spiral, at some
+ * angle, forever" is still a lot of visual weight and reading effort for
+ * what's ultimately just a boundary marker, not primary content the way
+ * an entry's own title is.
+ *
+ * This replaces that entirely: each year boundary is now a single small
+ * glyph (a Unicode "✦" four-pointed star, rendered as SVG `<text>` rather
+ * than a hand-drawn `<path>` star shape - a system font renders a crisp,
+ * properly-anti-aliased star at 9px far more reliably than a handful of
+ * short line segments would at that size) sitting exactly on the gridline
+ * at that year's position, styled at a low, muted opacity against the
+ * SAME `currentColor` the gridline itself already uses (see
+ * `YEAR_GLYPH_OPACITY`/`YEAR_GLYPH_HOVER_OPACITY`) - a quiet waypoint
+ * marker along the gridline, not a fourth kind of "star" competing with
+ * the colored, full-opacity entry stars. This also matches the app's
+ * broader night-sky/constellation visual language (see StarMap.tsx) far
+ * more naturally than rotated text ever did: a small dim star marking a
+ * point in time, brightening slightly and showing a plain "2021"-style
+ * tooltip on hover (via the SAME shared `EntryTooltip` entries already
+ * use - see that component's own "ENTRY vs. LABEL VARIANT" comment for
+ * how it renders a bare label instead of a title+date pair), rather than
+ * always-on decoration the user has to read past.
+ *
+ * COLLISION AVOIDANCE: because `radius = t * maxRadius` now starts at
+ * true 0 (see the SPIRAL FORMULA comment above), the earliest years'
+ * glyphs sit in the densest, smallest-radius part of the spiral, right
+ * alongside whatever entries happen to fall in that same tight inner
+ * region - exactly where a glyph is most likely to land on top of (or
+ * within a few px of) an actual entry marker. Before rendering each
+ * glyph, its raw position is checked against the ALREADY-COMPUTED
+ * `points`/`ranges` marker positions (their `x`/`y`, and each range's
+ * `start`/`end`/`midpoint`) within `YEAR_GLYPH_COLLISION_RADIUS_PX`; if
+ * one is too close, the glyph is nudged `YEAR_GLYPH_NUDGE_ARC_PX` further
+ * ALONG THE CURVE (via `arcLengthToT`, first forward, then backward if
+ * forward is still colliding) rather than off the gridline entirely - it
+ * still marks essentially the same point in time, just shifted enough
+ * along the ring to read as two distinct shapes instead of one fused
+ * blob.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * RANGE ENTRIES: ARCS THAT FOLLOW THE SPIRAL, NOT STRAIGHT CHORDS
+ * ──────────────────────────────────────────────────────────────────────
+ * An entry with `endTimestamp` (see the field comment in types/Entry.ts)
+ * spans two `t` values instead of one. A straight line between
+ * `spiralPoint(tStart)` and `spiralPoint(tEnd)` would cut across empty
+ * space and visually cross other loops of the spiral for anything but a
+ * very short span. Instead, `sampleArcPoints` walks `t` from `tStart` to
+ * `tEnd` in the same small-step, build-a-polyline way `spiralSamples`
+ * does for the whole spiral - so the arc is a short run of the identical
+ * parametric curve the spiral itself is drawn from, guaranteed to hug the
+ * spiral's own curvature over that stretch rather than approximate it.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * DOMAIN COMES FROM domainRange, NOT `entries`
+ * ──────────────────────────────────────────────────────────────────────
+ * This used to derive `minDate`/`maxDate` from `entries`' own extent (via
+ * d3.extent, including endTimestamps). Now that Spiral.tsx pre-filters
+ * `entries` down to whatever TimeRangeContext's `selectedRange` is (the
+ * same HARD time filter Timeline.tsx/Constellation.tsx apply - see
+ * Spiral.tsx's own comment), doing the same "extent over the entries I
+ * was handed" would shrink the spiral down to a SMALLER window than what
+ * the user actually selected whenever the surviving entries happen to
+ * cluster away from one or both edges of `domainRange` - the exact same
+ * bug LinearTimeline.tsx's own "DOMAIN COMES FROM domainRange" fix
+ * addresses for its axis. Building `minDate`/`maxDate` from `domainRange`
+ * directly instead keeps the spiral's full extent (and therefore
+ * `totalRotations`, and every year label) representing the FULL selected
+ * window regardless of how the entries inside it are distributed. The
+ * single-instant padding fallback stays as a defensive guard (in case
+ * `domainRange.start === domainRange.end`) even though
+ * TimeRangeContext's own `computeFullRange` already pads a degenerate
+ * range the same way.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * FULL-BLEED CANVAS + CLICK-TO-CENTER: SAME AS StarMap, NOT LinearTimeline
+ * ──────────────────────────────────────────────────────────────────────
+ * This used to render inside a bordered, padded card
+ * (`rounded-lg border ... p-6 shadow-sm`) at a fixed `h-[420px]`, as a
+ * normal-flow child of Spiral.tsx. Now that Spiral.tsx matches
+ * Constellation.tsx/Timeline.tsx's page structure (floating header +
+ * FilterBar above a full-bleed canvas, a sidebar overlay on top of that),
+ * this component's root is `fixed inset-0`, the same "always fills the
+ * entire viewport" approach StarMap.tsx uses - NOT LinearTimeline's
+ * `contentOriginX` origin-shift, since that shift only makes sense for a
+ * single linear axis where x position IS the data (see LinearTimeline's
+ * own CANVAS ORIGIN SHIFT comment for why). A spiral is a free-form 2D
+ * layout like StarMap's star field - there's no single meaningful
+ * "origin" to shift - so, like StarMap, `sidebarWidth` is threaded in and
+ * used only inside the CLICK-TO-CENTER target calculation below, not
+ * anywhere else in this file.
+ *
+ * `useLayoutEffect` (not `useEffect`) for the responsive-sizing effect -
+ * unlike the old bounded `h-[420px]` card, this now measures the full
+ * viewport on mount, the same transient-zero-size-on-first-frame risk
+ * LinearTimeline.tsx's own "MISSING DATA POINTS" comment (cause #2)
+ * describes for its own full-bleed switch; `useLayoutEffect` avoids an
+ * intermediate degenerate-scale paint the same way it does there.
+ *
+ * CLICK-TO-CENTER below is StarMap's own effect, adapted to this file's
+ * coordinate system: entry world positions come from `spiralPoint`
+ * instead of StarMap's jittered star (x, y), and a range entry centers on
+ * the midpoint of its `tStart`/`tEnd` (the point on the spiral halfway
+ * through its span) rather than a single point - the 2D equivalent of
+ * LinearTimeline's own "midpoint of a range entry's start/end" choice for
+ * its 1D axis.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * OVERLAPPING ARCS (AND POINTS): SAME LANE-ASSIGNMENT ALGORITHM AS
+ * LinearTimeline, RADIAL OFFSET INSTEAD OF VERTICAL
+ * ──────────────────────────────────────────────────────────────────────
+ * Two range entries whose date spans overlap would draw as two arcs
+ * tracing the exact same stretch of the spiral, indistinguishable from one
+ * another - the identical problem LinearTimeline.tsx solves for its
+ * capsules with greedy interval scheduling (see that file's own
+ * "LANE-BASED LAYOUT FOR CAPSULES" comment for the full algorithm
+ * explanation: place each in the first lane that doesn't conflict). The
+ * ALGORITHM deciding arc lane NUMBERS is reused exactly, via
+ * utils/laneAssignment.ts's `assignLanes` (duration-descending, same as
+ * LinearTimeline - see that function's own header comment) - just fed
+ * arc-length distance along `spiralPathD` (from `tToArcLength`) as its 1D
+ * "position" measure instead of LinearTimeline's xScale pixel position.
+ * Arc length is the right substitute because, like an xScale pixel
+ * position, it's a single monotonically-increasing-with-time number -
+ * exactly what the algorithm needs to reason about "does this one start
+ * far enough past where that one ends" - even though the underlying
+ * geometry is a 2D curve rather than a straight line.
+ *
+ * LANE 0 = ZERO OFFSET, UNLIKE LinearTimeline: LinearTimeline's lane 0
+ * capsule still sits one `LANE_HEIGHT` below its baseline (`BASELINE_Y +
+ * (lane+1)*LANE_HEIGHT`) because points and capsules already live on
+ * physically separate rows there - a capsule directly on the baseline
+ * would visually collide with the point row regardless of lane logic. The
+ * spiral has no such separate row: `spiralPoint`'s own curve IS the
+ * "home" position for both a point entry and a lane-0 arc, so lane 0 here
+ * gets radiusOffset `0 * RADIAL_LANE_OFFSET_PX` - literally zero, sitting
+ * exactly on the spiral's own drawn path - and only lane 1, 2, 3, ...
+ * nudge outward by `lane * RADIAL_LANE_OFFSET_PX`. This is what makes the
+ * longest-duration arc in a cluster of overlaps (see laneAssignment.ts's
+ * duration-descending comment - it wins lane 0) visibly trace the same
+ * gridline path a viewer would see if that arc were the only entry on the
+ * timeline, rather than every arc always appearing detached from the
+ * curve regardless of whether it actually overlaps anything.
+ *
+ * POINT ENTRIES NOW PARTICIPATE IN OVERLAP DETECTION TOO: a point sitting
+ * at a date that falls inside an already-laned arc's span would render
+ * right on top of that arc's lane-0 curve if left alone - previously
+ * points always rendered at radiusOffset 0 unconditionally, regardless of
+ * what arcs might cover their date. `points`/`ranges` below are computed
+ * together (ranges/arcs first, then points checked against them) so each
+ * point can look up whether ANY lane-0-or-above arc's span covers its own
+ * arc-length position via `assignLaneAroundRanges` (laneAssignment.ts) -
+ * if one does, the point is bumped to the next lane up (checked again
+ * against arcs in THAT lane, and so on) exactly like an arc that can't
+ * fit lane 0 moves to lane 1. A point is deliberately only ever checked
+ * against ARCS, never against other points - two coincident points
+ * sitting at the same spot is not the problem this solves, an arc's whole
+ * lane-length span silently swallowing a point that happens to fall
+ * inside it is. A point with no conflicting arc anywhere keeps its
+ * original always-lane-0 behavior, sitting directly on the curve.
+ *
+ * `spiralPoint`/`sampleArcPoints` both take a `radiusOffset` parameter
+ * (default 0) to make a lane number a small additive term in the same
+ * `radius = t*maxRadius` formula the top-of-file SPIRAL FORMULA comment
+ * already describes, at the SAME theta it would
+ * otherwise use - nudging only the radius leaves a point/arc's angular
+ * position (and therefore which year-ring it reads against) completely
+ * unchanged, just as LinearTimeline's vertical nudge leaves an entry's x
+ * position (and therefore which axis tick it reads against) unchanged.
+ *
+ * Because `start`/`end`/`midpoint`/`pathD` (for ranges) and `x`/`y` (for
+ * points) below are all computed WITH each entry's own lane offset
+ * already baked in, hover/click/highlight code downstream (which reads
+ * those same fields) automatically targets the lane-adjusted position -
+ * there's no separate "un-offset" position left anywhere that could get
+ * hovered/highlighted instead by mistake.
+ */
+
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import * as d3 from 'd3';
+import { Entry } from '../types/Entry';
+import { DateRange } from '../context/TimeRangeContext';
+import { getActivityColor } from '../utils/colors';
+// Shared with StarMap.tsx/LinearTimeline.tsx's own hover tooltip - see
+// EntryTooltip.tsx's header comment for why this is a shared pattern
+// across every visualization view rather than duplicated per-component.
+import EntryTooltip from './EntryTooltip';
+import VizEmptyState, { TimeRangeSelectorRect } from './VizEmptyState';
+import { assignLanes, assignLaneAroundRanges } from '../utils/laneAssignment';
+
+interface SpiralTimelineProps {
+  entries: Entry[];
+  /**
+   * Whether the RAW, unfiltered dataset (Spiral.tsx's own
+   * `entries.length > 0`, not the time-filtered `entries` prop above) has
+   * any entries at all - passed straight through to VizEmptyState.tsx so
+   * it can distinguish "no data exists" from "filtered to nothing" - see
+   * that component's own top-of-file comment for the full reasoning.
+   */
+  hasAnyEntries: boolean;
+  /**
+   * activityTypes currently "active" - see useEntrySelection.ts's
+   * CATEGORY FILTER comment. Points/arcs whose activityType is NOT in
+   * this list are dimmed to FILTERED_OUT_OPACITY, mirroring StarMap.tsx's
+   * treatment of its stars and LinearTimeline.tsx's treatment of its
+   * points/capsules.
+   */
+  filterCategories: string[];
+  /**
+   * Called with the clicked entry when a point or arc is clicked - wired
+   * by Spiral.tsx to useEntrySelection's `handleEntryClick`, the same
+   * shared open-new/expand-minimized/deselect-expanded callback
+   * StarMap.tsx wires to `onStarClick` and LinearTimeline.tsx wires to its
+   * own `onEntryClick` - see the CLICK PARITY comment at the top of this
+   * file.
+   */
+  onEntryClick: (entry: Entry) => void;
+  /**
+   * IDs of entries currently "opened" (represented by a panel, expanded
+   * or minimized, in Spiral.tsx's SidebarPanelStack) - same prop, same
+   * source (useEntrySelection.ts), and same purpose as StarMap.tsx's
+   * `openedEntryIds`: points/arcs whose id appears here render the
+   * OPENED-ENTRY HIGHLIGHT below.
+   */
+  openedEntryIds: string[];
+  /**
+   * The id of the entry whose panel is currently expanded (not
+   * minimized), or `null` - drives the CLICK-TO-CENTER effect below,
+   * exactly like StarMap.tsx's `expandedEntryId`.
+   */
+  expandedEntryId: string | null;
+  /**
+   * The sidebar overlay's current rendered width in pixels (0 when it
+   * isn't rendered) - same prop, same source (Spiral.tsx's measured
+   * `sidebarWidth`), and same purpose as StarMap.tsx's `sidebarWidth`:
+   * used only inside the CLICK-TO-CENTER target below to keep a centered
+   * entry out from under the sidebar overlay.
+   */
+  sidebarWidth: number;
+  /**
+   * Bumped by Spiral.tsx every time its Escape-key/reset-button full
+   * reset fires - see the RESET-VIEW effect below. Same counter-not-
+   * boolean reasoning as StarMap.tsx's own `resetViewSignal`.
+   */
+  resetViewSignal: number;
+  /**
+   * The visible spiral window - Spiral.tsx's TimeRangeContext
+   * `selectedRange`. `minDate`/`maxDate` are built from THIS now, instead
+   * of `entries`' own extent - see the DOMAIN COMES FROM domainRange
+   * comment above.
+   */
+  domainRange: DateRange;
+  /**
+   * The page's measured header bottom edge (Spiral.tsx's own
+   * `headerLayout.top`) - used only to position VizEmptyState.tsx below
+   * the header when there's nothing to show. Previously this component
+   * positioned its own empty-state message at a hardcoded `top-28`,
+   * which could overlap Spiral's (comparatively long, two-sentence)
+   * subtitle - this measured value replaces that guess.
+   */
+  topOffset: number;
+  /**
+   * TimeRangeSelector's own card's live rendered position
+   * (Spiral.tsx's own `timeRangeSelectorRect`) - passed straight through
+   * to VizEmptyState.tsx so it can position its "filtered" message
+   * immediately beside that card. See VizEmptyState.tsx's own
+   * POSITIONING comment.
+   */
+  timeRangeSelectorRect: TimeRangeSelectorRect;
+}
+
+/** Small circle radius (px) for a single-point entry and for a range entry's end caps. */
+const POINT_RADIUS = 5;
+
+/** Stroke width (px) of a range entry's arc. */
+const ARC_STROKE_WIDTH = 3.5;
+
+/**
+ * Extra stroke width (px) added to a range entry's own colored arc when
+ * it's opened - see the OPENED-ENTRY HIGHLIGHT (arc glow) comment below
+ * for why a subtle thickness bump (not a dramatic one) is what actually
+ * makes a highlighted arc read as connected to its start/end highlight
+ * circles, rather than relying on the glow/ring alone.
+ */
+const OPENED_ARC_STROKE_WIDTH_BOOST = 1.5;
+
+/**
+ * ──────────────────────────────────────────────────────────────────────
+ * ARC GLOW: TUNED DOWN SO THE COLOR STAYS DOMINANT
+ * ──────────────────────────────────────────────────────────────────────
+ * A first pass at the arc glow used `ARC_STROKE_WIDTH + 8` (11.5px) at
+ * `strokeOpacity={0.5}`, blurred with `stdDeviation={3}` (see
+ * GLOW_BLUR_STD_DEVIATION below). Even with the glow correctly layered
+ * BEHIND the colored arc (see the render below), that combination was
+ * simply too big and too bright relative to the ~5px colored arc drawn
+ * on top of it: a wide, half-opaque, heavily-blurred white stroke bleeds
+ * far enough past the colored arc's own edges that the two visually
+ * merge into one whitish shape instead of reading as "a colored arc with
+ * a soft glow behind it" - the category color (e.g. Shuffle Dance's
+ * green) got washed out rather than staying the dominant, legible color.
+ * The same oversized footprint also meant two selected arcs running
+ * close together on the spiral (e.g. two entries from the same
+ * multi-week tournament) could have their glows overlap and blur into
+ * one continuous highlighted region instead of reading as two distinct
+ * selections.
+ *
+ * `OPENED_ARC_GLOW_EXTRA_WIDTH` (8 -> 4) and `OPENED_ARC_GLOW_OPACITY`
+ * (0.5 -> 0.3) below are both cut roughly in half from that first pass,
+ * and `GLOW_BLUR_STD_DEVIATION` (3 -> 2) tightens the blur radius on top
+ * of that - together, the glow now extends only slightly past the
+ * colored arc's own (already opened-boosted) width, at a low enough
+ * opacity to read as a backdrop rather than competing with the
+ * full-opacity color painted over it, and with a small enough spatial
+ * footprint that two nearby selected arcs' halos stay visually separate
+ * instead of bleeding together.
+ */
+const OPENED_ARC_GLOW_EXTRA_WIDTH = 4;
+const OPENED_ARC_GLOW_OPACITY = 0.3;
+const GLOW_BLUR_STD_DEVIATION = 2;
+
+/**
+ * ──────────────────────────────────────────────────────────────────────
+ * ARC ENDPOINT GLOW: THE ACTUAL REMAINING SOURCE OF "WHITE OVERPOWERS
+ * THE COLOR" - A SEPARATE GLOW ELEMENT THE FIRST TUNING PASS MISSED
+ * ──────────────────────────────────────────────────────────────────────
+ * The arc's own path glow above (OPENED_ARC_GLOW_EXTRA_WIDTH/_OPACITY)
+ * was tuned down, but a range entry's two start/end highlight circles
+ * (rendered further below, one per endpoint) use a COMPLETELY SEPARATE
+ * glow - inherited unchanged from StarMap.tsx's own per-star glow values
+ * (`POINT_RADIUS + 5` radius, `strokeWidth={4}`, `strokeOpacity={0.6}`).
+ * That first pass fixed the LINE's color but left these two circles at
+ * their original, much brighter/wider settings - and since EVERY visible
+ * selected arc necessarily shows two of these large glowing rings
+ * bookending it, they - not the line - are what actually dominated the
+ * shape's overall appearance, which is why the "glow overpowers the
+ * color" complaint persisted even after the line itself was already
+ * rendering its category color correctly (confirmed directly: DOM order
+ * for the line/glow was already correct - glow first, colored line
+ * second - so this endpoint glow, not a layering bug, was the real
+ * remaining cause).
+ *
+ * Tuned to the same restrained magnitude as the line's own glow -
+ * `OPENED_ARC_GLOW_OPACITY` (0.3) reused directly rather than a second,
+ * separately-tunable opacity constant, so the line and its endpoints
+ * always read as ONE consistently-toned highlight instead of two
+ * independently-drifting glow strengths.
+ */
+const OPENED_ARC_ENDPOINT_GLOW_RADIUS_EXTRA = 3; // was POINT_RADIUS + 5
+const OPENED_ARC_ENDPOINT_GLOW_STROKE_WIDTH = 3; // was 4
+
+/**
+ * Radial spacing (px) between stacked arc lanes - the spiral's equivalent
+ * of LinearTimeline.tsx's `LANE_HEIGHT`. Lane 0's arc renders at
+ * `radius + RADIAL_LANE_OFFSET_PX`, lane 1 at `radius + 2 *
+ * RADIAL_LANE_OFFSET_PX`, and so on - see the top-of-file "OVERLAPPING
+ * ARCS" comment for why this is a radius nudge rather than a vertical one.
+ *
+ * Originally 10px (an 8-12px range, matched down from LANE_HEIGHT's 26px
+ * on the assumption that the spiral's loops were already spaced far
+ * enough apart radially that a small per-lane nudge would read clearly).
+ * In practice that was too tight once several overlapping arcs stacked up:
+ * outer lanes sat close enough to each other - and to the next loop of the
+ * main spiral curve/year gridlines - that telling two nearby lanes apart,
+ * or a lane apart from the underlying spiral, took real effort. Bumped to
+ * roughly 1.8x that (18px) for comfortable, unambiguous separation between
+ * stacked lanes and between the outermost lane and the next year's loop.
+ */
+const RADIAL_LANE_OFFSET_PX = 18;
+
+/**
+ * Extra arc-length clearance (px, along the spiral's own path) required
+ * between one arc's end and the next arc's start before they're allowed to
+ * share a lane - the spiral's equivalent of LinearTimeline.tsx's
+ * `LANE_GAP_PX`, using the same value: both measure "how much straight-line
+ * clearance in px reads as clearly separated," just along a straight axis
+ * there and along the spiral's curve here.
+ */
+const LANE_GAP_PX = 6;
+
+/**
+ * Clearance (px) reserved between the spiral's outermost loop
+ * (`maxRadius`) and the container's edge - room for point radii, arc end
+ * caps, and year-label text so nothing at the rim gets visually clipped.
+ */
+const RADIUS_PADDING = 40;
+
+/** Roughly how many straight segments make up one full loop of the main spiral path - tuned for a visibly smooth curve without an excessive path string. */
+const SAMPLES_PER_ROTATION = 48;
+
+/** Hard cap on total main-spiral samples, so a very long-spanning (many-year) timeline doesn't build an unreasonably large path string. */
+const MAX_SPIRAL_SAMPLES = 2000;
+
+/** Segments-per-rotation used when sampling one range entry's (typically much shorter) arc - lower than the main spiral's since an arc only covers a fraction of a loop. */
+const ARC_SAMPLES_PER_ROTATION = 32;
+const MIN_ARC_SAMPLES = 6;
+const MAX_ARC_SAMPLES = 200;
+
+/**
+ * Font size (px) of a year glyph - see the top-of-file "YEAR GLYPHS"
+ * comment. Small and quiet by design: this marks a waypoint on the
+ * gridline, not an entry, so it should never compete with the larger,
+ * colored `POINT_RADIUS`-sized entry stars.
+ */
+const YEAR_GLYPH_FONT_SIZE_PX = 9;
+
+/**
+ * Resting / hovered opacity of a year glyph, against the SAME
+ * `currentColor` (`--text-muted-color`) the gridline itself already uses
+ * - see the top-of-file "YEAR GLYPHS" comment for why a glyph should read
+ * as part of the gridline's own quiet visual language rather than as a
+ * distinct, attention-grabbing marker.
+ */
+const YEAR_GLYPH_OPACITY = 0.45;
+const YEAR_GLYPH_HOVER_OPACITY = 0.85;
+
+/**
+ * How close (px, on screen) a year glyph's raw position needs to be to an
+ * actual entry marker before it's considered "colliding" and gets nudged
+ * - see the top-of-file "YEAR GLYPHS" comment's "COLLISION AVOIDANCE"
+ * section. Sized a bit larger than `POINT_RADIUS` so the nudge kicks in
+ * before the two shapes visually touch, not only once they'd fully
+ * overlap.
+ */
+const YEAR_GLYPH_COLLISION_RADIUS_PX = 10;
+
+/**
+ * How far (px, along the curve's own arc length) a colliding year glyph
+ * is nudged - see the top-of-file "YEAR GLYPHS" comment's "COLLISION
+ * AVOIDANCE" section. Large enough to clear a typical entry marker's own
+ * radius/glow at `YEAR_GLYPH_COLLISION_RADIUS_PX`, small enough that the
+ * glyph still reads as marking essentially the same point on the
+ * gridline, not a different year boundary.
+ */
+const YEAR_GLYPH_NUDGE_ARC_PX = 14;
+
+/** How far the user can zoom in/out - same range StarMap.tsx uses for its own 2D pannable canvas. */
+const ZOOM_SCALE_EXTENT: [number, number] = [0.5, 8];
+
+/** Average milliseconds in a year (accounts for leap years) - used only to estimate `totalRotations`. */
+const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+
+/** Angle (radians) the spiral starts at for t=0 - purely cosmetic (starts pointing straight up rather than right). */
+const SPIRAL_START_ANGLE = -Math.PI / 2;
+
+/** Opacity applied to a point/arc whose category is filtered out - same value as StarMap.tsx's/LinearTimeline.tsx's FILTERED_OUT_OPACITY. */
+const FILTERED_OUT_OPACITY = 0.15;
+
+/**
+ * Neutral, bright highlight color for the "opened entry" ring/glow - same
+ * color, same reasoning as StarMap.tsx's/LinearTimeline.tsx's own
+ * OPENED_HIGHLIGHT_COLOR: deliberately not tied to any activityType
+ * color, so it reads clearly against every entry color. A theme token
+ * (--star-highlight-color), not a fixed hex value - see StarMap.tsx's own
+ * comment on its identical constant for why.
+ */
+const OPENED_HIGHLIGHT_COLOR = 'var(--star-highlight-color)';
+
+interface SpiralParams {
+  centerX: number;
+  centerY: number;
+  maxRadius: number;
+  totalRotations: number;
+}
+
+/**
+ * Polar -> cartesian mapping for a normalized time fraction `t` - see the
+ * top-of-file "SPIRAL FORMULA" comment. `radius = t * maxRadius` - ZERO
+ * at t=0, no `minRadius` floor (see that comment for why the earlier
+ * fixed-center-hole version was replaced) - so the earliest entry sits
+ * exactly at the spiral's own center.
+ *
+ * `radiusOffset` (default 0) adds a constant to the computed radius before
+ * converting to cartesian, at the SAME theta `t` would otherwise use - this
+ * is the one hook lane-assigned arcs use to push themselves outward; see
+ * the top-of-file "OVERLAPPING ARCS" comment for why a radius nudge (not a
+ * theta nudge) is the spiral's equivalent of LinearTimeline's vertical lane
+ * offset. Every other caller (the main spiral path, year labels, and point
+ * entries - none of which are ever lane-assigned) leaves this at its
+ * default and is completely unaffected.
+ */
+/**
+ * The raw polar angle (radians) at `t` - `theta` in the SPIRAL FORMULA
+ * comment, before it's converted to cartesian. Pulled out of `spiralPoint`
+ * so the YEAR LABEL TICKS mark (which needs the "from center outward to
+ * this point" direction, not `spiralPoint`'s own (x, y) output) can reuse
+ * the exact same formula rather than a second, possibly-drifting copy of
+ * it.
+ */
+function spiralPolarAngle(t: number, params: SpiralParams): number {
+  return SPIRAL_START_ANGLE + t * params.totalRotations * Math.PI * 2;
+}
+
+function spiralPoint(
+  t: number,
+  params: SpiralParams,
+  radiusOffset = 0
+): { x: number; y: number } {
+  const { centerX, centerY, maxRadius } = params;
+  const radius = t * maxRadius + radiusOffset;
+  const theta = spiralPolarAngle(t, params);
+  return {
+    x: centerX + radius * Math.cos(theta),
+    y: centerY + radius * Math.sin(theta),
+  };
+}
+
+/** Stitches a list of points into one straight-segmented SVG path `d` string. */
+function buildPolylinePath(points: { x: number; y: number }[]): string {
+  if (points.length === 0) return '';
+  return points
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
+    .join(' ');
+}
+
+/**
+ * Samples the spiral curve between two `t` values (inclusive) - used to
+ * draw a range entry's arc. See the top-of-file "RANGE ENTRIES" comment
+ * for why this (walking the same parametric curve over a short span)
+ * rather than a straight line between the two endpoints.
+ *
+ * `radiusOffset` is forwarded to every sampled `spiralPoint` call - see
+ * that function's own comment - so a lane-assigned arc's ENTIRE path (not
+ * just its endpoints) follows the same outward-shifted curve, rather than
+ * only its start/end points moving while the arc between them still traces
+ * the un-offset spiral.
+ */
+function sampleArcPoints(
+  tStart: number,
+  tEnd: number,
+  params: SpiralParams,
+  radiusOffset = 0
+): { x: number; y: number }[] {
+  const t0 = Math.min(tStart, tEnd);
+  const t1 = Math.max(tStart, tEnd);
+  const span = t1 - t0;
+  const segmentCount = Math.min(
+    MAX_ARC_SAMPLES,
+    Math.max(
+      MIN_ARC_SAMPLES,
+      Math.round(span * params.totalRotations * ARC_SAMPLES_PER_ROTATION)
+    )
+  );
+
+  const points: { x: number; y: number }[] = [];
+  for (let i = 0; i <= segmentCount; i++) {
+    const t = t0 + (span * i) / segmentCount;
+    points.push(spiralPoint(t, params, radiusOffset));
+  }
+  return points;
+}
+
+export default function SpiralTimeline({
+  entries,
+  hasAnyEntries,
+  filterCategories,
+  onEntryClick,
+  openedEntryIds,
+  expandedEntryId,
+  sidebarWidth,
+  resetViewSignal,
+  domainRange,
+  topOffset,
+  timeRangeSelectorRect,
+}: SpiralTimelineProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const zoomLayerRef = useRef<SVGGElement>(null);
+  // Holds the same zoom *behavior* instance attached to the <svg> below, so
+  // CLICK-TO-CENTER/RESET-VIEW (see below) can programmatically drive it
+  // later, outside of the 'zoom' event handler that normally drives it -
+  // same role as StarMap.tsx's own `zoomBehaviorRef`.
+  const zoomBehaviorRef = useRef<d3.ZoomBehavior<
+    SVGSVGElement,
+    unknown
+  > | null>(null);
+
+  // ─── Responsive sizing ───
+  // Same ResizeObserver-on-a-container-ref pattern as StarMap.tsx/
+  // LinearTimeline.tsx - now measuring the full viewport (see the
+  // FULL-BLEED CANVAS comment above), so this uses `useLayoutEffect`, not
+  // `useEffect`, for the same first-frame reason LinearTimeline.tsx does.
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect();
+      setSize({ width: rect.width, height: rect.height });
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // ─── Date domain ───
+  // See the DOMAIN COMES FROM domainRange comment above - this no longer
+  // derives from `entries`' own extent.
+  const [minDate, maxDate] = useMemo(() => {
+    const domain: [Date, Date] = [domainRange.start, domainRange.end];
+
+    if (domain[0].getTime() === domain[1].getTime()) {
+      domain[0] = d3.timeDay.offset(domain[0], -1);
+      domain[1] = d3.timeDay.offset(domain[1], 1);
+    }
+
+    return domain;
+  }, [domainRange]);
+
+  const normalize = (date: Date): number => {
+    const span = maxDate.getTime() - minDate.getTime();
+    return span === 0 ? 0 : (date.getTime() - minDate.getTime()) / span;
+  };
+
+  // ─── Spiral parameters ───
+  // `totalRotations` is roughly the number of years the domain spans
+  // (see the top-of-file SPIRAL FORMULA comment), floored at 1 full loop
+  // so even a short-lived history still reads as a spiral rather than a
+  // single tight arc. `maxRadius` is scaled off the container's own
+  // measured size - see the "FITTING THE WHOLE SPIRAL" comment above. No
+  // `minRadius` - see the "SPIRAL FORMULA" comment's own explanation of
+  // why the spiral now starts at true radius 0 instead of a reserved
+  // center hole.
+  const spiralParams = useMemo<SpiralParams>(() => {
+    const yearsSpanned = (maxDate.getTime() - minDate.getTime()) / MS_PER_YEAR;
+    const totalRotations = Math.max(1, yearsSpanned);
+    const maxRadius = Math.max(
+      0,
+      Math.min(size.width, size.height) / 2 - RADIUS_PADDING
+    );
+
+    return {
+      centerX: size.width / 2,
+      centerY: size.height / 2,
+      maxRadius,
+      totalRotations,
+    };
+  }, [size, minDate, maxDate]);
+
+  // ─── Main spiral path ───
+  // Densely sampled polyline approximation of the spiral curve itself -
+  // see "DRAWING THE SPIRAL LINE" above for why a polyline's length is
+  // exact (not approximate) and how that feeds year-label positioning.
+  const spiralSampleCount = Math.min(
+    MAX_SPIRAL_SAMPLES,
+    Math.max(64, Math.round(spiralParams.totalRotations * SAMPLES_PER_ROTATION))
+  );
+
+  const spiralSamples = useMemo(() => {
+    const samples: { x: number; y: number }[] = [];
+    for (let i = 0; i <= spiralSampleCount; i++) {
+      samples.push(spiralPoint(i / spiralSampleCount, spiralParams));
+    }
+    return samples;
+  }, [spiralSampleCount, spiralParams]);
+
+  const spiralPathD = useMemo(
+    () => buildPolylinePath(spiralSamples),
+    [spiralSamples]
+  );
+
+  // Cumulative Euclidean distance up to each sample - since every
+  // segment is straight, this sum IS the path's exact length at that
+  // sample, the same units `tToArcLength`/`arcLengthToT` both work in.
+  const cumulativeLengths = useMemo(() => {
+    const lengths = [0];
+    for (let i = 1; i < spiralSamples.length; i++) {
+      const prev = spiralSamples[i - 1];
+      const curr = spiralSamples[i];
+      lengths.push(
+        lengths[i - 1] + Math.hypot(curr.x - prev.x, curr.y - prev.y)
+      );
+    }
+    return lengths;
+  }, [spiralSamples]);
+
+  const totalPathLength = cumulativeLengths[cumulativeLengths.length - 1] ?? 0;
+
+  /** Interpolates a `t` (0-1) fraction to its arc-length position along `spiralPathD`. */
+  const tToArcLength = (t: number): number => {
+    const index = t * spiralSampleCount;
+    const i0 = Math.floor(index);
+    const i1 = Math.min(spiralSampleCount, i0 + 1);
+    const frac = index - i0;
+    const len0 = cumulativeLengths[i0] ?? 0;
+    const len1 = cumulativeLengths[i1] ?? len0;
+    return len0 + (len1 - len0) * frac;
+  };
+
+  /**
+   * The inverse of `tToArcLength` - given an arc-length distance along
+   * `spiralPathD`, finds the `t` (0-1) it corresponds to. Used to nudge a
+   * year glyph along the gridline when it would otherwise land on top of
+   * an entry marker - see the top-of-file "YEAR GLYPHS" comment's
+   * "COLLISION AVOIDANCE" section: `arcLengthToT(tToArcLength(t) +
+   * YEAR_GLYPH_NUDGE_ARC_PX)` finds the `t` a fixed PIXEL distance past a
+   * glyph's own position, which is what lets the nudge stay visually
+   * consistent regardless of how much arc length a given `t` step covers
+   * at that point in the spiral (outer loops cover far more arc length
+   * per unit `t` than inner ones).
+   *
+   * `cumulativeLengths` is monotonically non-decreasing (each segment
+   * adds a non-negative length), so a binary search for the bracketing
+   * sample index is valid, then linear interpolation WITHIN that bracket
+   * mirrors `tToArcLength`'s own interpolation exactly (same source
+   * array, same units), just solved in the opposite direction.
+   */
+  const arcLengthToT = (targetLength: number): number => {
+    const clamped = Math.max(0, Math.min(targetLength, totalPathLength));
+    let lo = 0;
+    let hi = cumulativeLengths.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (cumulativeLengths[mid] < clamped) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    const i1 = lo;
+    const i0 = Math.max(0, i1 - 1);
+    const len0 = cumulativeLengths[i0] ?? 0;
+    const len1 = cumulativeLengths[i1] ?? len0;
+    const frac = len1 > len0 ? (clamped - len0) / (len1 - len0) : 0;
+    return (i0 + frac) / spiralSampleCount;
+  };
+
+  // ─── Year boundaries ───
+  // One glyph per calendar year the domain touches, positioned at that
+  // year's Jan 1 (clamped into [minDate, maxDate] for the first/last
+  // partial years) - see the top-of-file "YEAR GLYPHS" comment for how
+  // each one is actually rendered.
+  const yearBoundaries = useMemo(() => {
+    const startYear = minDate.getFullYear();
+    const endYear = maxDate.getFullYear();
+    const span = maxDate.getTime() - minDate.getTime();
+    const labels: { year: number; t: number }[] = [];
+
+    for (let year = startYear; year <= endYear; year++) {
+      const boundaryTime = Math.min(
+        Math.max(new Date(year, 0, 1).getTime(), minDate.getTime()),
+        maxDate.getTime()
+      );
+      labels.push({
+        year,
+        t: span === 0 ? 0 : (boundaryTime - minDate.getTime()) / span,
+      });
+    }
+    return labels;
+  }, [minDate, maxDate]);
+
+  // ─── Sorted entries ───
+  // Chronological draw order, same as LinearTimeline's implicit ordering
+  // (entries already sorted by position along its axis) - so later
+  // entries draw on top of earlier ones where circles/arcs overlap.
+  const sortedEntries = useMemo(
+    () =>
+      [...entries].sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      ),
+    [entries]
+  );
+
+  // Set for O(1) membership checks per point/arc - same pattern as
+  // StarMap.tsx's activeCategorySet/LinearTimeline.tsx's own.
+  const activeCategorySet = useMemo(
+    () => new Set<string>(filterCategories),
+    [filterCategories]
+  );
+
+  // Whether there's anything actually visible to plot right now - see
+  // StarMap.tsx's identical `isEmpty` comment and VizEmptyState.tsx's own
+  // top-of-file comment for the full reasoning (this single check covers
+  // both the time filter and the category filter as a possible cause).
+  const isEmpty = useMemo(
+    () => !entries.some(entry => activeCategorySet.has(entry.activityType)),
+    [entries, activeCategorySet]
+  );
+
+  // Set for O(1) membership checks per point/arc - same pattern, same
+  // source, and same purpose as StarMap.tsx's own `openedEntryIdSet`.
+  const openedEntryIdSet = useMemo(
+    () => new Set(openedEntryIds),
+    [openedEntryIds]
+  );
+
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * RANGE ENTRIES (with endTimestamp): LANE-ASSIGNED ARCS, LANE 0 = 0
+   * RADIAL OFFSET
+   * ──────────────────────────────────────────────────────────────────────
+   * See the top-of-file "OVERLAPPING ARCS (AND POINTS)" comment for the
+   * full reasoning. In short: `assignLanes` (utils/laneAssignment.ts,
+   * shared verbatim with LinearTimeline.tsx) decides lane NUMBERS from
+   * each entry's arc-length span along the spiral path (`tToArcLength`,
+   * the spiral's stand-in for LinearTimeline's xScale pixel position, and
+   * processed duration-descending, so a solitary or longest-overlapping
+   * arc lands in lane 0); `radiusOffset` then turns a lane number into an
+   * outward radial nudge, re-sampling that entry's arc (and its
+   * start/end/midpoint) at the larger radius via `spiralPoint`/
+   * `sampleArcPoints`'s `radiusOffset` parameter - `lane * RADIAL_LANE_OFFSET_PX`,
+   * so lane 0 is exactly 0: it sits directly on the spiral's own drawn
+   * curve, not nudged outward at all.
+   *
+   * `start`/`end`/`midpoint`/`pathD` below all already have this offset
+   * baked in - the hover/click/highlight JSX further down reads these same
+   * fields, so it automatically targets the lane-adjusted arc position, not
+   * the original un-offset spiral curve.
+   *
+   * `lanedRangeItems` (the pre-radiusOffset `assignLanes` output, still
+   * carrying `arcStart`/`arcEnd`) is kept alongside the final `ranges` list
+   * so the POINT ENTRIES computation just below can look up which lane
+   * each arc landed in and what span it covers, without recomputing any of
+   * this from scratch.
+   */
+  const { ranges, lanedRangeItems } = useMemo(() => {
+    const items = sortedEntries
+      .filter(entry => entry.endTimestamp)
+      .map(entry => {
+        const tStart = normalize(new Date(entry.timestamp));
+        const tEnd = normalize(new Date(entry.endTimestamp as string));
+        return {
+          entry,
+          tStart,
+          tEnd,
+          arcStart: tToArcLength(Math.min(tStart, tEnd)),
+          arcEnd: tToArcLength(Math.max(tStart, tEnd)),
+          color: getActivityColor(entry.activityType),
+        };
+      });
+
+    const laned = assignLanes(
+      items,
+      item => item.arcStart,
+      item => item.arcEnd,
+      LANE_GAP_PX
+    );
+
+    const ranges = laned.map(({ entry, tStart, tEnd, color, lane }) => {
+      const radiusOffset = lane * RADIAL_LANE_OFFSET_PX;
+      const arcPoints = sampleArcPoints(
+        tStart,
+        tEnd,
+        spiralParams,
+        radiusOffset
+      );
+      return {
+        entry,
+        pathD: buildPolylinePath(arcPoints),
+        start: arcPoints[0],
+        end: arcPoints[arcPoints.length - 1],
+        midpoint: spiralPoint((tStart + tEnd) / 2, spiralParams, radiusOffset),
+        color,
+        lane,
+      };
+    });
+
+    return { ranges, lanedRangeItems: laned };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedEntries, spiralParams, minDate, maxDate, cumulativeLengths]);
+
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * SINGLE-POINT ENTRIES (no endTimestamp): LANE-BUMPED AROUND ARCS THAT
+   * COVER THEIR DATE
+   * ──────────────────────────────────────────────────────────────────────
+   * See the top-of-file "POINT ENTRIES NOW PARTICIPATE IN OVERLAP
+   * DETECTION TOO" comment for the full reasoning. In short: a point whose
+   * date falls within an already-laned arc's span (`lanedRangeItems`,
+   * computed just above) would render right on top of that arc's curve if
+   * left at lane 0 - `assignLaneAroundRanges` (utils/laneAssignment.ts)
+   * finds the first lane (0, 1, 2, ...) where no arc assigned to that lane
+   * covers this point's own arc-length position, checking only against
+   * ARCS (never other points - see that function's own comment for why).
+   * A point with no conflicting arc anywhere stays at lane 0, i.e.
+   * `radiusOffset` 0, unchanged from its original always-on-the-curve
+   * behavior.
+   */
+  const points = useMemo(
+    () =>
+      sortedEntries
+        .filter(entry => !entry.endTimestamp)
+        .map(entry => {
+          const t = normalize(new Date(entry.timestamp));
+          const position = tToArcLength(t);
+          const lane = assignLaneAroundRanges(
+            position,
+            lanedRangeItems,
+            item => item.arcStart,
+            item => item.arcEnd,
+            LANE_GAP_PX
+          );
+          const radiusOffset = lane * RADIAL_LANE_OFFSET_PX;
+          return {
+            entry,
+            ...spiralPoint(t, spiralParams, radiusOffset),
+            color: getActivityColor(entry.activityType),
+          };
+        }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sortedEntries, spiralParams, minDate, maxDate, lanedRangeItems]
+  );
+
+  // ─── Entry marker positions (for year-glyph collision avoidance) ───
+  // See the top-of-file "YEAR GLYPHS" comment's "COLLISION AVOIDANCE"
+  // section - a flat list of every rendered entry marker's on-screen
+  // position (a point's own (x, y), or a range arc's start/end/midpoint),
+  // checked against each year glyph's raw position before it's drawn.
+  const entryMarkerPositions = useMemo(
+    () => [
+      ...points.map(point => ({ x: point.x, y: point.y })),
+      ...ranges.flatMap(range => [range.start, range.end, range.midpoint]),
+    ],
+    [points, ranges]
+  );
+
+  /**
+   * Finds a `t` for a year glyph that doesn't land on top of an entry
+   * marker - see the top-of-file "YEAR GLYPHS" comment's "COLLISION
+   * AVOIDANCE" section. Tries the glyph's own raw position first, then
+   * nudges forward along the curve, then backward; if even that's still
+   * colliding (an extreme edge case - entries densely packed on both
+   * sides), just accepts the forward-nudged position rather than
+   * searching indefinitely for a perfectly clear spot.
+   */
+  const findNonCollidingYearGlyphT = (t: number, arcLength: number): number => {
+    const collidesAt = (candidateT: number): boolean => {
+      const candidate = spiralPoint(candidateT, spiralParams);
+      return entryMarkerPositions.some(
+        marker =>
+          Math.hypot(marker.x - candidate.x, marker.y - candidate.y) <
+          YEAR_GLYPH_COLLISION_RADIUS_PX
+      );
+    };
+
+    if (!collidesAt(t)) return t;
+
+    const forwardT = arcLengthToT(
+      Math.min(totalPathLength, arcLength + YEAR_GLYPH_NUDGE_ARC_PX)
+    );
+    if (!collidesAt(forwardT)) return forwardT;
+
+    const backwardT = arcLengthToT(
+      Math.max(0, arcLength - YEAR_GLYPH_NUDGE_ARC_PX)
+    );
+    return collidesAt(backwardT) ? forwardT : backwardT;
+  };
+
+  // ─── Pan/zoom behavior ───
+  // Same mechanism as StarMap.tsx: attached once, and the 'zoom' handler
+  // writes the transform directly onto `zoomLayerRef`'s <g> rather than
+  // going through React state - there's no axis here that needs to be
+  // regenerated against a rescaled domain the way LinearTimeline's is, so
+  // there's nothing else that needs to react to the transform.
+  // `zoomBehaviorRef` is stashed (unlike the pre-parity version) so
+  // CLICK-TO-CENTER/RESET-VIEW below can drive it programmatically.
+  useEffect(() => {
+    if (!svgRef.current || !zoomLayerRef.current) return;
+
+    const svg = d3.select(svgRef.current);
+    const zoomLayer = d3.select(zoomLayerRef.current);
+
+    const zoomBehavior = d3
+      .zoom<SVGSVGElement, unknown>()
+      .scaleExtent(ZOOM_SCALE_EXTENT)
+      .on('zoom', event => {
+        zoomLayer.attr('transform', event.transform.toString());
+      });
+
+    svg.call(zoomBehavior);
+    zoomBehaviorRef.current = zoomBehavior;
+
+    return () => {
+      svg.on('.zoom', null);
+      zoomBehaviorRef.current = null;
+    };
+  }, []);
+
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * CLICK-TO-CENTER: PROGRAMMATIC PAN VIA d3-zoom's `.transform()`, TIED TO
+   * THE EXPANDED-ENTRY STATE CHANGE
+   * ──────────────────────────────────────────────────────────────────────
+   * Adapted from StarMap.tsx's own CLICK-TO-CENTER effect - see its
+   * comment for the full reasoning (why this lives in an effect keyed on
+   * `expandedEntryId` rather than the click handler, and why the target
+   * isn't simply the canvas center). The only difference in the target
+   * MATH is *where* a target entry's world (x, y) comes from: a point uses
+   * its own `spiralPoint` output directly; a range entry uses `midpoint`
+   * (see the `ranges` useMemo above) instead of a single endpoint, so
+   * centering a long-duration entry doesn't push most of its arc off to
+   * one side of the target.
+   *
+   * `sidebarWidth` IS A DEPENDENCY HERE - UNLIKE StarMap.tsx's OWN EFFECT:
+   * StarMap deliberately excludes it (see that file's comment: "the pan
+   * should only ever be triggered by the expanded entry actually changing,
+   * not by e.g. a window resize"), but that omission has a race condition
+   * on the very FIRST entry ever opened: `expandedEntryId` flips to a
+   * real id and `hasSelection` flips true in the SAME render (both come
+   * from the same useEntrySelection.ts state update), but the sidebar's
+   * ACTUAL rendered pixel width isn't known yet - Spiral.tsx's own
+   * `sidebarWidth` state still measures 0 until its ResizeObserver
+   * callback fires against the now-mounted SidebarPanelStack DOM node,
+   * which lands in a LATER, separate commit. Since `targetX` reads
+   * `sidebarWidth` directly, this effect firing on that first render would
+   * center against the stale pre-open value (0) - i.e. the full canvas
+   * center - instead of the correct sidebar-excluded center, exactly the
+   * bug this fixes. Including `sidebarWidth` here means the effect fires
+   * AGAIN once the real measured width lands a moment later, recentering
+   * onto the correct target - the identical fix (and identical staleness
+   * cause) LinearTimeline.tsx's own AUTO-RECENTER effect already documents
+   * for its `contentOriginX`/`innerWidth`. d3's `.transition()` simply
+   * redirects the still-in-flight first animation toward the corrected
+   * target rather than restarting it, so this reads as one smooth pan
+   * converging on the right spot, not a visible double jump. On every
+   * SUBSEQUENT click (sidebar already open, `sidebarWidth` unchanged by
+   * this expand), this dependency is a no-op - the effect only actually
+   * re-fires when `sidebarWidth`'s value itself changes, which also means
+   * resizing the window while a panel is open correctly re-centers as the
+   * sidebar's rendered width changes with it. `points`/`ranges`/`size`
+   * stay excluded, same as StarMap's own `stars`/`size` - see StarMap's
+   * comment for why this should only re-run for a real "recenter" signal
+   * (the expanded entry changing, or the sidebar's width changing),
+   * not every render that happens to touch one of the values it reads.
+   */
+  useEffect(() => {
+    const svgNode = svgRef.current;
+    const zoomBehavior = zoomBehaviorRef.current;
+    if (!svgNode || !zoomBehavior || !expandedEntryId) return;
+
+    const point = points.find(
+      candidate => candidate.entry.id === expandedEntryId
+    );
+    const range = point
+      ? undefined
+      : ranges.find(candidate => candidate.entry.id === expandedEntryId);
+    const world = point ?? range?.midpoint;
+    if (!world) return;
+
+    const { width, height } = size;
+    if (width === 0 || height === 0) return;
+
+    const targetX = sidebarWidth + (width - sidebarWidth) / 2;
+    const targetY = height / 2;
+
+    const currentTransform = d3.zoomTransform(svgNode);
+
+    const centeredTransform = d3.zoomIdentity
+      .translate(targetX, targetY)
+      .scale(currentTransform.k) // preserve the user's current zoom level
+      .translate(-world.x, -world.y);
+
+    d3.select(svgNode)
+      .transition()
+      .duration(650) // 500-750ms: smooth, not sluggish, same as StarMap's
+      .call(zoomBehavior.transform, centeredTransform);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedEntryId, sidebarWidth]);
+
+  /**
+   * ─── RESET-VIEW: PROGRAMMATIC PAN/ZOOM RESET, TIED TO `resetViewSignal` ───
+   * Identical to StarMap.tsx's own RESET-VIEW effect - see its comment for
+   * why `isFirstResetSignal` skips the very first run.
+   */
+  const isFirstResetSignal = useRef(true);
+  useEffect(() => {
+    if (isFirstResetSignal.current) {
+      isFirstResetSignal.current = false;
+      return;
+    }
+
+    const svgNode = svgRef.current;
+    const zoomBehavior = zoomBehaviorRef.current;
+    if (!svgNode || !zoomBehavior) return;
+
+    d3.select(svgNode)
+      .transition()
+      .duration(650)
+      .call(zoomBehavior.transform, d3.zoomIdentity);
+  }, [resetViewSignal]);
+
+  // ─── Hover tooltip ───
+  // Same shape/tracking as LinearTimeline.tsx/StarMap.tsx - see the
+  // "Hover tooltip" comment in LinearTimeline.tsx - EXTENDED with a
+  // `kind` discriminant so the SAME piece of state can also track a
+  // hovered YEAR GLYPH (see the "YEAR GLYPHS" comment below), not just a
+  // hovered entry point/arc. `EntryTooltip` below is rendered with either
+  // its `entry` prop (unchanged behavior) or its `label` prop (the bare
+  // year), depending on which branch is set - see EntryTooltip.tsx's own
+  // "ENTRY vs. LABEL VARIANT" comment.
+  const [hovered, setHovered] = useState<
+    | { kind: 'entry'; entry: Entry; x: number; y: number }
+    | { kind: 'year'; year: number; x: number; y: number }
+    | null
+  >(null);
+
+  const isReady =
+    size.width > 0 && size.height > 0 && spiralParams.maxRadius > 0;
+
+  return (
+    // `fixed inset-0` (not a layout child) - see the FULL-BLEED CANVAS
+    // comment above. z-0, same base layer as StarMap.tsx/LinearTimeline.tsx:
+    // Spiral.tsx's floating header and sidebar overlay both render above
+    // this with their own higher z-index. canvas-vignette-bg (see
+    // index.css), not a flat bg-[var(--bg-color)] - the same radial
+    // vignette StarMap.tsx's own canvas paints, so this reads as the same
+    // background rather than a visibly flatter one just because this is a
+    // different view.
+    <div ref={containerRef} className="canvas-vignette-bg fixed inset-0 z-0">
+      <svg
+        ref={svgRef}
+        width={size.width}
+        height={size.height}
+        className="cursor-grab text-[var(--text-muted-color)] active:cursor-grabbing"
+      >
+        <defs>
+          {/*
+           * Soft blur used behind opened entries' highlight ring, so it
+           * reads as a glow rather than a hard-edged shape - same
+           * pattern as StarMap.tsx's `opened-star-glow`/
+           * LinearTimeline.tsx's `opened-point-glow` (kept as a separate
+           * id here since defs ids are scoped per-<svg>, not shared
+           * across components). `stdDeviation` uses
+           * GLOW_BLUR_STD_DEVIATION (2, tuned down from an initial 3) -
+           * see the ARC GLOW comment above `OPENED_ARC_GLOW_EXTRA_WIDTH`
+           * for why: a smaller blur radius keeps each opened entry's
+           * halo from spreading far enough to wash out its own color or
+           * bleed into a nearby opened arc's halo.
+           */}
+          <filter
+            id="opened-spiral-glow"
+            x="-100%"
+            y="-100%"
+            width="300%"
+            height="300%"
+          >
+            <feGaussianBlur stdDeviation={GLOW_BLUR_STD_DEVIATION} />
+          </filter>
+        </defs>
+        <g ref={zoomLayerRef}>
+          {isReady && (
+            <>
+              <path
+                d={spiralPathD}
+                fill="none"
+                stroke="currentColor"
+                strokeOpacity={0.35}
+                strokeWidth={1.5}
+              />
+
+              {ranges.map(({ entry, pathD, start, end, color }) => {
+                const isOpened = openedEntryIdSet.has(entry.id);
+                const isFilteredOut = !activeCategorySet.has(
+                  entry.activityType
+                );
+                return (
+                  // OPENED-ENTRY HIGHLIGHT: one group per range, opacity
+                  // applied once to the whole group (glow + arc + ring +
+                  // end caps) so a filtered-out arc's highlight dims
+                  // along with it - same structure as StarMap.tsx's
+                  // per-star <g>/LinearTimeline.tsx's per-range <g>.
+                  <g
+                    key={entry.id}
+                    style={{
+                      opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
+                    }}
+                    className="cursor-pointer transition-opacity duration-200"
+                    onMouseEnter={event =>
+                      setHovered({
+                        kind: 'entry',
+                        entry,
+                        x: event.clientX,
+                        y: event.clientY,
+                      })
+                    }
+                    onMouseMove={event =>
+                      setHovered(current =>
+                        current &&
+                        current.kind === 'entry' &&
+                        current.entry.id === entry.id
+                          ? { ...current, x: event.clientX, y: event.clientY }
+                          : current
+                      )
+                    }
+                    onMouseLeave={() => setHovered(null)}
+                    onClick={() => onEntryClick(entry)}
+                  >
+                    {isOpened && (
+                      // OPENED-ENTRY HIGHLIGHT (arc glow) - LAYERING:
+                      // this glow <path> is deliberately the FIRST child
+                      // rendered inside this <g>, BEFORE the colored arc
+                      // <path> below it - in SVG (as in HTML), a later
+                      // sibling paints ON TOP of an earlier one, so
+                      // ordering the glow first is what puts it BEHIND
+                      // the colored arc, the same "glow element added to
+                      // the DOM before the main shape" layering
+                      // StarMap.tsx's per-star <g> and the point
+                      // highlight below both use (glow circle, then the
+                      // solid point, then the ring). Traced along the
+                      // SAME path the colored arc itself uses (an arc
+                      // isn't a straight capsule, so there's no simple
+                      // inflated-rect outline the way
+                      // LinearTimeline.tsx's capsuleOutlineRect draws
+                      // one). Width/opacity/blur are all
+                      // OPENED_ARC_GLOW_*/GLOW_BLUR_STD_DEVIATION - see
+                      // the "ARC GLOW: TUNED DOWN" comment above
+                      // OPENED_ARC_GLOW_EXTRA_WIDTH for the specific
+                      // values and why they were tuned down from a
+                      // first, too-strong attempt.
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={OPENED_HIGHLIGHT_COLOR}
+                        strokeWidth={
+                          ARC_STROKE_WIDTH + OPENED_ARC_GLOW_EXTRA_WIDTH
+                        }
+                        strokeLinecap="round"
+                        strokeOpacity={OPENED_ARC_GLOW_OPACITY}
+                        filter="url(#opened-spiral-glow)"
+                        className="pointer-events-none"
+                      />
+                    )}
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke={color}
+                      // Full opacity, painted AFTER (on top of) the glow
+                      // above - the category color is what should read
+                      // as the dominant, legible color of the arc, with
+                      // the glow only a backdrop peeking out past its
+                      // edges. Subtly thicker while opened (see
+                      // OPENED_ARC_STROKE_WIDTH_BOOST's own comment) so
+                      // it still reads as connected to the
+                      // equally-emphasized start/end highlight circles.
+                      strokeOpacity={1}
+                      strokeWidth={
+                        isOpened
+                          ? ARC_STROKE_WIDTH + OPENED_ARC_STROKE_WIDTH_BOOST
+                          : ARC_STROKE_WIDTH
+                      }
+                      strokeLinecap="round"
+                    />
+                    {isOpened && (
+                      // OPENED-ENTRY HIGHLIGHT (arc ring): a thin, crisp
+                      // bright stroke traced along the same path, drawn
+                      // AFTER (on top of) the colored arc above for a
+                      // defined edge against the glow - same visual role
+                      // as StarMap's/LinearTimeline's own ring.
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={OPENED_HIGHLIGHT_COLOR}
+                        strokeWidth={1.5}
+                        strokeLinecap="round"
+                        className="pointer-events-none"
+                      />
+                    )}
+                    {[start, end].map((endpoint, index) => (
+                      <g key={index}>
+                        {isOpened && (
+                          // See the "ARC ENDPOINT GLOW" comment above
+                          // OPENED_ARC_ENDPOINT_GLOW_RADIUS_EXTRA - this
+                          // used to be a much bigger/brighter glow
+                          // (radius +5, opacity 0.6) than the arc's own
+                          // line glow, and since every selected arc
+                          // shows two of these, THEY were the actual
+                          // dominant "white overpowers the color"
+                          // element, not the line.
+                          <circle
+                            cx={endpoint.x}
+                            cy={endpoint.y}
+                            r={
+                              POINT_RADIUS +
+                              OPENED_ARC_ENDPOINT_GLOW_RADIUS_EXTRA
+                            }
+                            fill="none"
+                            stroke={OPENED_HIGHLIGHT_COLOR}
+                            strokeWidth={OPENED_ARC_ENDPOINT_GLOW_STROKE_WIDTH}
+                            strokeOpacity={OPENED_ARC_GLOW_OPACITY}
+                            filter="url(#opened-spiral-glow)"
+                            className="pointer-events-none"
+                          />
+                        )}
+                        <circle
+                          cx={endpoint.x}
+                          cy={endpoint.y}
+                          r={POINT_RADIUS}
+                          fill={color}
+                        />
+                        {isOpened && (
+                          <circle
+                            cx={endpoint.x}
+                            cy={endpoint.y}
+                            r={POINT_RADIUS + 3}
+                            fill="none"
+                            stroke={OPENED_HIGHLIGHT_COLOR}
+                            strokeWidth={1.5}
+                            className="pointer-events-none"
+                          />
+                        )}
+                      </g>
+                    ))}
+                  </g>
+                );
+              })}
+
+              {points.map(({ entry, x, y, color }) => {
+                const isOpened = openedEntryIdSet.has(entry.id);
+                const isFilteredOut = !activeCategorySet.has(
+                  entry.activityType
+                );
+                return (
+                  // OPENED-ENTRY HIGHLIGHT: same per-entry <g> + opacity
+                  // + glow/ring structure as StarMap.tsx's stars.map().
+                  <g
+                    key={entry.id}
+                    style={{
+                      opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
+                    }}
+                    className="transition-opacity duration-200"
+                  >
+                    {isOpened && (
+                      <circle
+                        cx={x}
+                        cy={y}
+                        r={POINT_RADIUS + 5}
+                        fill="none"
+                        stroke={OPENED_HIGHLIGHT_COLOR}
+                        strokeWidth={4}
+                        strokeOpacity={0.6}
+                        filter="url(#opened-spiral-glow)"
+                        className="pointer-events-none"
+                      />
+                    )}
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r={POINT_RADIUS}
+                      fill={color}
+                      stroke={color}
+                      strokeOpacity={0.35}
+                      strokeWidth={4}
+                      className="cursor-pointer"
+                      onMouseEnter={event =>
+                        setHovered({
+                          kind: 'entry',
+                          entry,
+                          x: event.clientX,
+                          y: event.clientY,
+                        })
+                      }
+                      onMouseMove={event =>
+                        setHovered(current =>
+                          current &&
+                          current.kind === 'entry' &&
+                          current.entry.id === entry.id
+                            ? {
+                                ...current,
+                                x: event.clientX,
+                                y: event.clientY,
+                              }
+                            : current
+                        )
+                      }
+                      onMouseLeave={() => setHovered(null)}
+                      onClick={() => onEntryClick(entry)}
+                    />
+                    {isOpened && (
+                      <circle
+                        cx={x}
+                        cy={y}
+                        r={POINT_RADIUS + 3}
+                        fill="none"
+                        stroke={OPENED_HIGHLIGHT_COLOR}
+                        strokeWidth={1.5}
+                        className="pointer-events-none"
+                      />
+                    )}
+                  </g>
+                );
+              })}
+
+              {yearBoundaries.map(({ year, t }) => {
+                // Nudged away from any colliding entry marker (see the
+                // top-of-file "YEAR GLYPHS" comment's "COLLISION
+                // AVOIDANCE" section) before computing its final position.
+                const glyphT = findNonCollidingYearGlyphT(t, tToArcLength(t));
+                const { x, y } = spiralPoint(glyphT, spiralParams);
+                const isHovered =
+                  hovered?.kind === 'year' && hovered.year === year;
+
+                return (
+                  <text
+                    key={year}
+                    x={x}
+                    y={y}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fill="currentColor"
+                    fontSize={YEAR_GLYPH_FONT_SIZE_PX}
+                    opacity={
+                      isHovered ? YEAR_GLYPH_HOVER_OPACITY : YEAR_GLYPH_OPACITY
+                    }
+                    className="cursor-default select-none transition-opacity duration-150"
+                    onMouseEnter={event =>
+                      setHovered({
+                        kind: 'year',
+                        year,
+                        x: event.clientX,
+                        y: event.clientY,
+                      })
+                    }
+                    onMouseMove={event =>
+                      setHovered(current =>
+                        current &&
+                        current.kind === 'year' &&
+                        current.year === year
+                          ? { ...current, x: event.clientX, y: event.clientY }
+                          : current
+                      )
+                    }
+                    onMouseLeave={() => setHovered(null)}
+                  >
+                    ✦
+                  </text>
+                );
+              })}
+            </>
+          )}
+        </g>
+      </svg>
+
+      {hovered &&
+        (hovered.kind === 'entry' ? (
+          <EntryTooltip entry={hovered.entry} x={hovered.x} y={hovered.y} />
+        ) : (
+          <EntryTooltip
+            label={String(hovered.year)}
+            x={hovered.x}
+            y={hovered.y}
+          />
+        ))}
+
+      {isEmpty && (
+        <VizEmptyState
+          hasAnyEntries={hasAnyEntries}
+          topOffset={topOffset}
+          sidebarWidth={sidebarWidth}
+          timeRangeSelectorRect={timeRangeSelectorRect}
+        />
+      )}
+    </div>
+  );
+}
