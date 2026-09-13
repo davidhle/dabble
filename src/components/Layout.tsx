@@ -197,7 +197,19 @@ export default function Layout({
             className="pointer-events-auto flex items-center gap-6 justify-self-start rounded-full border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] px-5 py-2.5 shadow-lg backdrop-blur"
             aria-label="Site links"
           >
-            <Link to="/" className="text-lg font-bold text-indigo-600">
+            {/*
+             * style (not a Tailwind class): --font-heading (Young Serif -
+             * see index.css's own comment) has no Tailwind utility of its
+             * own, the same reason VizPageHeader.tsx reaches for inline
+             * `style` to apply its own CSS-variable-driven text-shadow.
+             * Stylizes the wordmark to read as a brand mark consistent
+             * with the page titles, rather than plain UI chrome text.
+             */}
+            <Link
+              to="/"
+              className="text-lg font-bold text-indigo-600"
+              style={{ fontFamily: 'var(--font-heading)' }}
+            >
               Dabble
             </Link>
             <Link

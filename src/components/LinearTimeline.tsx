@@ -263,11 +263,11 @@ interface LinearTimelineProps {
 const FILTERED_OUT_OPACITY = 0.15;
 
 /**
- * Neutral, bright highlight color for the "opened entry" ring/glow -
- * same color, same reasoning as StarMap.tsx's OPENED_HIGHLIGHT_COLOR:
+ * Neutral, bright highlight color for the "opened entry" ring/glow - same
+ * color, same reasoning as StarMap.tsx's OPENED_HIGHLIGHT_COLOR:
  * deliberately not tied to any activityType color, so it reads clearly
- * against every entry color. A theme token (--star-highlight-color), not a
- * fixed hex value - see StarMap.tsx's own comment on its identical
+ * against every entry color. A theme token (--star-highlight-color), not
+ * a fixed hex value - see StarMap.tsx's own comment on its identical
  * constant for why.
  */
 const OPENED_HIGHLIGHT_COLOR = 'var(--star-highlight-color)';

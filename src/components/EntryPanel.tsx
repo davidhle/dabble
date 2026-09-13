@@ -271,7 +271,35 @@ export default function EntryPanel({
            * keeps the icon buttons pinned to the top of this block once
            * it grows to two lines, rather than re-centering against it.
            */}
-          <h2 className="break-words text-base font-semibold text-[var(--text-color)]">
+          {/*
+           * font-family/fontWeight here override the global `h1, h2 {
+           * font-family: var(--font-heading) }` rule (index.css) with
+           * --font-heading-light instead - a self-hosted Light (300)
+           * weight of Young Serif that Google Fonts doesn't serve for
+           * this family (see that variable's own comment in index.css).
+           * `font-semibold` is deliberately DROPPED (not just overridden
+           * by the inline style) - the self-hosted file only registers a
+           * single 300-weight face, so requesting a heavier weight than
+           * that against it would trigger the browser's synthetic/faux
+           * bold on top of the light face, undermining the whole point of
+           * using a genuinely light weight here. inline `style` (not a
+           * Tailwind class) for the same reason Layout.tsx's 'Dabble'
+           * wordmark uses one: neither CSS variable has a Tailwind utility
+           * of its own. `text-lg` (bumped up from `text-base`) rather than
+           * the size every other h2 in the app uses - a light weight reads
+           * noticeably thinner/lower-contrast at 16px, especially in the
+           * light theme, so this one title gets a size bump to compensate;
+           * verified this doesn't reintroduce the overflow/collision the
+           * icon buttons' `items-start` and `break-words` above already
+           * guard against.
+           */}
+          <h2
+            className="break-words text-lg text-[var(--text-color)]"
+            style={{
+              fontFamily: 'var(--font-heading-light)',
+              fontWeight: 300,
+            }}
+          >
             {entry.title}
           </h2>
           <p className="mt-1 text-sm text-[var(--text-muted-color)]">

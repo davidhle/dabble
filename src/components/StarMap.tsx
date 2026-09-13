@@ -257,8 +257,12 @@ const LABEL_CLEARANCE = 16;
  * A theme token (--star-highlight-color, see index.css), not a fixed hex
  * value - white glows brightly against the dark theme's night sky but
  * would nearly vanish against the light theme's cream canvas, so this
- * flips to a dark ink color in light mode instead, preserving the same
- * "reads clearly against every star color AND the canvas itself" goal.
+ * swaps to a distinct, more saturated navy in light mode instead
+ * (deliberately NOT --bg-color's own near-black, which reads as plain
+ * black rather than blue against a bright canvas - see that token's own
+ * comment in index.css for the full history/reasoning), preserving the
+ * same "reads clearly against every star color AND the canvas itself"
+ * goal in both themes.
  */
 const OPENED_HIGHLIGHT_COLOR = 'var(--star-highlight-color)';
 
