@@ -87,6 +87,24 @@ export interface Entry {
   timestamp: string;
 
   /**
+   * Whether `timestamp`'s time-of-day component is meaningful and should
+   * be shown to the user (vs. just a placeholder needed because a
+   * timestamp requires some time value).
+   *
+   * OPTIONAL & BACKWARD-COMPATIBLE:
+   * Defaults to `true` when absent - entries created before this field
+   * existed always had a real, user-picked time (the old single
+   * datetime-local input in AddEntryForm.tsx forced one), so their
+   * timestamp's time portion is meaningful and should keep being shown
+   * with no data migration needed. Set to `false` only when the user
+   * logs a past event via the date-only input and leaves the "Add
+   * specific time" toggle off - AddEntryForm.tsx then stores `timestamp`
+   * at a placeholder midnight UTC on the chosen date, and
+   * formatEntryDate.ts hides the time portion accordingly.
+   */
+  hasTime?: boolean;
+
+  /**
    * Primary category of the activity.
    * Used for filtering, grouping, and analysis.
    *

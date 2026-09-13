@@ -10,13 +10,34 @@
 
 import { Entry } from '../types/Entry';
 
-function formatSingleDate(date: Date): string {
-  return date.toLocaleDateString(undefined, {
+function formatSingleDate(date: Date, includeTime: boolean): string {
+  const dateOptions: Intl.DateTimeFormatOptions = {
     weekday: 'short',
     year: 'numeric',
     month: 'short',
     day: 'numeric',
+  };
+
+  if (!includeTime) {
+    // No meaningful time-of-day (see the hasTime field comment in
+    // types/Entry.ts) - AddEntryForm.tsx stores a placeholder midnight
+    // UTC timestamp for these, so the calendar date must be read back in
+    // UTC too. Formatting in the viewer's local timezone instead would
+    // shift the displayed date to the previous day for anyone west of
+    // UTC (e.g. US timezones), since local midnight UTC has already
+    // rolled into "yesterday evening" there.
+    return date.toLocaleDateString(undefined, {
+      ...dateOptions,
+      timeZone: 'UTC',
+    });
+  }
+
+  const datePart = date.toLocaleDateString(undefined, dateOptions);
+  const timePart = date.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
   });
+  return `${datePart}, ${timePart}`;
 }
 
 /**
@@ -43,6 +64,13 @@ function formatDateRange(start: Date, end: Date): string {
  * types/Entry.ts - then a formatted date range when endTimestamp is
  * present, falling back to the exact formatted timestamp for ordinary
  * single-point-in-time entries.
+ *
+ * For a single-point-in-time entry, the time-of-day is only appended
+ * when `hasTime` isn't explicitly `false` - see the hasTime field
+ * comment in types/Entry.ts for why entries without the field default
+ * to showing time, and range entries never show a time-of-day (ranges
+ * predate hasTime and are about which days are covered, not a time on
+ * either end).
  */
 export function formatEntryDate(entry: Entry): string {
   if (entry.dateDisplay) return entry.dateDisplay;
@@ -51,5 +79,5 @@ export function formatEntryDate(entry: Entry): string {
   if (entry.endTimestamp) {
     return formatDateRange(start, new Date(entry.endTimestamp));
   }
-  return formatSingleDate(start);
+  return formatSingleDate(start, entry.hasTime !== false);
 }

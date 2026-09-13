@@ -137,16 +137,30 @@ export default function AddEntryForm({
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
-  const [timestamp, setTimestamp] = useState('');
+
+  // ─── Date / optional time (see hasTime field comment in types/Entry.ts) ───
+  // Date-only (YYYY-MM-DD, from an <input type="date">) - always shown and
+  // always required to build a timestamp, whether or not a specific time
+  // is also given.
+  const [dateOnly, setDateOnly] = useState('');
+  // Off by default: logging a past event usually means only the date is
+  // known, so we don't force a time on the user. When on, `timeOnly`
+  // (HH:MM, from an <input type="time">) combines with `dateOnly` to form
+  // the full timestamp and hasTime is saved as true; when off, the
+  // timestamp uses a placeholder midnight UTC and hasTime is saved as
+  // false - see handleSubmit.
+  const [hasSpecificTime, setHasSpecificTime] = useState(false);
+  const [timeOnly, setTimeOnly] = useState('');
 
   // ─── Optional multi-day range (iCal-style) ───
   // Off by default - an entry is a single point in time unless the user
   // explicitly opts into a range. See the endTimestamp field comment in
   // types/Entry.ts for why this is optional and backward-compatible.
+  // Independent of the hasSpecificTime toggle above - either can be on,
+  // off, or both, without affecting the other's UI or state.
   const [isMultiDay, setIsMultiDay] = useState(false);
-  // Date-only (YYYY-MM-DD, from an <input type="date">) rather than
-  // datetime-local like `timestamp` - a multi-day span is about which
-  // days it covers, not a time of day on the end date.
+  // Date-only (YYYY-MM-DD, from an <input type="date">) - a multi-day span
+  // is about which days it covers, not a time of day on the end date.
   const [endDate, setEndDate] = useState('');
 
   const [location, setLocation] = useState('');
@@ -177,12 +191,14 @@ export default function AddEntryForm({
       setCurrentStep(1);
       setSlideDirection('forward');
       const now = new Date();
-      const localDatetime = new Date(
+      const localIso = new Date(
         now.getTime() - now.getTimezoneOffset() * 60000
-      )
-        .toISOString()
-        .slice(0, 16);
-      setTimestamp(localDatetime);
+      ).toISOString();
+      setDateOnly(localIso.slice(0, 10));
+      // Prefilled so flipping "Add specific time" on starts from the
+      // current time rather than an empty input.
+      setTimeOnly(localIso.slice(11, 16));
+      setHasSpecificTime(false);
       setIsMultiDay(false);
       setEndDate('');
 
@@ -197,11 +213,8 @@ export default function AddEntryForm({
 
   const suggestedTags = SUGGESTED_TAGS[activityType] || [];
 
-  // Date-only (YYYY-MM-DD) portion of `timestamp`'s datetime-local value,
-  // for comparing against `endDate` (also date-only).
-  const startDateOnly = timestamp.slice(0, 10);
   const isEndDateBeforeStart =
-    isMultiDay && endDate !== '' && endDate < startDateOnly;
+    isMultiDay && endDate !== '' && endDate < dateOnly;
 
   /**
    * Determines if the user can proceed from Step 1 to Step 2.
@@ -235,7 +248,7 @@ export default function AddEntryForm({
   const handleToggleMultiDay = () => {
     const next = !isMultiDay;
     setIsMultiDay(next);
-    setEndDate(next ? startDateOnly : '');
+    setEndDate(next ? dateOnly : '');
   };
 
   /**
@@ -319,7 +332,18 @@ export default function AddEntryForm({
       duration: duration ? parseInt(duration, 10) : undefined,
       notes: notes.trim(),
       mood: moods.length > 0 ? moods : undefined,
-      timestamp: timestamp ? new Date(timestamp).toISOString() : undefined,
+      // When "Add specific time" is off, `timeOnly` isn't meaningful, so
+      // we fall back to a placeholder midnight UTC - a timestamp needs
+      // some time value, but hasTime: false tells every display (see
+      // formatEntryDate.ts) not to show it. When on, the date and time
+      // combine as local time, matching the old datetime-local input's
+      // behavior.
+      timestamp: dateOnly
+        ? hasSpecificTime
+          ? new Date(`${dateOnly}T${timeOnly || '00:00'}`).toISOString()
+          : new Date(`${dateOnly}T00:00:00Z`).toISOString()
+        : undefined,
+      hasTime: hasSpecificTime,
       // Only set when the user opted into a range via the "This spans
       // multiple days" toggle - see the endTimestamp field comment in
       // types/Entry.ts for why this stays undefined otherwise.
@@ -350,7 +374,9 @@ export default function AddEntryForm({
     setLocation('');
     setDuration('');
     setNotes('');
-    setTimestamp('');
+    setDateOnly('');
+    setHasSpecificTime(false);
+    setTimeOnly('');
     setIsMultiDay(false);
     setEndDate('');
     setMediaUrl('');
@@ -760,18 +786,61 @@ export default function AddEntryForm({
                     {/* Date Picker */}
                     <div>
                       <label
-                        htmlFor="timestamp"
+                        htmlFor="dateOnly"
                         className="block text-sm font-medium text-[var(--text-secondary-color)]"
                       >
                         Date
                       </label>
                       <input
-                        type="datetime-local"
-                        id="timestamp"
-                        value={timestamp}
-                        onChange={e => setTimestamp(e.target.value)}
+                        type="date"
+                        id="dateOnly"
+                        value={dateOnly}
+                        onChange={e => setDateOnly(e.target.value)}
                         className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
+
+                      {/*
+                       * Optional specific time - off by default, since
+                       * logging a past event usually means only the date
+                       * is known. See the hasTime field comment in
+                       * types/Entry.ts. Independent of the "This spans
+                       * multiple days" toggle below - each renders its own
+                       * checkbox + conditional input, so neither's UI
+                       * affects the other's.
+                       */}
+                      <div className="mt-2 flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="hasSpecificTime"
+                          checked={hasSpecificTime}
+                          onChange={e => setHasSpecificTime(e.target.checked)}
+                          className="h-4 w-4 rounded border-[var(--field-border-strong)] bg-[var(--field-tint-1)] text-indigo-500 focus:ring-indigo-500"
+                        />
+                        <label
+                          htmlFor="hasSpecificTime"
+                          className="text-sm text-[var(--text-muted-color)]"
+                        >
+                          Add specific time
+                        </label>
+                      </div>
+
+                      {hasSpecificTime && (
+                        <div className="mt-2">
+                          <label
+                            htmlFor="timeOnly"
+                            className="block text-sm font-medium text-[var(--text-secondary-color)]"
+                          >
+                            Time
+                          </label>
+                          <input
+                            type="time"
+                            id="timeOnly"
+                            value={timeOnly}
+                            onChange={e => setTimeOnly(e.target.value)}
+                            className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          />
+                        </div>
+                      )}
 
                       {/*
                        * Optional multi-day range, iCal-style: off by
