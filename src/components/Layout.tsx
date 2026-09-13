@@ -183,13 +183,13 @@ export default function Layout({ onAddEntry }: LayoutProps) {
                   to="/linear"
                   className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
-                  Timeline
+                  Linear Timeline
                 </Link>
                 <Link
                   to="/spiral"
                   className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
-                  Spiral
+                  Spiral Timeline
                 </Link>
               </div>
             </div>

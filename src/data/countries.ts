@@ -95,7 +95,7 @@ export const COUNTRIES: string[] = [
   'Iran',
   'Iraq',
   'Ireland',
-  'Israel',
+  'Israel / The Occupied Palestinian Territories',
   'Italy',
   'Jamaica',
   'Japan',

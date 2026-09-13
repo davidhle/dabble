@@ -270,7 +270,7 @@ export default function Timeline({ entries }: TimelineProps) {
         style={{ width: `calc(33vw - ${headerLayout.left}px)` }}
       >
         <VizPageHeader
-          title="Timeline"
+          title="Linear Timeline"
           subtitle="Drag to pan, scroll to zoom, and click a point to see the entry behind it."
         />
 

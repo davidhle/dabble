@@ -80,6 +80,15 @@ import { isEntryWithinRange } from '../utils/entryDateRange';
 import { useEntrySelection } from '../hooks/useEntrySelection';
 import { useTimeRange } from '../context/TimeRangeContext';
 
+/**
+ * Gap (px) between the STAR GLYPH FOOTNOTE (see its own comment below,
+ * near the returned JSX) and TimeRangeSelector's card - same role as
+ * VizEmptyState.tsx's own `GAP` constant for its "above instead of
+ * beside" layout, just a smaller value since this is a single-line
+ * caption, not a bordered card.
+ */
+const STAR_GLYPH_FOOTNOTE_GAP = 8;
+
 interface SpiralProps {
   entries: Entry[];
 }
@@ -267,7 +276,7 @@ export default function Spiral({ entries }: SpiralProps) {
         style={{ width: `calc(33vw - ${headerLayout.left}px)` }}
       >
         <VizPageHeader
-          title="Spiral"
+          title="Spiral Timeline"
           subtitle="Drag to pan, scroll to zoom, and click a point (or arc) to see the entry behind it. Time coils outward from the center - oldest at the middle, most recent at the rim."
         />
 
@@ -311,6 +320,45 @@ export default function Spiral({ entries }: SpiralProps) {
         entries={entries}
         sidebarWidth={sidebarWidth}
       />
+
+      {/*
+       * STAR GLYPH FOOTNOTE: explains SpiralTimeline's own "✦" year-glyph
+       * markers (see its "YEAR GLYPHS" comment) - the same glyph character
+       * is reused here so this note visually matches what's actually drawn
+       * on the canvas. Spiral-only: this lives here rather than in
+       * TimeRangeSelector.tsx itself, which Constellation.tsx/Timeline.tsx
+       * also render and neither of which has a year glyph to explain.
+       *
+       * POSITIONING: the same "stack directly above TimeRangeSelector's
+       * card, centered within [sidebarWidth, viewport right]" approach
+       * VizEmptyState.tsx's own ABOVE-INSTEAD-OF-BESIDE layout uses - see
+       * that file's POSITIONING comment for why `bottom` is derived from
+       * `timeRangeSelectorRect.top` (the card's own measured top edge)
+       * rather than a flat guessed pixel offset: this keeps the footnote
+       * flush just above the card regardless of the card's own rendered
+       * height, and regardless of how `sidebarWidth`/viewport width shift
+       * where that card actually centers itself - i.e. the exact same
+       * sidebar-aware centering TimeRangeSelector uses for itself, kept in
+       * sync via the same measured rect rather than a second independent
+       * calculation. `pointer-events-none` since this is read-only caption
+       * text that shouldn't intercept clicks meant for the canvas/scrubber
+       * around it.
+       */}
+      <div
+        className="pointer-events-none fixed z-40 flex justify-center px-6"
+        style={{
+          bottom:
+            window.innerHeight -
+            timeRangeSelectorRect.top +
+            STAR_GLYPH_FOOTNOTE_GAP,
+          left: sidebarWidth,
+          right: 0,
+        }}
+      >
+        <p className="text-xs text-[var(--text-muted-color)]">
+          ✦ marks a year along the spiral.
+        </p>
+      </div>
 
       <ResetToast visible={resetPending} />
       <ResetButton onClick={resetAll} />
