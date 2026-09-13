@@ -32,17 +32,9 @@
  *      (TimeRangeContext's `selectedRange`) and/or active category
  *      filters (useEntrySelection.ts's `filterCategories`) happen to
  *      exclude every entry. The data exists; the fix is to widen the
- *      range, reset, or add an entry for this window. Rendered NEXT TO
- *      TimeRangeSelector instead, at the bottom of the page - this is a
- *      deliberate change from an earlier version that also centered this
- *      message in the canvas: centering a paragraph of filter-adjustment
- *      advice in the middle of the visualization competed with (and on
- *      LinearTimeline, visually collided with) the canvas's own axis/
- *      content, and put the message far from the actual controls
- *      (FilterBar, TimeRangeSelector) it's telling the user to use.
- *      Anchoring it directly beside the control most relevant to the
- *      suggested fix (widen the time range) reads more like inline help
- *      text than a canvas overlay.
+ *      range, reset, or add an entry for this window. Rendered TOP-RIGHT,
+ *      stacked with EditModeBanner.tsx - see the EDIT MODE STACKING
+ *      comment below.
  *
  * DETECTION IS SPLIT BETWEEN THE CALLER AND THIS COMPONENT, deliberately:
  * this component only renders whichever message/layout `hasAnyEntries`
@@ -65,76 +57,35 @@
  *     at once regardless.
  *
  * ──────────────────────────────────────────────────────────────────────
- * POSITIONING THE "FILTERED" MESSAGE: MEASURED, NOT GUESSED
+ * EDIT MODE STACKING: ONE SHARED TOP-RIGHT SLOT, NOT TWO INDEPENDENT
+ * POSITIONS
  * ──────────────────────────────────────────────────────────────────────
- * `timeRangeSelectorRect` is TimeRangeSelector.tsx's own CARD's live
- * `getBoundingClientRect()` (`top`/`right`/`height`), measured by each
- * page (see e.g. Constellation.tsx's `timeRangeSelectorRect` state) via
- * the `ref` TimeRangeSelector.tsx now forwards to that card - NOT a fixed
- * offset or a CSS trick. This matters because the card's own rendered
- * position already varies with `sidebarWidth` (TimeRangeSelector
- * re-centers itself within a narrower `[sidebarWidth, viewport right]`
- * box as the sidebar opens/closes) and with viewport width - two boxes
- * independently `justify-center`-ed within the same available region do
- * NOT line up their edges just because they share that region (centering
- * a WIDER combined box shifts its own left edge further left than a
- * narrower box centered alone would sit), so a CSS-only "matching
- * spacer" trick can't reproduce the card's true edge. Reading its actual
- * rect directly sidesteps that entirely and stays correct at any
- * sidebar-open/closed state or viewport width.
- *
- * `top`/`height` from that same rect are used (rather than a flat
- * `bottom-*` Tailwind class) so this message's own box is vertically
- * CENTERED against the card's actual height, not just bottom-anchored to
- * the same baseline - the two can end up visibly uneven heights (the
- * card carries an svg track + a date-label row; this message is a
- * variable-length paragraph), so matching centers (not bottoms) is what
- * actually reads as "the same row."
- *
- * `availableWidth` clamps this message's own max-width to whatever room
- * is actually left between the card's right edge and the viewport's
- * right edge (minus a small margin) - without this, a wide sidebar
- * (`sidebarWidth`) combined with a narrower window could push the
- * message's fixed max-width off the right edge of the screen entirely.
+ * The "filtered to nothing" message and EditModeBanner.tsx's own "Edit
+ * Mode is on" notice both anchor to the exact same fixed top-right stack
+ * (see utils/topRightTooltipStack.ts for the shared constants and the
+ * full reasoning) - Edit Mode is completely independent of whether the
+ * current time range/filters happen to exclude every entry, so either,
+ * both, or neither can be showing at once. `editModeBannerVisible` (prop
+ * below - each canvas just forwards the `isEditMode` flag it already
+ * receives for THIS SAME reason - see e.g. StarMap.tsx's own `isEditMode`
+ * prop comment) tells this message whether the stack's top slot is
+ * already taken:
+ *   - NOT visible: this message renders in the TOP slot itself - the
+ *     exact position EditModeBanner would use if IT were the one showing.
+ *   - Visible: this message shifts down by one estimated row
+ *     (`EDIT_MODE_HEIGHT_ESTIMATE` + `STACK_GAP`) so it sits directly
+ *     below EditModeBanner instead of overlapping it.
+ * EditModeBanner is rendered by the PAGE (Constellation.tsx/Timeline.tsx/
+ * Spiral.tsx), not by this component or the canvas that renders it, so
+ * there's no shared flex/layout parent the two could stack through via
+ * normal document flow - hence the fixed pixel math instead.
  */
 
-export interface TimeRangeSelectorRect {
-  top: number;
-  right: number;
-  height: number;
-}
-
-/** Horizontal gap (px) between TimeRangeSelector's card and this message. */
-const GAP = 16;
-
-/**
- * Minimum clearance (px) kept between this message and the viewport's
- * right edge. Sized to clear the stacked ResetButton.tsx/ThemeToggle.tsx
- * pair's shared reserved corner (both `fixed right-6 h-11 w-11` - 24px
- * inset + 44px button = 68px), plus a small gap - not just a flat
- * screen-edge margin - since that pair sits in the same bottom-right
- * region on every page this renders on (only their relative bottom-6/
- * bottom-20 stacking order differs, which doesn't affect this horizontal
- * clearance), and without this the "beside" layout's right edge could
- * otherwise land underneath/overlapping them.
- */
-const RIGHT_MARGIN = 90;
-
-/** This message's own preferred max width (px) - shrinks below this via `availableWidth` if there isn't room. */
-const PREFERRED_MAX_WIDTH = 320;
-
-/**
- * Minimum usable width (px) to the right of TimeRangeSelector's card
- * before the "beside it" layout is abandoned in favor of stacking above
- * it instead - see the ABOVE-INSTEAD-OF-BESIDE comment below. Below this,
- * `availableWidth`'s clamp would still keep the message on-screen, but at
- * a width so narrow the text wraps into a tall, cramped column rather
- * than a readable paragraph - a real case, not a hypothetical one: with
- * the sidebar open (`sidebarWidth` ~33vw) on a ~1280px-wide viewport,
- * TimeRangeSelector's own centered card leaves only ~100-140px to its
- * right before the viewport edge.
- */
-const MIN_SIDE_WIDTH = 220;
+import {
+  EDIT_MODE_HEIGHT_ESTIMATE,
+  STACK_GAP,
+  TOP_SLOT,
+} from '../utils/topRightTooltipStack';
 
 interface VizEmptyStateProps {
   /**
@@ -149,88 +100,33 @@ interface VizEmptyStateProps {
   /** The sidebar overlay's current rendered width (0 when closed) - used only for the `hasAnyEntries === false` centered-in-canvas layout. */
   sidebarWidth: number;
   /**
-   * TimeRangeSelector's own card's live rendered position - used only
-   * for the `hasAnyEntries === true` layout. See POSITIONING above.
+   * Whether EditModeBanner is ALSO currently occupying the shared
+   * top-right stack's top slot - used only for the `hasAnyEntries ===
+   * true` layout. See the EDIT MODE STACKING comment above.
    */
-  timeRangeSelectorRect: TimeRangeSelectorRect;
+  editModeBannerVisible: boolean;
 }
 
 export default function VizEmptyState({
   hasAnyEntries,
   topOffset,
   sidebarWidth,
-  timeRangeSelectorRect,
+  editModeBannerVisible,
 }: VizEmptyStateProps) {
   if (hasAnyEntries) {
-    const left = timeRangeSelectorRect.right + GAP;
-    const availableWidth = window.innerWidth - left - RIGHT_MARGIN;
-
-    const message = (
-      <>
-        No entries match the current time range or filters. Try widening the
-        selected range, pressing the reset button, or adding an entry for this
-        time period.
-      </>
-    );
-
-    if (availableWidth < MIN_SIDE_WIDTH) {
-      /**
-       * ──────────────────────────────────────────────────────────────
-       * ABOVE-INSTEAD-OF-BESIDE: NOT ENOUGH ROOM TO THE RIGHT
-       * ──────────────────────────────────────────────────────────────
-       * Falls back to centering the message in its OWN row directly
-       * above TimeRangeSelector's card - same horizontal centering
-       * approach TimeRangeSelector.tsx uses for itself
-       * (`[sidebarWidth, viewport right]`, `justify-center`), just one
-       * row higher. `bottom` (not `top`) is what's computed here,
-       * anchored to TimeRangeSelector's own measured `top` edge (i.e.
-       * "this message's bottom sits `GAP`px above wherever the
-       * selector's card actually starts") - the selector already sits
-       * near the very bottom of the viewport, so stacking a second row
-       * BELOW it (rather than above) would frequently render partly
-       * off-screen under the fold; there's comfortably more room
-       * upward, into the canvas area, instead.
-       */
-      return (
-        <div
-          className="pointer-events-none fixed z-40 flex justify-center px-6"
-          style={{
-            bottom: window.innerHeight - timeRangeSelectorRect.top + GAP,
-            left: sidebarWidth,
-            right: 0,
-          }}
-        >
-          <div
-            className="pointer-events-auto max-w-sm rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-center text-sm text-[var(--indigo-accent-text)]"
-            role="status"
-          >
-            {message}
-          </div>
-        </div>
-      );
-    }
+    const top = editModeBannerVisible
+      ? TOP_SLOT + EDIT_MODE_HEIGHT_ESTIMATE + STACK_GAP
+      : TOP_SLOT;
 
     return (
       <div
-        className="pointer-events-none fixed z-40 flex items-center"
-        style={{
-          left,
-          top: timeRangeSelectorRect.top,
-          height: timeRangeSelectorRect.height,
-        }}
+        className="pointer-events-auto fixed right-6 z-40 max-w-sm rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-sm text-[var(--indigo-accent-text)]"
+        style={{ top }}
+        role="status"
       >
-        <div
-          className="pointer-events-auto rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-sm text-[var(--indigo-accent-text)]"
-          style={{
-            maxWidth: Math.max(
-              0,
-              Math.min(PREFERRED_MAX_WIDTH, availableWidth)
-            ),
-          }}
-          role="status"
-        >
-          {message}
-        </div>
+        No entries match the current time range or filters. Try widening the
+        selected range, pressing the reset button, or adding an entry for this
+        time period.
       </div>
     );
   }

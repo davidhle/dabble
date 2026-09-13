@@ -73,6 +73,21 @@ interface EntryPanelProps {
   onExpand: () => void;
   /** Called when either mode's close button is clicked. */
   onClose: () => void;
+  /**
+   * Called when the EXPANDED panel's edit button is clicked, to open this
+   * entry in the shared AddEntryForm's edit mode - see App.tsx's
+   * `editingEntry` state. Not used by (and not rendered on) a minimized
+   * row - see the header comment above for why edit/minimize only make
+   * sense once a panel is already expanded.
+   */
+  onEdit: () => void;
+  /**
+   * Called when the EXPANDED panel's minimize button is clicked, to
+   * collapse just this panel back to its minimized row - wired to
+   * useEntrySelection's `handleMinimizePanel`, the mirror of `onExpand`.
+   * Also not used by a minimized row, for the same reason as `onEdit`.
+   */
+  onMinimize: () => void;
 }
 
 /**
@@ -114,11 +129,42 @@ function CloseButton({
   );
 }
 
+/**
+ * One circular icon button in the EXPANDED panel header's edit/minimize/
+ * close row below - a heavier, more clearly-clickable treatment (circular
+ * hit target + hover background) than the minimized row's plain
+ * `CloseButton` above, since this row has three actions competing for
+ * attention instead of one.
+ */
+function PanelIconButton({
+  onClick,
+  label,
+  children,
+}: {
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[var(--text-muted-color)] hover:bg-[var(--field-tint-2)] hover:text-[var(--text-secondary-color)]"
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function EntryPanel({
   entry,
   expanded,
   onExpand,
   onClose,
+  onEdit,
+  onMinimize,
 }: EntryPanelProps) {
   // Looked up from the dynamic category list rather than a fixed option
   // list, so a user-created category's name displays correctly here too -
@@ -212,7 +258,20 @@ export default function EntryPanel({
         style={{ borderColor: 'var(--panel-border-color)' }}
       >
         <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold text-[var(--text-color)]">
+          {/*
+           * No `truncate` here (unlike the minimized row's title span
+           * above, which keeps it) - a long title wraps to a second line
+           * instead of being clipped with an ellipsis, the same way an
+           * email inbox lets a long subject line wrap under its fixed
+           * action icons rather than hiding the end of it. `break-words`
+           * guards against a single unbroken long "word" (unlikely for a
+           * real title, but user-entered text is never guaranteed to have
+           * spaces) still overflowing this flex item instead of wrapping.
+           * The header's own `items-start` (not `items-center`) is what
+           * keeps the icon buttons pinned to the top of this block once
+           * it grows to two lines, rather than re-centering against it.
+           */}
+          <h2 className="break-words text-base font-semibold text-[var(--text-color)]">
             {entry.title}
           </h2>
           <p className="mt-1 text-sm text-[var(--text-muted-color)]">
@@ -220,7 +279,57 @@ export default function EntryPanel({
             {formattedLocation && <> &middot; {formattedLocation}</>}
           </p>
         </div>
-        <CloseButton onClick={onClose} label={`Close ${entry.title}`} />
+        {/*
+         * Three circular icon buttons, same row, close staying rightmost
+         * since it's the most "permanent" of the three actions - see the
+         * header comment above. Only rendered here (the EXPANDED layout);
+         * the minimized row above keeps its original single CloseButton.
+         */}
+        <div className="ml-2 flex flex-shrink-0 items-center gap-0.5">
+          <PanelIconButton onClick={onEdit} label={`Edit ${entry.title}`}>
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z"
+              />
+            </svg>
+          </PanelIconButton>
+          <PanelIconButton
+            onClick={onMinimize}
+            label={`Minimize ${entry.title}`}
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeWidth={2} d="M5 12h14" />
+            </svg>
+          </PanelIconButton>
+          <PanelIconButton onClick={onClose} label={`Close ${entry.title}`}>
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </PanelIconButton>
+        </div>
       </div>
 
       {/* ─── Body ─── */}

@@ -55,6 +55,7 @@ import { loadEntries, saveEntries } from './utils/entriesStorage';
 import { initializeDefaultDataForFirstVisit } from './utils/initializeFirstVisit';
 import { TimeRangeProvider } from './context/TimeRangeContext';
 import { EntrySelectionProvider } from './context/EntrySelectionContext';
+import { EditModeProvider } from './context/EditModeContext';
 
 function App() {
   /**
@@ -188,6 +189,42 @@ function App() {
   };
 
   /**
+   * EDITING STATE
+   *
+   * The single entry (if any) currently open in AddEntryForm's edit mode -
+   * null means the form, if open at all, is in its normal 'add' mode. Set
+   * by clicking the edit (pencil) button on an EXPANDED sidebar panel (see
+   * EntryPanel.tsx -> SidebarPanelStack.tsx -> each visualization page's
+   * `onEditEntry` prop below), and cleared by Layout.tsx once the form
+   * closes (Cancel, the backdrop, or a successful Update).
+   *
+   * Lives here (not in Layout, which actually renders AddEntryForm)
+   * because entries state does too, and because the pencil button that
+   * sets it lives several layers below Layout, in each page's sidebar -
+   * passing it down as a prop the same way `entries` itself already is
+   * (see the Route elements below) needs no new plumbing (Outlet context,
+   * another provider) beyond what's already here.
+   */
+  const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
+
+  /**
+   * UPDATE ENTRY CALLBACK
+   *
+   * The edit counterpart to addEntry above - REPLACES the entry whose id
+   * matches `updatedEntry.id` in place, rather than appending a new one.
+   * AddEntryForm's edit mode always preserves the original entry's id (see
+   * its own ADD VS. EDIT MODE comment), so this only ever matches exactly
+   * one entry; every other entry in the array passes through untouched.
+   */
+  const updateEntry = (updatedEntry: Entry) => {
+    setEntries(prevEntries =>
+      prevEntries.map(entry =>
+        entry.id === updatedEntry.id ? updatedEntry : entry
+      )
+    );
+  };
+
+  /**
    * RENDER
    *
    * The component tree structure:
@@ -216,64 +253,93 @@ function App() {
    * 3. Use a state management library
    */
   return (
-    // TimeRangeProvider AND EntrySelectionProvider both wrap EVERYTHING
-    // that follows, including HashRouter itself - see TimeRangeContext.tsx's
-    // top-of-file "WHY THIS LIVES ABOVE THE ROUTER" comment (and
-    // EntrySelectionContext.tsx's own, identical-in-spirit comment) for
-    // why: a provider that's a PARENT of the router never unmounts when
-    // routes change (only the router's own children do), so
-    // `selectedRange` AND the sidebar's selection/filter/sort state both
-    // survive navigating between Constellation/Timeline/Spiral instead of
-    // resetting every time. Both are passed the same `entries` state this
-    // component already owns - see each context file for what it derives
-    // from that (fullRange; categories).
+    // TimeRangeProvider, EntrySelectionProvider, AND EditModeProvider all
+    // wrap EVERYTHING that follows, including HashRouter itself - see
+    // TimeRangeContext.tsx's top-of-file "WHY THIS LIVES ABOVE THE ROUTER"
+    // comment (and EntrySelectionContext.tsx's/EditModeContext.tsx's own,
+    // identical-in-spirit comments) for why: a provider that's a PARENT of
+    // the router never unmounts when routes change (only the router's own
+    // children do), so `selectedRange`, the sidebar's selection/filter/sort
+    // state, AND `isEditMode` all survive navigating between
+    // Constellation/Timeline/Spiral instead of resetting every time. The
+    // first two are passed the same `entries` state this component already
+    // owns - see each context file for what it derives from that
+    // (fullRange; categories) - EditModeProvider needs no such input, since
+    // `isEditMode` is just a standalone flag.
     <TimeRangeProvider entries={entries}>
       <EntrySelectionProvider entries={entries}>
-        {/* HashRouter (URLs like /dabble/#/constellation) instead of BrowserRouter
+        <EditModeProvider>
+          {/* HashRouter (URLs like /dabble/#/constellation) instead of BrowserRouter
           is a deliberate trade-off for static GitHub Pages hosting: Pages has no
           server-side rewrite rule, so a direct load or refresh of a BrowserRouter
           path like /dabble/constellation would 404. The hash portion of the URL
           never reaches the server, so GitHub Pages just serves index.html and
           React Router handles the rest client-side. Given the deployment
           timeline, this was chosen over adding a 404.html redirect workaround. */}
-        <HashRouter>
-          <Routes>
-            {/**
-             * Parent route with Layout
-             *
-             * The Layout component wraps all child routes, providing:
-             * - Consistent navbar across all pages
-             * - AddEntry modal accessible from any page
-             * - Main content container
-             *
-             * The onAddEntry prop enables the Layout (and its AddEntryForm)
-             * to add entries to the state managed here.
-             */}
-            <Route path="/" element={<Layout onAddEntry={addEntry} />}>
+          <HashRouter>
+            <Routes>
               {/**
-               * Child routes render inside Layout's <Outlet />
+               * Parent route with Layout
                *
-               * These components could receive entries as props if needed.
-               * Currently they don't need entries, but here's how you'd do it:
+               * The Layout component wraps all child routes, providing:
+               * - Consistent navbar across all pages
+               * - AddEntry modal accessible from any page
+               * - Main content container
                *
-               * <Route
-               *   index
-               *   element={<Home entries={entries} />}
-               * />
-               *
-               * Or use Outlet context in Layout to pass data.
+               * The onAddEntry prop enables the Layout (and its AddEntryForm)
+               * to add entries to the state managed here.
                */}
-              <Route index element={<Home />} />
-              <Route path="about" element={<About />} />
               <Route
-                path="constellation"
-                element={<Constellation entries={entries} />}
-              />
-              <Route path="linear" element={<Timeline entries={entries} />} />
-              <Route path="spiral" element={<Spiral entries={entries} />} />
-            </Route>
-          </Routes>
-        </HashRouter>
+                path="/"
+                element={
+                  <Layout
+                    onAddEntry={addEntry}
+                    onUpdateEntry={updateEntry}
+                    editingEntry={editingEntry}
+                    onEditEntry={setEditingEntry}
+                  />
+                }
+              >
+                {/**
+                 * Child routes render inside Layout's <Outlet />
+                 *
+                 * These components could receive entries as props if needed.
+                 * Currently they don't need entries, but here's how you'd do it:
+                 *
+                 * <Route
+                 *   index
+                 *   element={<Home entries={entries} />}
+                 * />
+                 *
+                 * Or use Outlet context in Layout to pass data.
+                 */}
+                <Route index element={<Home />} />
+                <Route path="about" element={<About />} />
+                <Route
+                  path="constellation"
+                  element={
+                    <Constellation
+                      entries={entries}
+                      onEditEntry={setEditingEntry}
+                    />
+                  }
+                />
+                <Route
+                  path="linear"
+                  element={
+                    <Timeline entries={entries} onEditEntry={setEditingEntry} />
+                  }
+                />
+                <Route
+                  path="spiral"
+                  element={
+                    <Spiral entries={entries} onEditEntry={setEditingEntry} />
+                  }
+                />
+              </Route>
+            </Routes>
+          </HashRouter>
+        </EditModeProvider>
       </EntrySelectionProvider>
     </TimeRangeProvider>
   );

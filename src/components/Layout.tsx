@@ -43,9 +43,20 @@ import { Entry } from '../types/Entry';
 interface LayoutProps {
   /** Callback to add a new entry to the app state (defined in App.tsx) */
   onAddEntry: (entry: Entry) => void;
+  /** Callback to replace an existing entry (by id) in the app state (defined in App.tsx) */
+  onUpdateEntry: (entry: Entry) => void;
+  /** The entry currently open in AddEntryForm's edit mode, or null - see App.tsx's `editingEntry` state. */
+  editingEntry: Entry | null;
+  /** Setter for `editingEntry` (App.tsx's `setEditingEntry`) - used here to clear it once the form closes. */
+  onEditEntry: (entry: Entry | null) => void;
 }
 
-export default function Layout({ onAddEntry }: LayoutProps) {
+export default function Layout({
+  onAddEntry,
+  onUpdateEntry,
+  editingEntry,
+  onEditEntry,
+}: LayoutProps) {
   /**
    * LOCAL STATE: Modal visibility
    *
@@ -67,10 +78,21 @@ export default function Layout({ onAddEntry }: LayoutProps) {
 
   /**
    * Closes the entry form modal
-   * Called by AddEntryForm on cancel or successful submit
+   * Called by AddEntryForm on cancel or successful submit.
+   *
+   * ADD VS. EDIT: AddEntryForm renders through this ONE modal regardless
+   * of mode (see `isOpen`/`editingEntry` on the AddEntryForm below), so
+   * this one handler needs to close whichever mode is actually active -
+   * clearing `editingEntry` (back to add-mode's null) when a specific
+   * entry was being edited, or just hiding the modal via `isModalOpen`
+   * when it was in plain add mode.
    */
   const handleCloseModal = () => {
-    setIsModalOpen(false);
+    if (editingEntry) {
+      onEditEntry(null);
+    } else {
+      setIsModalOpen(false);
+    }
   };
 
   /**
@@ -258,14 +280,25 @@ export default function Layout({ onAddEntry }: LayoutProps) {
        * 3. Its state (open/close) is managed by Layout
        *
        * Props passed to AddEntryForm:
-       * - isOpen: Controls visibility (from local state)
-       * - onClose: Callback to close modal (local handler)
-       * - onSubmit: Callback to add entry (passed from App.tsx)
+       * - isOpen: Controls visibility - true for plain add mode
+       *   (isModalOpen, from local state) OR edit mode (editingEntry set,
+       *   from App.tsx)
+       * - onClose: Callback to close modal (local handleCloseModal, which
+       *   itself picks the right thing to clear - see its own comment)
+       * - onSubmit: Callback to add a brand-new entry (passed from App.tsx)
+       * - onUpdate: Callback to replace-by-id an existing entry (passed
+       *   from App.tsx) - used instead of onSubmit whenever `editingEntry`
+       *   is set
+       * - editingEntry: The entry being edited, or null for add mode - see
+       *   AddEntryForm.tsx's own ADD VS. EDIT MODE comment for how it
+       *   changes the form's behavior
        */}
       <AddEntryForm
-        isOpen={isModalOpen}
+        isOpen={isModalOpen || editingEntry !== null}
         onClose={handleCloseModal}
         onSubmit={handleAddEntry}
+        onUpdate={onUpdateEntry}
+        editingEntry={editingEntry}
       />
 
       {/*

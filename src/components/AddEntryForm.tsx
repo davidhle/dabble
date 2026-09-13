@@ -46,6 +46,28 @@
  * - isOpen: boolean - Controls modal visibility (from Layout)
  * - onClose: () => void - Callback to close modal (from Layout)
  * - onSubmit: (entry: Entry) => void - Callback to add entry (from App via Layout)
+ * - onUpdate: (entry: Entry) => void - Callback to replace an existing entry
+ *   by id (from App via Layout) - see ADD VS. EDIT MODE below
+ * - editingEntry?: Entry | null - When present, the form runs in edit mode
+ *   instead of add mode - see ADD VS. EDIT MODE below
+ *
+ * ADD VS. EDIT MODE:
+ * This ONE component (and its ONE modal instance in Layout.tsx) handles
+ * both creating a brand-new entry and editing an existing one, rather than
+ * a second near-duplicate form - the two only ever differ in three places:
+ * (1) the `isOpen` effect below pre-fills every field from `editingEntry`
+ * instead of resetting to blank/default values, (2) Step 2's final button
+ * reads "Update Entry" instead of "Add Entry", and (3) handleSubmit calls
+ * `onUpdate` with the ORIGINAL entry's id preserved instead of `onSubmit`
+ * with a freshly minted one. Every other field, validation rule, and the
+ * "+ Add new category" flow work identically in both modes, since they
+ * never look at `editingEntry` at all - reclassifying an entry into a
+ * brand-new category while editing it works exactly the way picking a
+ * brand-new category for a new entry does.
+ *
+ * `isEditMode` (derived as `editingEntry != null`, computed once near the
+ * top of the component) is the single source of truth those three spots
+ * branch on, so add/edit can't drift out of sync with each other.
  *
  * THEMING: this modal used to be the one remaining light/white-mode surface
  * in an otherwise dark-themed app (see index.css :root's THEME TOKENS
@@ -97,6 +119,10 @@ interface AddEntryFormProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (entry: Entry) => void;
+  /** Replaces an existing entry by id - see the ADD VS. EDIT MODE comment above. */
+  onUpdate: (entry: Entry) => void;
+  /** The entry to prefill and edit, or null/undefined for plain add mode. */
+  editingEntry?: Entry | null;
 }
 
 interface FormErrors {
@@ -108,7 +134,12 @@ export default function AddEntryForm({
   isOpen,
   onClose,
   onSubmit,
+  onUpdate,
+  editingEntry,
 }: AddEntryFormProps) {
+  // Single source of truth for every add/edit branch below - see the ADD
+  // VS. EDIT MODE comment above.
+  const isEditMode = editingEntry != null;
   // ─── Step Navigation State ───
   // Tracks which step the user is on (1 or 2)
   const [currentStep, setCurrentStep] = useState(1);
@@ -193,13 +224,101 @@ export default function AddEntryForm({
   );
 
   /**
-   * Reset form and step when modal opens.
-   * Always start at Step 1 with a fresh form.
+   * Reset (add mode) or pre-fill (edit mode) the form when the modal
+   * opens. Always starts at Step 1, whichever mode. `editingEntry` is in
+   * the dependency list (not just `isOpen`) so re-prefilling still happens
+   * correctly if the entry being edited changes while the modal stays
+   * open - see the ADD VS. EDIT MODE comment at the top of this file.
    */
   useEffect(() => {
-    if (isOpen) {
-      setCurrentStep(1);
-      setSlideDirection('forward');
+    if (!isOpen) return;
+
+    setCurrentStep(1);
+    setSlideDirection('forward');
+    setIsAddingCategory(false);
+    setNewCategoryName('');
+    setTagInput('');
+    setMediaUrl('');
+    setErrors({});
+
+    // Refresh the category list on every open (not just once on mount) so
+    // a category created in an earlier session - or by mock data
+    // generation - shows up without needing a page reload.
+    const freshCategories = loadCategories();
+    setCategories(freshCategories);
+
+    if (editingEntry) {
+      // ─── EDIT MODE: pre-fill every field from the entry being edited ───
+      setActivityType(editingEntry.activityType);
+      setTitle(editingEntry.title);
+      setDescription(editingEntry.description);
+      setTags(editingEntry.tags);
+      setMoods(editingEntry.mood ?? []);
+      setNotes(editingEntry.notes);
+      setMediaLinks(editingEntry.mediaLinks);
+      setDuration(
+        editingEntry.duration != null ? String(editingEntry.duration) : ''
+      );
+
+      const location = editingEntry.location;
+      if (location && typeof location === 'object') {
+        setCountry(location.country ?? '');
+        setCity(location.city ?? '');
+        setPlace(location.place ?? '');
+      } else {
+        // Legacy plain-string location (see the BACKWARD COMPATIBILITY
+        // comment on Entry.location in types/Entry.ts) - this form has no
+        // single free-text location input to show it in as-is, so it's
+        // carried into the free-text Place field rather than silently
+        // dropped. Saving from here migrates it to the structured shape.
+        setCountry('');
+        setCity('');
+        setPlace(location ?? '');
+      }
+
+      const start = new Date(editingEntry.timestamp);
+      if (editingEntry.hasTime !== false) {
+        // A real local time is known - format it back into the date/time
+        // inputs in the viewer's own local timezone, the exact inverse of
+        // how handleSubmit below builds `timestamp` from them.
+        const localIso = new Date(
+          start.getTime() - start.getTimezoneOffset() * 60000
+        ).toISOString();
+        setDateOnly(localIso.slice(0, 10));
+        setTimeOnly(localIso.slice(11, 16));
+        setHasSpecificTime(true);
+      } else {
+        // Placeholder-midnight-UTC entry (hasTime: false) - read the date
+        // back in UTC, same as formatEntryDate.ts does, so it doesn't
+        // shift a day for anyone west of UTC.
+        setDateOnly(start.toISOString().slice(0, 10));
+        setTimeOnly('');
+        setHasSpecificTime(false);
+      }
+
+      if (editingEntry.endTimestamp) {
+        setIsMultiDay(true);
+        setEndDate(
+          new Date(editingEntry.endTimestamp).toISOString().slice(0, 10)
+        );
+      } else {
+        setIsMultiDay(false);
+        setEndDate('');
+      }
+    } else {
+      // ─── ADD MODE: blank form, defaulting the date/time to now ───
+      setActivityType(freshCategories[0]?.id ?? DEFAULT_CATEGORIES[0].id);
+      setTitle('');
+      setDescription('');
+      setTags([]);
+      setMoods([]);
+      setMediaLinks([]);
+      setCountry('');
+      setCity('');
+      setPlace('');
+      setDuration('');
+      setNotes('');
+
       const now = new Date();
       const localIso = new Date(
         now.getTime() - now.getTimezoneOffset() * 60000
@@ -211,15 +330,8 @@ export default function AddEntryForm({
       setHasSpecificTime(false);
       setIsMultiDay(false);
       setEndDate('');
-
-      // Refresh the category list on every open (not just once on mount)
-      // so a category created in an earlier session - or by mock data
-      // generation - shows up without needing a page reload.
-      const freshCategories = loadCategories();
-      setCategories(freshCategories);
-      setActivityType(freshCategories[0]?.id ?? DEFAULT_CATEGORIES[0].id);
     }
-  }, [isOpen]);
+  }, [isOpen, editingEntry]);
 
   const suggestedTags = SUGGESTED_TAGS[activityType] || [];
 
@@ -341,7 +453,26 @@ export default function AddEntryForm({
     const trimmedPlace = place.trim();
     const hasLocation = trimmedCountry || trimmedCity || trimmedPlace;
 
-    const entry = createEntry({
+    // When "Add specific time" is off, `timeOnly` isn't meaningful, so we
+    // fall back to a placeholder midnight UTC - a timestamp needs some
+    // time value, but hasTime: false tells every display (see
+    // formatEntryDate.ts) not to show it. When on, the date and time
+    // combine as local time, matching the old datetime-local input's
+    // behavior. Falls back to "now" if `dateOnly` was somehow cleared,
+    // the same default createEntry itself would apply - computed as a
+    // definite string (not left to createEntry) so edit mode's directly-
+    // constructed Entry below satisfies its required `timestamp: string`
+    // just as reliably as add mode's does.
+    const timestamp = dateOnly
+      ? hasSpecificTime
+        ? new Date(`${dateOnly}T${timeOnly || '00:00'}`).toISOString()
+        : new Date(`${dateOnly}T00:00:00Z`).toISOString()
+      : new Date().toISOString();
+
+    // Shared by both modes - see the ADD VS. EDIT MODE comment at the top
+    // of this file. Only `id` (and, in edit mode, `dateDisplay` - see
+    // below) differ between the two.
+    const entryFields = {
       activityType,
       title: title.trim(),
       description: description.trim(),
@@ -357,17 +488,7 @@ export default function AddEntryForm({
       duration: duration ? parseInt(duration, 10) : undefined,
       notes: notes.trim(),
       mood: moods.length > 0 ? moods : undefined,
-      // When "Add specific time" is off, `timeOnly` isn't meaningful, so
-      // we fall back to a placeholder midnight UTC - a timestamp needs
-      // some time value, but hasTime: false tells every display (see
-      // formatEntryDate.ts) not to show it. When on, the date and time
-      // combine as local time, matching the old datetime-local input's
-      // behavior.
-      timestamp: dateOnly
-        ? hasSpecificTime
-          ? new Date(`${dateOnly}T${timeOnly || '00:00'}`).toISOString()
-          : new Date(`${dateOnly}T00:00:00Z`).toISOString()
-        : undefined,
+      timestamp,
       hasTime: hasSpecificTime,
       // Only set when the user opted into a range via the "This spans
       // multiple days" toggle - see the endTimestamp field comment in
@@ -376,9 +497,25 @@ export default function AddEntryForm({
         isMultiDay && endDate
           ? new Date(`${endDate}T00:00:00`).toISOString()
           : undefined,
-    });
+    };
 
-    onSubmit(entry);
+    if (isEditMode && editingEntry) {
+      // EDIT MODE: replace-by-id via onUpdate, rather than createEntry's
+      // "mint a brand-new id" behavior - see updateEntry's own comment in
+      // App.tsx for why that's what turns this into a replace instead of
+      // an append. `dateDisplay` is carried over unchanged since this form
+      // has no field to edit or clear it (see its comment in
+      // types/Entry.ts) - without this it would silently disappear from
+      // any entry that had one the moment it was edited.
+      onUpdate({
+        ...entryFields,
+        id: editingEntry.id,
+        dateDisplay: editingEntry.dateDisplay,
+      });
+    } else {
+      onSubmit(createEntry(entryFields));
+    }
+
     resetForm();
     setIsSubmitting(false);
     onClose();
@@ -1204,7 +1341,7 @@ export default function AddEntryForm({
                   </>
                 ) : (
                   <>
-                    {/* Step 2: Back (left) + Add Entry (right) */}
+                    {/* Step 2: Back (left) + Add/Update Entry (right) */}
                     <button
                       type="button"
                       onClick={handleBack}
@@ -1218,7 +1355,13 @@ export default function AddEntryForm({
                       disabled={isSubmitting}
                       className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {isSubmitting ? 'Saving...' : 'Add Entry'}
+                      {isSubmitting
+                        ? isEditMode
+                          ? 'Updating...'
+                          : 'Saving...'
+                        : isEditMode
+                          ? 'Update Entry'
+                          : 'Add Entry'}
                     </button>
                   </>
                 )}

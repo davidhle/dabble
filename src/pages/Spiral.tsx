@@ -66,7 +66,16 @@
  * not in how selecting, filtering, or time-windowing them works.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import EditModeBanner from '../components/EditModeBanner';
+import EditModeToggle from '../components/EditModeToggle';
 import FilterBar from '../components/FilterBar';
 import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
@@ -79,6 +88,7 @@ import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
 import { useEntrySelection } from '../hooks/useEntrySelection';
 import { useTimeRange } from '../context/TimeRangeContext';
+import { useEditMode } from '../context/EditModeContext';
 
 /**
  * Gap (px) between the STAR GLYPH FOOTNOTE (see its own comment below,
@@ -91,9 +101,11 @@ const STAR_GLYPH_FOOTNOTE_GAP = 8;
 
 interface SpiralProps {
   entries: Entry[];
+  /** Opens `entry` in the shared AddEntryForm's edit mode - see App.tsx's `editingEntry` state. */
+  onEditEntry: (entry: Entry) => void;
 }
 
-export default function Spiral({ entries }: SpiralProps) {
+export default function Spiral({ entries, onEditEntry }: SpiralProps) {
   // The dynamic category list - see Constellation.tsx's identical
   // `categories` useMemo for why this is recomputed off `entries`.
   const categories = useMemo(() => loadCategories(), [entries]);
@@ -121,6 +133,7 @@ export default function Spiral({ entries }: SpiralProps) {
     expandedEntryId,
     handleEntryClick,
     handleExpandPanel,
+    handleMinimizePanel,
     handleClosePanel,
     sortMode,
     handleSortModeChange,
@@ -147,6 +160,27 @@ export default function Spiral({ entries }: SpiralProps) {
       resetToFullRange();
     },
   });
+
+  const { isEditMode } = useEditMode();
+
+  /**
+   * Composes SpiralTimeline's single `onEntryClick` callback around the
+   * shared `isEditMode` flag - see EditModeContext.tsx's top-of-file "WHY
+   * THIS IS A GLOBAL CLICK-BEHAVIOR OVERRIDE" comment for why this branch
+   * lives here (in the page) rather than inside SpiralTimeline.tsx itself,
+   * and Constellation.tsx's identical `handleCanvasEntryClick` for the
+   * full reasoning (StarMap's version of this same wrapper).
+   */
+  const handleCanvasEntryClick = useCallback(
+    (entry: Entry) => {
+      if (isEditMode) {
+        onEditEntry(entry);
+        return;
+      }
+      handleEntryClick(entry);
+    },
+    [isEditMode, onEditEntry, handleEntryClick]
+  );
 
   // Where the header stack (title/subtitle + FilterBar) actually sits in
   // the viewport - identical to Constellation.tsx's/Timeline.tsx's own
@@ -195,11 +229,21 @@ export default function Spiral({ entries }: SpiralProps) {
     return () => observer.disconnect();
   }, [hasSelection]);
 
-  // TimeRangeSelector's own CARD's live rendered position - identical to
-  // Constellation.tsx's own `timeRangeSelectorRect` measurement; see its
-  // comment for the full reasoning (why `sidebarWidth` is a dependency,
-  // why both a ResizeObserver AND a resize listener are needed, and why
-  // `useLayoutEffect`).
+  // TimeRangeSelector's own CARD's live rendered position - used only by
+  // the STAR GLYPH FOOTNOTE below (Spiral-only; Constellation.tsx/
+  // Timeline.tsx no longer need this measurement themselves now that
+  // EditModeBanner.tsx/VizEmptyState.tsx's "filtered" message both anchor
+  // top-right instead of beside TimeRangeSelector - see
+  // utils/topRightTooltipStack.ts). `sidebarWidth` is a dependency (not
+  // just mount) because TimeRangeSelector re-centers its card within a
+  // narrower `[sidebarWidth, viewport right]` box as the sidebar opens/
+  // closes - a pure horizontal TRANSLATION of the same-sized card, which a
+  // ResizeObserver alone would miss (it only fires on size changes, not
+  // position). The window resize listener alongside it catches the OTHER
+  // way this position can change: the viewport itself resizing.
+  // `useLayoutEffect` (not `useEffect`) so this is measured before the
+  // first paint the footnote could appear in, avoiding a one-frame flash
+  // at the wrong position.
   const timeRangeSelectorCardRef = useRef<HTMLDivElement>(null);
   const [timeRangeSelectorRect, setTimeRangeSelectorRect] = useState({
     top: 0,
@@ -296,14 +340,14 @@ export default function Spiral({ entries }: SpiralProps) {
         entries={timeFilteredEntries}
         hasAnyEntries={entries.length > 0}
         filterCategories={filterCategories}
-        onEntryClick={handleEntryClick}
+        onEntryClick={handleCanvasEntryClick}
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}
         sidebarWidth={sidebarWidth}
         resetViewSignal={resetViewSignal}
         domainRange={selectedRange}
         topOffset={headerLayout.top}
-        timeRangeSelectorRect={timeRangeSelectorRect}
+        isEditMode={isEditMode}
       />
 
       {/*
@@ -312,8 +356,9 @@ export default function Spiral({ entries }: SpiralProps) {
        * <TimeRangeSelector>. Passed the full, unfiltered `entries` (not
        * `timeFilteredEntries`) for its density ticks - same reasoning as
        * the other two pages' own comment on this prop. `ref` is the
-       * TimeRangeSelector.tsx forwardRef - see the `timeRangeSelectorRect`
-       * measurement above for why.
+       * TimeRangeSelector.tsx forwardRef, measured above for the STAR
+       * GLYPH FOOTNOTE below - the only remaining consumer of that
+       * measurement on this page.
        */}
       <TimeRangeSelector
         ref={timeRangeSelectorCardRef}
@@ -329,10 +374,10 @@ export default function Spiral({ entries }: SpiralProps) {
        * TimeRangeSelector.tsx itself, which Constellation.tsx/Timeline.tsx
        * also render and neither of which has a year glyph to explain.
        *
-       * POSITIONING: the same "stack directly above TimeRangeSelector's
-       * card, centered within [sidebarWidth, viewport right]" approach
-       * VizEmptyState.tsx's own ABOVE-INSTEAD-OF-BESIDE layout uses - see
-       * that file's POSITIONING comment for why `bottom` is derived from
+       * POSITIONING: stacked directly above TimeRangeSelector's card,
+       * centered within `[sidebarWidth, viewport right]` - the same
+       * horizontal centering approach TimeRangeSelector.tsx uses for
+       * itself, just one row higher. `bottom` (not `top`) is derived from
        * `timeRangeSelectorRect.top` (the card's own measured top edge)
        * rather than a flat guessed pixel offset: this keeps the footnote
        * flush just above the card regardless of the card's own rendered
@@ -360,8 +405,11 @@ export default function Spiral({ entries }: SpiralProps) {
         </p>
       </div>
 
+      {isEditMode && <EditModeBanner />}
+
       <ResetToast visible={resetPending} />
       <ResetButton onClick={resetAll} />
+      <EditModeToggle />
 
       {hasSelection && (
         <SidebarPanelStack
@@ -370,7 +418,9 @@ export default function Spiral({ entries }: SpiralProps) {
           sortMode={sortMode}
           categoryGroups={categoryGroups}
           onExpand={handleExpandPanel}
+          onMinimize={handleMinimizePanel}
           onClose={handleClosePanel}
+          onEdit={onEditEntry}
           top={headerLayout.top}
           left={headerLayout.left}
         />

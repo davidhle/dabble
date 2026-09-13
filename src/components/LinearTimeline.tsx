@@ -168,7 +168,7 @@ import { getActivityColor } from '../utils/colors';
 // header comment for why this was pulled out into one component instead
 // of each visualization keeping its own copy of the markup.
 import EntryTooltip from './EntryTooltip';
-import VizEmptyState, { TimeRangeSelectorRect } from './VizEmptyState';
+import VizEmptyState from './VizEmptyState';
 import { assignLanes } from '../utils/laneAssignment';
 
 interface LinearTimelineProps {
@@ -248,13 +248,15 @@ interface LinearTimelineProps {
    */
   domainRange: DateRange;
   /**
-   * TimeRangeSelector's own card's live rendered position
-   * (Timeline.tsx's own `timeRangeSelectorRect`) - passed straight
-   * through to VizEmptyState.tsx so it can position its "filtered"
-   * message immediately beside that card. See VizEmptyState.tsx's own
-   * POSITIONING comment.
+   * Whether the shared, cross-page Edit Mode flag (EditModeContext.tsx)
+   * is currently on - passed straight through to VizEmptyState.tsx so its
+   * "filtered" message knows whether EditModeBanner.tsx is ALSO occupying
+   * the shared top-right tooltip stack's top slot (see that file's own
+   * EDIT MODE STACKING comment). PURELY PRESENTATIONAL - see StarMap.tsx's
+   * identical `isEditMode` prop comment for why this doesn't change
+   * LinearTimeline's own click behavior.
    */
-  timeRangeSelectorRect: TimeRangeSelectorRect;
+  isEditMode: boolean;
 }
 
 /** Opacity applied to a point/range whose category is filtered out - same value as StarMap.tsx's FILTERED_OUT_OPACITY. */
@@ -382,7 +384,7 @@ export default function LinearTimeline({
   sidebarWidth,
   topOffset,
   domainRange,
-  timeRangeSelectorRect,
+  isEditMode,
 }: LinearTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -1209,7 +1211,7 @@ export default function LinearTimeline({
           hasAnyEntries={hasAnyEntries}
           topOffset={topOffset}
           sidebarWidth={sidebarWidth}
-          timeRangeSelectorRect={timeRangeSelectorRect}
+          editModeBannerVisible={isEditMode}
         />
       )}
     </div>

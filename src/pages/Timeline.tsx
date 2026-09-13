@@ -98,7 +98,9 @@
  * change just because the visible time window did.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import EditModeBanner from '../components/EditModeBanner';
+import EditModeToggle from '../components/EditModeToggle';
 import FilterBar from '../components/FilterBar';
 import LinearTimeline from '../components/LinearTimeline';
 import ResetButton from '../components/ResetButton';
@@ -111,12 +113,15 @@ import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
 import { useEntrySelection } from '../hooks/useEntrySelection';
 import { useTimeRange } from '../context/TimeRangeContext';
+import { useEditMode } from '../context/EditModeContext';
 
 interface TimelineProps {
   entries: Entry[];
+  /** Opens `entry` in the shared AddEntryForm's edit mode - see App.tsx's `editingEntry` state. */
+  onEditEntry: (entry: Entry) => void;
 }
 
-export default function Timeline({ entries }: TimelineProps) {
+export default function Timeline({ entries, onEditEntry }: TimelineProps) {
   // The dynamic category list - see Constellation.tsx's identical
   // `categories` useMemo for why this is recomputed off `entries`. Reads
   // the full `entries`, not `timeFilteredEntries` below - see the
@@ -141,6 +146,7 @@ export default function Timeline({ entries }: TimelineProps) {
     expandedEntryId,
     handleEntryClick,
     handleExpandPanel,
+    handleMinimizePanel,
     handleClosePanel,
     sortMode,
     handleSortModeChange,
@@ -172,6 +178,27 @@ export default function Timeline({ entries }: TimelineProps) {
     // needs to be wired up for "the brush visually resets too."
     onFullReset: resetToFullRange,
   });
+
+  const { isEditMode } = useEditMode();
+
+  /**
+   * Composes LinearTimeline's single `onEntryClick` callback around the
+   * shared `isEditMode` flag - see EditModeContext.tsx's top-of-file "WHY
+   * THIS IS A GLOBAL CLICK-BEHAVIOR OVERRIDE" comment for why this branch
+   * lives here (in the page) rather than inside LinearTimeline.tsx itself,
+   * and Constellation.tsx's identical `handleCanvasEntryClick` for the
+   * full reasoning (StarMap's version of this same wrapper).
+   */
+  const handleCanvasEntryClick = useCallback(
+    (entry: Entry) => {
+      if (isEditMode) {
+        onEditEntry(entry);
+        return;
+      }
+      handleEntryClick(entry);
+    },
+    [isEditMode, onEditEntry, handleEntryClick]
+  );
 
   // Where the header stack (title/subtitle + FilterBar) actually sits in
   // the viewport, so SidebarPanelStack below can start just past its
@@ -224,41 +251,6 @@ export default function Timeline({ entries }: TimelineProps) {
     return () => observer.disconnect();
   }, [hasSelection]);
 
-  // TimeRangeSelector's own CARD's live rendered position - identical to
-  // Constellation.tsx's own `timeRangeSelectorRect` measurement; see its
-  // comment for the full reasoning (why `sidebarWidth` is a dependency,
-  // why both a ResizeObserver AND a resize listener are needed, and why
-  // `useLayoutEffect`).
-  const timeRangeSelectorCardRef = useRef<HTMLDivElement>(null);
-  const [timeRangeSelectorRect, setTimeRangeSelectorRect] = useState({
-    top: 0,
-    right: 0,
-    height: 0,
-  });
-
-  useLayoutEffect(() => {
-    const el = timeRangeSelectorCardRef.current;
-    if (!el) return;
-
-    const updateRect = () => {
-      const rect = el.getBoundingClientRect();
-      setTimeRangeSelectorRect({
-        top: rect.top,
-        right: rect.right,
-        height: rect.height,
-      });
-    };
-    updateRect();
-
-    const observer = new ResizeObserver(updateRect);
-    observer.observe(el);
-    window.addEventListener('resize', updateRect);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', updateRect);
-    };
-  }, [sidebarWidth]);
-
   return (
     // Fragment, not a `space-y-4` div - see Constellation.tsx's identical
     // comment: `space-y-*` would misalign LinearTimeline's `fixed inset-0`
@@ -290,13 +282,13 @@ export default function Timeline({ entries }: TimelineProps) {
         entries={timeFilteredEntries}
         hasAnyEntries={entries.length > 0}
         filterCategories={filterCategories}
-        onEntryClick={handleEntryClick}
+        onEntryClick={handleCanvasEntryClick}
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}
         sidebarWidth={sidebarWidth}
         topOffset={headerLayout.top}
         domainRange={selectedRange}
-        timeRangeSelectorRect={timeRangeSelectorRect}
+        isEditMode={isEditMode}
       />
 
       {/*
@@ -310,17 +302,14 @@ export default function Timeline({ entries }: TimelineProps) {
        * within the same sidebar-excluded visible region LinearTimeline's
        * own content now starts past - see both files' own comments on
        * their respective (different) sidebar-aware layout mechanisms.
-       * `ref` is the TimeRangeSelector.tsx forwardRef - see the
-       * `timeRangeSelectorRect` measurement above for why.
        */}
-      <TimeRangeSelector
-        ref={timeRangeSelectorCardRef}
-        entries={entries}
-        sidebarWidth={sidebarWidth}
-      />
+      <TimeRangeSelector entries={entries} sidebarWidth={sidebarWidth} />
+
+      {isEditMode && <EditModeBanner />}
 
       <ResetToast visible={resetPending} />
       <ResetButton onClick={resetAll} />
+      <EditModeToggle />
 
       {hasSelection && (
         <SidebarPanelStack
@@ -329,7 +318,9 @@ export default function Timeline({ entries }: TimelineProps) {
           sortMode={sortMode}
           categoryGroups={categoryGroups}
           onExpand={handleExpandPanel}
+          onMinimize={handleMinimizePanel}
           onClose={handleClosePanel}
+          onEdit={onEditEntry}
           top={headerLayout.top}
           left={headerLayout.left}
         />

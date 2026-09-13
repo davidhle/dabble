@@ -83,6 +83,11 @@
    *                          keep reading against a pale tint either way
    *   --teal-accent-text     same idea as --indigo-accent-text, for Mood
    *                          chips (EntryPanel.tsx)
+   *   --yellow-accent-text   same idea as --indigo-accent-text, for
+   *                          EditModeBanner.tsx's "Edit Mode is on" notice -
+   *                          yellow specifically to read as a distinct
+   *                          "heads up" tone rather than the app's usual
+   *                          indigo (informational/neutral) or teal (mood)
    *   --star-highlight-color the "opened entry" ring/glow color in
    *                          StarMap/LinearTimeline/SpiralTimeline -
    *                          deliberately not tied to any activityType
@@ -123,6 +128,7 @@
    * --chrome-hover-bg-color: #16203d               --chrome-hover-bg-color: #ebe4d3
    * --indigo-accent-text:    #a5b4fc               --indigo-accent-text: #4338ca
    * --teal-accent-text:      #5eead4               --teal-accent-text:   #0f766e
+   * --yellow-accent-text:    #fde047               --yellow-accent-text: #a16207
    * --star-highlight-color:  #ffffff               --star-highlight-color: #1c1917
    * --viz-label-color:       rgba(255,255,255,.35)  --viz-label-color:   rgba(17,24,39,.4)
    * --viz-header-text-shadow: 0 1px 3px rgba(0,0,0,.9), 0 2px 10px rgba(0,0,0,.7)
@@ -158,6 +164,7 @@
   --chrome-hover-bg-color: #16203d;
   --indigo-accent-text: #a5b4fc; /* indigo-300 */
   --teal-accent-text: #5eead4; /* teal-300 */
+  --yellow-accent-text: #fde047; /* yellow-300 */
   --star-highlight-color: #ffffff;
   --viz-label-color: rgba(255, 255, 255, 0.35);
   --viz-header-text-shadow:
@@ -198,6 +205,7 @@
   --chrome-hover-bg-color: #ebe4d3;
   --indigo-accent-text: #4338ca; /* indigo-700 - dark enough to read on a pale indigo tint */
   --teal-accent-text: #0f766e; /* teal-700 */
+  --yellow-accent-text: #a16207; /* yellow-700 - dark enough to read on a pale yellow tint */
   --star-highlight-color: #1c1917;
   --viz-label-color: rgba(17, 24, 39, 0.4);
   --viz-header-text-shadow:

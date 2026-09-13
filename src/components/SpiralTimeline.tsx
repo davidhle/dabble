@@ -327,7 +327,7 @@ import { getActivityColor } from '../utils/colors';
 // EntryTooltip.tsx's header comment for why this is a shared pattern
 // across every visualization view rather than duplicated per-component.
 import EntryTooltip from './EntryTooltip';
-import VizEmptyState, { TimeRangeSelectorRect } from './VizEmptyState';
+import VizEmptyState from './VizEmptyState';
 import { assignLanes, assignLaneAroundRanges } from '../utils/laneAssignment';
 
 interface SpiralTimelineProps {
@@ -402,13 +402,15 @@ interface SpiralTimelineProps {
    */
   topOffset: number;
   /**
-   * TimeRangeSelector's own card's live rendered position
-   * (Spiral.tsx's own `timeRangeSelectorRect`) - passed straight through
-   * to VizEmptyState.tsx so it can position its "filtered" message
-   * immediately beside that card. See VizEmptyState.tsx's own
-   * POSITIONING comment.
+   * Whether the shared, cross-page Edit Mode flag (EditModeContext.tsx)
+   * is currently on - passed straight through to VizEmptyState.tsx so its
+   * "filtered" message knows whether EditModeBanner.tsx is ALSO occupying
+   * the shared top-right tooltip stack's top slot (see that file's own
+   * EDIT MODE STACKING comment). PURELY PRESENTATIONAL - see StarMap.tsx's
+   * identical `isEditMode` prop comment for why this doesn't change
+   * SpiralTimeline's own click behavior.
    */
-  timeRangeSelectorRect: TimeRangeSelectorRect;
+  isEditMode: boolean;
 }
 
 /** Small circle radius (px) for a single-point entry and for a range entry's end caps. */
@@ -702,7 +704,7 @@ export default function SpiralTimeline({
   resetViewSignal,
   domainRange,
   topOffset,
-  timeRangeSelectorRect,
+  isEditMode,
 }: SpiralTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -1592,7 +1594,7 @@ export default function SpiralTimeline({
           hasAnyEntries={hasAnyEntries}
           topOffset={topOffset}
           sidebarWidth={sidebarWidth}
-          timeRangeSelectorRect={timeRangeSelectorRect}
+          editModeBannerVisible={isEditMode}
         />
       )}
     </div>

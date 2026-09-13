@@ -131,7 +131,7 @@ import { getActivityColor } from '../utils/colors';
 // EntryTooltip.tsx's header comment for why this is a shared pattern
 // across both visualization views rather than duplicated per-component.
 import EntryTooltip from './EntryTooltip';
-import VizEmptyState, { TimeRangeSelectorRect } from './VizEmptyState';
+import VizEmptyState from './VizEmptyState';
 
 interface StarMapProps {
   entries: Entry[];
@@ -219,13 +219,20 @@ interface StarMapProps {
    */
   topOffset: number;
   /**
-   * TimeRangeSelector's own card's live rendered position
-   * (Constellation.tsx's own `timeRangeSelectorRect`) - passed straight
-   * through to VizEmptyState.tsx so it can position its "filtered"
-   * message immediately beside that card. See VizEmptyState.tsx's own
-   * POSITIONING comment.
+   * Whether the shared, cross-page Edit Mode flag (EditModeContext.tsx)
+   * is currently on - passed straight through to VizEmptyState.tsx so its
+   * "filtered" message knows whether EditModeBanner.tsx is ALSO occupying
+   * the shared top-right tooltip stack's top slot (see that file's own
+   * EDIT MODE STACKING comment). PURELY PRESENTATIONAL: this is NOT used
+   * to change StarMap's own click behavior - that branch lives entirely
+   * in Constellation.tsx's `handleCanvasEntryClick` (see
+   * EditModeContext.tsx's own "WHY THIS IS A GLOBAL CLICK-BEHAVIOR
+   * OVERRIDE" comment for why StarMap otherwise stays unaware Edit Mode
+   * exists at all) - StarMap only needs the flag here to position a
+   * tooltip correctly, the same way it already needs `hasAnyEntries`/
+   * `topOffset`/`sidebarWidth` purely to hand them to VizEmptyState.
    */
-  timeRangeSelectorRect: TimeRangeSelectorRect;
+  isEditMode: boolean;
 }
 
 /** Opacity applied to a star whose category is filtered out. */
@@ -307,7 +314,7 @@ export default function StarMap({
   sidebarWidth,
   resetViewSignal,
   topOffset,
-  timeRangeSelectorRect,
+  isEditMode,
 }: StarMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -901,7 +908,7 @@ export default function StarMap({
           hasAnyEntries={hasAnyEntries}
           topOffset={topOffset}
           sidebarWidth={sidebarWidth}
-          timeRangeSelectorRect={timeRangeSelectorRect}
+          editModeBannerVisible={isEditMode}
         />
       )}
     </div>
