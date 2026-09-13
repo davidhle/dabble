@@ -51,6 +51,31 @@ export interface MediaLink {
 }
 
 /**
+ * EntryLocation Interface
+ *
+ * STRUCTURED LOCATION (intentional groundwork, deliberately plain text):
+ * Splitting location into country/city/place - instead of one free-text
+ * string - is groundwork for future location-based connections between
+ * entries (e.g. "everything logged in Paris", or "everything logged at
+ * this venue"), which need some shared structure to group/match on.
+ * Every field is still a plain string, not a coordinate or place-ID -
+ * there's deliberately no geocoding, map, or external location API here,
+ * to avoid that cost/key-management overhead before it's actually
+ * needed. All three fields are optional and independent: an entry can
+ * have just a country, country+city, or all three.
+ */
+export interface EntryLocation {
+  /** Country name, picked from the bundled list in data/countries.ts. */
+  country?: string;
+
+  /** Free-text city name. */
+  city?: string;
+
+  /** Free-text specific place/venue/address name. */
+  place?: string;
+}
+
+/**
  * Entry Interface
  *
  * The core data structure for a single activity entry in Dabble.
@@ -151,10 +176,20 @@ export interface Entry {
 
   /**
    * Where the activity took place.
-   * Optional - useful for location-based patterns and memories.
-   * Could be enhanced with coordinates for mapping features.
+   * Optional - useful for location-based patterns and memories. See the
+   * EntryLocation comment above for why this is split into
+   * country/city/place rather than one free-text string.
+   *
+   * BACKWARD COMPATIBILITY:
+   * Entries created before this structured shape existed have a plain
+   * string here instead (AddEntryForm.tsx used to have a single
+   * "Location" text input). Those old string values are left exactly as
+   * they are - not parsed/migrated into { country, city, place } - and
+   * are simply displayed as a single unstructured line wherever location
+   * is shown (see utils/formatLocation.ts). New entries always get the
+   * structured object (or no location at all).
    */
-  location?: string;
+  location?: string | EntryLocation;
 
   /**
    * How long the activity lasted in minutes.

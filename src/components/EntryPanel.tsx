@@ -49,6 +49,12 @@
  * one. (Spiral.tsx doesn't render through this component yet - it still
  * uses EntryDetailModal.tsx, which got the same two sections added for
  * the same reason; see that file's own comments.)
+ *
+ * SECTION LABEL EMOJI: each body section label (Tags/Mood/Description/
+ * Notes/Media Links) is prefixed with one small emoji (🏷️/💫/📝/💭/🔗) -
+ * a purely cosmetic touch to break up what's otherwise an all-caps
+ * text-only label, applied consistently here since this is the one
+ * shared panel every visualization view renders through (see above).
  */
 
 import { Entry } from '../types/Entry';
@@ -57,6 +63,7 @@ import { getCategoryName } from '../utils/categories';
 import { linkify, LINK_CLASSNAME } from '../utils/linkify';
 import { getMediaLinkLabel } from '../utils/mediaLinks';
 import { formatEntryDate } from '../utils/formatEntryDate';
+import { formatLocationDisplay } from '../utils/formatLocation';
 
 interface EntryPanelProps {
   entry: Entry;
@@ -172,6 +179,21 @@ export default function EntryPanel({
   // has an endTimestamp (see types/Entry.ts).
   const formattedDate = formatEntryDate(entry);
 
+  // Structured ("Djoon Club, Paris, France") or legacy plain-string
+  // location, formatted by the one shared helper - see
+  // utils/formatLocation.ts and the EntryLocation comment in
+  // types/Entry.ts for why an entry's location can be either shape.
+  //
+  // SUBTITLE AGGREGATION: this used to have its own "Location" section
+  // further down in the panel body. It's now folded into the header
+  // subtitle line instead, alongside category and date, so the subtitle
+  // reads as one scannable "what, when, where" line (e.g. "Shuffle Dance
+  // · Mar 9, 2022 · EXIL Club, Vienna, Austria") rather than making the
+  // reader look further down the panel to find where an entry happened.
+  // Appended only when present - see the render below for the "no empty
+  // separator" behavior when an entry has no location.
+  const formattedLocation = formatLocationDisplay(entry.location);
+
   return (
     <div
       // bg-[var(--panel-bg-color-solid)]: same opaque surface the
@@ -195,6 +217,7 @@ export default function EntryPanel({
           </h2>
           <p className="mt-1 text-sm text-[var(--text-muted-color)]">
             {displayActivityType} &middot; {formattedDate}
+            {formattedLocation && <> &middot; {formattedLocation}</>}
           </p>
         </div>
         <CloseButton onClick={onClose} label={`Close ${entry.title}`} />
@@ -205,7 +228,7 @@ export default function EntryPanel({
         {entry.tags.length > 0 && (
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-              Tags
+              🏷️ Tags
             </p>
             <div className="mt-1.5 flex flex-wrap gap-2">
               {entry.tags.map(tag => (
@@ -236,7 +259,7 @@ export default function EntryPanel({
         {entry.mood && entry.mood.length > 0 && (
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-              Mood
+              💫 Mood
             </p>
             <div className="mt-1.5 flex flex-wrap gap-2">
               {entry.mood.map(mood => (
@@ -253,7 +276,7 @@ export default function EntryPanel({
 
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-            Description
+            📝 Description
           </p>
           <p className="mt-1.5 whitespace-pre-wrap text-sm text-[var(--text-secondary-color)]">
             {entry.description
@@ -264,7 +287,7 @@ export default function EntryPanel({
 
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-            Notes
+            💭 Notes
           </p>
           <p className="mt-1.5 whitespace-pre-wrap text-sm text-[var(--text-secondary-color)]">
             {entry.notes ? linkify(entry.notes) : 'No notes for this entry.'}
@@ -287,7 +310,7 @@ export default function EntryPanel({
         {entry.mediaLinks.length > 0 && (
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-              Media Links
+              🔗 Media Links
             </p>
             <div className="mt-1.5 flex flex-col gap-1">
               {entry.mediaLinks.map((media, index) => (

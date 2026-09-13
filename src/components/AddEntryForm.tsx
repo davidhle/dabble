@@ -82,6 +82,7 @@ import {
   addCategory,
   previewNextCategoryColor,
 } from '../utils/categories';
+import { COUNTRIES } from '../data/countries';
 
 /**
  * Sentinel <option> value for the trailing "+ Add new category" dropdown
@@ -163,7 +164,16 @@ export default function AddEntryForm({
   // is about which days it covers, not a time of day on the end date.
   const [endDate, setEndDate] = useState('');
 
-  const [location, setLocation] = useState('');
+  // ─── Structured location (country/city/place) ───
+  // Three independent, optional plain-text fields rather than one
+  // free-text "Location" input - see the EntryLocation comment in
+  // types/Entry.ts for why (groundwork for future location-based entry
+  // connections, without any geocoding/map API). Country is a dropdown
+  // populated from the bundled static list in data/countries.ts; city and
+  // place stay free-text since there's no bundled list for those.
+  const [country, setCountry] = useState('');
+  const [city, setCity] = useState('');
+  const [place, setPlace] = useState('');
   const [duration, setDuration] = useState('');
 
   // ─── Step 2 Fields: Reflections & Media ───
@@ -322,13 +332,28 @@ export default function AddEntryForm({
 
     setIsSubmitting(true);
 
+    // Only set when at least one of the three fields is filled in - see
+    // the EntryLocation comment in types/Entry.ts. Omitting empty
+    // strings (rather than storing them as "") keeps
+    // utils/formatLocation.ts's "which pieces are present" check simple.
+    const trimmedCountry = country.trim();
+    const trimmedCity = city.trim();
+    const trimmedPlace = place.trim();
+    const hasLocation = trimmedCountry || trimmedCity || trimmedPlace;
+
     const entry = createEntry({
       activityType,
       title: title.trim(),
       description: description.trim(),
       tags,
       mediaLinks,
-      location: location.trim() || undefined,
+      location: hasLocation
+        ? {
+            ...(trimmedCountry ? { country: trimmedCountry } : {}),
+            ...(trimmedCity ? { city: trimmedCity } : {}),
+            ...(trimmedPlace ? { place: trimmedPlace } : {}),
+          }
+        : undefined,
       duration: duration ? parseInt(duration, 10) : undefined,
       notes: notes.trim(),
       mood: moods.length > 0 ? moods : undefined,
@@ -371,7 +396,9 @@ export default function AddEntryForm({
     setTagInput('');
     setMoods([]);
     setMediaLinks([]);
-    setLocation('');
+    setCountry('');
+    setCity('');
+    setPlace('');
     setDuration('');
     setNotes('');
     setDateOnly('');
@@ -893,41 +920,89 @@ export default function AddEntryForm({
                       )}
                     </div>
 
-                    {/* Location and Duration (side by side) */}
+                    {/*
+                     * Structured location: three independent optional
+                     * fields (Country dropdown, City/Place free-text)
+                     * instead of one "Location" text input - see the
+                     * EntryLocation comment in types/Entry.ts. Country
+                     * gets a bundled static dropdown (data/countries.ts);
+                     * City and Place stay free-text since there's no
+                     * bundled list for those.
+                     */}
+                    <div>
+                      <label
+                        htmlFor="country"
+                        className="block text-sm font-medium text-[var(--text-secondary-color)]"
+                      >
+                        Country
+                      </label>
+                      <select
+                        id="country"
+                        value={country}
+                        onChange={e => setCountry(e.target.value)}
+                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        <option value="">Select a country</option>
+                        {COUNTRIES.map(countryName => (
+                          <option key={countryName} value={countryName}>
+                            {countryName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label
-                          htmlFor="location"
+                          htmlFor="city"
                           className="block text-sm font-medium text-[var(--text-secondary-color)]"
                         >
-                          Location
+                          City (optional)
                         </label>
                         <input
                           type="text"
-                          id="location"
-                          value={location}
-                          onChange={e => setLocation(e.target.value)}
-                          placeholder="Where?"
+                          id="city"
+                          value={city}
+                          onChange={e => setCity(e.target.value)}
+                          placeholder="e.g., Paris"
                           className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       </div>
                       <div>
                         <label
-                          htmlFor="duration"
+                          htmlFor="place"
                           className="block text-sm font-medium text-[var(--text-secondary-color)]"
                         >
-                          Duration (min)
+                          Place or venue (optional)
                         </label>
                         <input
-                          type="number"
-                          id="duration"
-                          value={duration}
-                          onChange={e => setDuration(e.target.value)}
-                          placeholder="Minutes"
-                          min="0"
+                          type="text"
+                          id="place"
+                          value={place}
+                          onChange={e => setPlace(e.target.value)}
+                          placeholder="e.g., Djoon Club"
                           className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       </div>
+                    </div>
+
+                    {/* Duration */}
+                    <div>
+                      <label
+                        htmlFor="duration"
+                        className="block text-sm font-medium text-[var(--text-secondary-color)]"
+                      >
+                        Duration (min)
+                      </label>
+                      <input
+                        type="number"
+                        id="duration"
+                        value={duration}
+                        onChange={e => setDuration(e.target.value)}
+                        placeholder="Minutes"
+                        min="0"
+                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
                     </div>
 
                     {/* Description (optional) */}
