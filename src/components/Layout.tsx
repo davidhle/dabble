@@ -174,6 +174,12 @@ export default function Layout({ onAddEntry }: LayoutProps) {
                   className="h-5 w-px self-center bg-[var(--panel-border-color)]"
                 />
                 <Link
+                  to="/constellation"
+                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
+                >
+                  Constellation
+                </Link>
+                <Link
                   to="/linear"
                   className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
@@ -184,12 +190,6 @@ export default function Layout({ onAddEntry }: LayoutProps) {
                   className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
                 >
                   Spiral
-                </Link>
-                <Link
-                  to="/constellation"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
-                >
-                  Constellation
                 </Link>
               </div>
             </div>

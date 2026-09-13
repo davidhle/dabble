@@ -264,13 +264,13 @@ function App() {
                * Or use Outlet context in Layout to pass data.
                */}
               <Route index element={<Home />} />
-              <Route path="linear" element={<Timeline entries={entries} />} />
-              <Route path="spiral" element={<Spiral entries={entries} />} />
+              <Route path="about" element={<About />} />
               <Route
                 path="constellation"
                 element={<Constellation entries={entries} />}
               />
-              <Route path="about" element={<About />} />
+              <Route path="linear" element={<Timeline entries={entries} />} />
+              <Route path="spiral" element={<Spiral entries={entries} />} />
             </Route>
           </Routes>
         </HashRouter>
