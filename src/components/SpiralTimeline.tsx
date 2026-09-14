@@ -739,6 +739,62 @@ const YEAR_GLYPH_COLLISION_RADIUS_PX = 10;
  */
 const YEAR_GLYPH_NUDGE_ARC_PX = 14;
 
+/**
+ * ──────────────────────────────────────────────────────────────────────
+ * YEAR HOVER HIGHLIGHT: THE SAME CURVE-SAMPLING BAND AS RANGE ENTRIES,
+ * DELIBERATELY DIFFERENT PAINT
+ * ──────────────────────────────────────────────────────────────────────
+ * Hovering a year glyph highlights that whole calendar year's stretch of
+ * the gridline. That stretch is a curved band of the spiral just like a
+ * range entry's arc is (see the top-of-file "RANGE ENTRIES" comment) -
+ * its outer radius keeps growing across the span exactly the same way -
+ * so a `d3.arc()`-style fixed-radius sector would drift off the true
+ * curve here for the exact same reason it did for range entries. Rather
+ * than re-deriving that fix, this reuses `buildRangeBandPath` verbatim:
+ * sample `spiralPoint`/`spiralOutwardNormal` at many `t` steps across the
+ * year's span and offset perpendicular to the curve for a thin closed
+ * band - the identical technique, just fed a year's `[t0, t1]` instead of
+ * an entry's `[tStart, tEnd]`, and no lane `radiusOffset` (this highlights
+ * the base gridline itself, which always sits at lane 0).
+ *
+ * The PAINT is intentionally NOT copied from the opened-entry highlight:
+ * that one uses `OPENED_HIGHLIGHT_COLOR` (navy/white) specifically
+ * because it means "a specific entry is selected." This is a different
+ * kind of thing - "a stretch of the timeline structure is being pointed
+ * at" - so it stays in the gridline's own `currentColor` grey, just
+ * brightened (higher fill opacity) and thickened (still thinner than an
+ * entry band - see `YEAR_HIGHLIGHT_HALF_THICKNESS` below) relative to the
+ * plain gridline stroke. Reusing the entry highlight's navy/white here
+ * would read as "an entry is selected" when nothing has been clicked,
+ * which is exactly the confusion this is avoiding - see
+ * `YEAR_HIGHLIGHT_HALF_THICKNESS`'s own comment for the thickness side of
+ * the same reasoning.
+ */
+/**
+ * Half-thickness (px) of the year hover-highlight band -
+ * `ARC_BAND_HALF_THICKNESS / 2`, i.e. HALF as thick as a range entry's own
+ * band. This should read as "the gridline itself, lit up," not as a shape
+ * with its own presence competing with actual entries - a full
+ * entry-width band here would make an empty year look like it had its own
+ * arc/entry sitting on it.
+ */
+const YEAR_HIGHLIGHT_HALF_THICKNESS = ARC_BAND_HALF_THICKNESS / 2;
+
+/** Fill opacity of the year hover-highlight band itself - well above the plain gridline's own 0.35, so the highlighted stretch reads as visibly "brighter," not just thicker. */
+const YEAR_HIGHLIGHT_FILL_OPACITY = 0.85;
+
+/** Blur radius (px) for the year hover-highlight's own soft glow-behind - reuses the same soft-blur-behind TECHNIQUE as `opened-arc-glow`/`opened-spiral-glow` (a dedicated filter, decoupled so tuning this doesn't also change either entry glow). */
+const YEAR_HIGHLIGHT_GLOW_BLUR_STD_DEVIATION = ARC_GLOW_BLUR_STD_DEVIATION;
+
+/** Extra half-width (px) the glow-behind stroke extends past the band's own edge - same role as `OPENED_ARC_GLOW_EXTRA_RADIUS`, sized a bit smaller to match this band's own thinner profile. */
+const YEAR_HIGHLIGHT_GLOW_EXTRA_RADIUS = 3;
+
+/** Opacity of the year hover-highlight's glow-behind stroke. */
+const YEAR_HIGHLIGHT_GLOW_OPACITY = 0.5;
+
+/** How many `t` samples the year hover-highlight band walks per full rotation of the spiral - same density as the main spiral curve/range bands (`SAMPLES_PER_ROTATION`), so it hugs the true curve just as tightly. */
+const YEAR_HIGHLIGHT_MIN_SAMPLE_COUNT = 16;
+
 /** How far the user can zoom in/out - same range StarMap.tsx uses for its own 2D pannable canvas. */
 const ZOOM_SCALE_EXTENT: [number, number] = [0.5, 8];
 
@@ -1163,6 +1219,33 @@ export default function SpiralTimeline({
     }
     return labels;
   }, [minDate, maxDate]);
+
+  /**
+   * Each year glyph's FULL SPAN as a `[t0, t1]` range - see the "YEAR
+   * HOVER HIGHLIGHT" comment above `YEAR_HIGHLIGHT_HALF_THICKNESS`. `t0`
+   * is the glyph's own boundary `t` (the start of that calendar year);
+   * `t1` is the NEXT year glyph's boundary `t`, so the highlighted band
+   * reads as "everything between this Jan 1 and the next." The most
+   * recent year has no next glyph, so its span runs out to `1` (the
+   * spiral's own outer rim/domain edge) instead - this is the one case
+   * that actually needs a fallback, since `yearBoundaries`' last entry is
+   * clamped to `maxDate`, which usually sits INSIDE that final partial
+   * year, short of the true rim. The earliest year needs no equivalent
+   * fallback on the `t0` side: `yearBoundaries`' construction already
+   * clamps a year's boundary to `minDate` when its own Jan 1 falls before
+   * the domain starts, so the first glyph's `t0` already naturally lands
+   * at `0` (dead center) whenever the domain's own start isn't itself a
+   * Jan 1.
+   */
+  const yearSpans = useMemo(
+    () =>
+      yearBoundaries.map((boundary, i) => ({
+        year: boundary.year,
+        t0: boundary.t,
+        t1: i + 1 < yearBoundaries.length ? yearBoundaries[i + 1].t : 1,
+      })),
+    [yearBoundaries]
+  );
 
   // ─── Sorted entries ───
   // Chronological draw order, same as LinearTimeline's implicit ordering
@@ -1594,6 +1677,52 @@ export default function SpiralTimeline({
     | null
   >(null);
 
+  /**
+   * The currently-hovered year's highlight band path - `null` whenever
+   * nothing year-shaped is hovered. Built with the EXACT SAME
+   * `buildRangeBandPath` a range entry's arc uses (see the "YEAR HOVER
+   * HIGHLIGHT" comment above `YEAR_HIGHLIGHT_HALF_THICKNESS`), just over
+   * this year's `[t0, t1]` span from `yearSpans`, a thinner half-thickness,
+   * and `radiusOffset` 0 (no lane - this always traces the base gridline).
+   * Sample count scales with the span's own share of `totalRotations` the
+   * same way the "now" marker's dotted continuation does, so a short
+   * partial year (e.g. the very first or very last) isn't over-sampled and
+   * a long one still hugs the curve tightly.
+   */
+  const hoveredYearBandPath = useMemo(() => {
+    if (hovered?.kind !== 'year') return null;
+    const span = yearSpans.find(candidate => candidate.year === hovered.year);
+    if (!span) return null;
+
+    const sampleCount = Math.max(
+      YEAR_HIGHLIGHT_MIN_SAMPLE_COUNT,
+      Math.round(
+        (span.t1 - span.t0) * spiralParams.totalRotations * SAMPLES_PER_ROTATION
+      )
+    );
+
+    return buildRangeBandPath(
+      span.t0,
+      span.t1,
+      0,
+      YEAR_HIGHLIGHT_HALF_THICKNESS,
+      spiralParams,
+      sampleCount
+    );
+  }, [hovered, yearSpans, spiralParams]);
+
+  // Keeps rendering the LAST computed band path while its opacity fades
+  // to 0 (instead of the path disappearing the instant the mouse leaves),
+  // so the CSS opacity transition below actually has something to fade
+  // OUT - see the render's own comment on this path for how `opacity`
+  // (not conditional mounting) drives the fade in/out.
+  const [displayedYearBandPath, setDisplayedYearBandPath] = useState<
+    string | null
+  >(null);
+  useEffect(() => {
+    if (hoveredYearBandPath) setDisplayedYearBandPath(hoveredYearBandPath);
+  }, [hoveredYearBandPath]);
+
   // While the "now" glyph is actively hovered, its tooltip should
   // visibly tick once a second rather than staying frozen at whatever
   // instant the hover started - see the top-of-file "NOW MARKER"
@@ -1676,6 +1805,25 @@ export default function SpiralTimeline({
           >
             <feGaussianBlur stdDeviation={ARC_GLOW_BLUR_STD_DEVIATION} />
           </filter>
+          {/*
+           * Soft blur for the YEAR HOVER HIGHLIGHT's own glow-behind -
+           * see the "YEAR HOVER HIGHLIGHT" comment above
+           * `YEAR_HIGHLIGHT_HALF_THICKNESS`. A separate filter (not
+           * `opened-arc-glow`) so this can be tuned independently and so
+           * it's never accidentally reused for the navy/white
+           * opened-entry glow, or vice versa.
+           */}
+          <filter
+            id="year-highlight-glow"
+            x="-100%"
+            y="-100%"
+            width="300%"
+            height="300%"
+          >
+            <feGaussianBlur
+              stdDeviation={YEAR_HIGHLIGHT_GLOW_BLUR_STD_DEVIATION}
+            />
+          </filter>
         </defs>
         <g ref={zoomLayerRef}>
           {isReady && (
@@ -1687,6 +1835,46 @@ export default function SpiralTimeline({
                 strokeOpacity={0.35}
                 strokeWidth={1.5}
               />
+
+              {/*
+               * YEAR HOVER HIGHLIGHT - rendered here, BEFORE `ranges`/
+               * `points` below, deliberately: SVG draws later siblings on
+               * top of earlier ones, so this needs to sit right after the
+               * plain gridline (which it's illuminating) and before any
+               * entry/arc so entries always stay visually on top and
+               * readable - see the "YEAR HOVER HIGHLIGHT" comment above
+               * `YEAR_HIGHLIGHT_HALF_THICKNESS` for the full reasoning on
+               * both the reused sampling technique and the deliberately
+               * distinct grey/glow paint (vs. the navy/white
+               * `OPENED_HIGHLIGHT_COLOR` entry highlight further below).
+               * `displayedYearBandPath` (not `hoveredYearBandPath`
+               * directly) keeps the last shape mounted so `opacity`'s CSS
+               * transition has something to fade FROM/TO on both hover
+               * start and hover end, instead of the path just
+               * appearing/disappearing; `pointer-events-none` keeps this
+               * purely decorative - it must never steal a hover/click
+               * meant for the glyph, an entry, or an arc underneath it.
+               */}
+              {displayedYearBandPath && (
+                <g
+                  opacity={hoveredYearBandPath ? 1 : 0}
+                  className="pointer-events-none transition-opacity duration-200"
+                >
+                  <path
+                    d={displayedYearBandPath}
+                    fill="currentColor"
+                    filter="url(#year-highlight-glow)"
+                    opacity={YEAR_HIGHLIGHT_GLOW_OPACITY}
+                    stroke="currentColor"
+                    strokeWidth={YEAR_HIGHLIGHT_GLOW_EXTRA_RADIUS * 2}
+                  />
+                  <path
+                    d={displayedYearBandPath}
+                    fill="currentColor"
+                    opacity={YEAR_HIGHLIGHT_FILL_OPACITY}
+                  />
+                </g>
+              )}
 
               {/*
                * "NOW" MARKER - see the top-of-file "NOW MARKER" comment.
