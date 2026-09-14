@@ -2,37 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/*
- * Self-hosted Light weight of 'Young Serif' - see --font-heading-light's
- * own comment in :root below for why this exists as a separate local
- * @font-face instead of a font-weight:300 declaration on the Google
- * Fonts-hosted 'Young Serif' family (short version: Google Fonts only
- * serves that family's 400/Regular cut - there's nothing to select a
- * lighter weight FROM there). Sourced from the Young Serif project's own
- * GitHub repo (github.com/noirblancrouge/YoungSerif) rather than Google
- * Fonts - same OFL (SIL Open Font License) license either way, just a
- * weight Google's own hosted build doesn't happen to include.
- *
- * `url('./assets/fonts/...')` - a relative path, not `/assets/...` off
- * the site root - so Vite's own CSS asset pipeline resolves, fingerprints,
- * and copies this file automatically, the same as any other imported
- * asset. This matters specifically because of vite.config.ts's
- * `base: '/dabble/'` (GitHub Pages subpath deployment - see that file's
- * own comment): a root-relative `/assets/...` URL written directly in CSS
- * is NOT rewritten with that base prefix at build time (unlike asset
- * references inside index.html, or relative CSS url()s like this one),
- * so it would 404 once deployed even though it resolves fine in local
- * dev. Keeping the font file under src/ and referencing it relatively
- * sidesteps that entirely.
- */
-@font-face {
-  font-family: 'Young Serif Light';
-  src: url('./assets/fonts/ttf/YoungSerif-Light.ttf') format('truetype');
-  font-weight: 300;
-  font-style: normal;
-  font-display: swap;
-}
-
 :root {
   font-family: var(--font-body);
   line-height: 1.5;
@@ -45,25 +14,27 @@
    * :root above (rather than left as a plain hardcoded stack) so both
    * this rule AND anything that wants to explicitly reassert the body
    * font (e.g. after a descendant's own font-family override) can
-   * reference one shared value. Previously a bare `Inter, system-ui,
-   * Avenir, Helvetica, Arial, sans-serif` stack - swapped to 'DM Sans'
-   * (loaded via the Google Fonts <link> in index.html, OFL-licensed) but
-   * keeping the exact same fallback chain, so a slow/failed font load
-   * degrades exactly the way it always did. wght@400/500/600/700 are all
-   * loaded since the app actually uses all four Tailwind weight classes
-   * (font-normal/medium/semibold/bold) somewhere on body text.
+   * reference one shared value. 'Sen' (loaded via the Google Fonts
+   * <link> in index.html, OFL-licensed) keeps the same
+   * `system-ui, Avenir, Helvetica, Arial, sans-serif` fallback chain as
+   * before, so a slow/failed font load degrades the same way it always
+   * did. wght@400/500/600/700/800 are all loaded since the app actually
+   * uses all four Tailwind weight classes (font-normal/medium/semibold/
+   * bold) somewhere on body text, plus Sen's own 800 cut for anything
+   * bolder.
    *
-   * --font-heading: headings ONLY (h1/h2, the 'Dabble' wordmark in
-   * Layout.tsx's left nav pill, and any other component-level "page
-   * title" element that renders as one - e.g. VizPageHeader.tsx's title,
-   * which is already a plain <h1> so the tag-level rule below covers it
-   * with no extra class needed). Tailwind's Preflight (@tailwind base)
-   * already makes form controls inherit font-family from their ancestors
-   * rather than defaulting to the browser's own UA font, so nothing needs
-   * to opt back INTO --font-body explicitly; only h1/h2 (and the
-   * wordmark) opt into --font-heading instead, below/in Layout.tsx.
+   * --font-heading: headings (h1/h2, and the shared EntryPanel.tsx
+   * expanded-panel title - any component-level "page title" element,
+   * e.g. VizPageHeader.tsx's title, which is already a plain <h1> so the
+   * tag-level rule below covers it with no extra class needed) - but NOT
+   * the 'Dabble' wordmark in Layout.tsx's left nav pill, which uses
+   * --font-wordmark instead (below). Tailwind's Preflight
+   * (@tailwind base) already makes form controls inherit font-family
+   * from their ancestors rather than defaulting to the browser's own UA
+   * font, so nothing needs to opt back INTO --font-body explicitly; only
+   * h1/h2 opt into --font-heading instead.
    *
-   * 'Young Serif' is loaded via the same Google Fonts <link> in
+   * 'Bree Serif' is loaded via the same Google Fonts <link> in
    * index.html - OFL-licensed, like every other Google Font. It ships
    * exactly ONE weight on Google Fonts (400/Regular - confirmed against
    * the Google Fonts CSS API; no bold/heavier cut exists to request), so
@@ -75,21 +46,18 @@
    * load still reads as "a serif heading" rather than silently reverting
    * to the body font.
    *
-   * --font-heading-light: EntryPanel.tsx's own expanded-panel entry title
-   * ONLY (e.g. "First time participating in a music video!") - NOT page
-   * H1s or the 'Dabble' wordmark, which stay on --font-heading's regular
-   * weight. Points at the self-hosted @font-face above, not the Google
-   * Fonts 'Young Serif' family, since that family has no light weight to
-   * request in the first place - see the @font-face block's own comment
-   * for the full reasoning and where the file came from. Falls back to
-   * 'Young Serif' (--font-heading's own family), THEN serif, rather than
-   * straight to serif, so a failed local-file load still lands on the
-   * closest real match (the regular weight of the same typeface) instead
+   * --font-wordmark: Layout.tsx's 'Dabble' wordmark ONLY - a distinct
+   * display face ('Chonburi') reserved just for this one short, fixed
+   * brand mark rather than general heading use, so it doesn't get reused
+   * anywhere --font-heading is. Also ships just one weight on Google
+   * Fonts (400/Regular). Falls back to --font-heading's own 'Bree Serif'
+   * family, THEN serif, rather than straight to serif, so a failed font
+   * load still lands on the closest available serif heading face instead
    * of jumping straight to a generic fallback.
    */
-  --font-body: 'DM Sans', system-ui, Avenir, Helvetica, Arial, sans-serif;
-  --font-heading: 'Young Serif', serif;
-  --font-heading-light: 'Young Serif Light', 'Young Serif', serif;
+  --font-body: 'Sen', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  --font-heading: 'Bree Serif', serif;
+  --font-wordmark: 'Chonburi', 'Bree Serif', serif;
 
   /*
    * ════════════════════════════════════════════════════════════════════
@@ -159,6 +127,42 @@
    *                          --panel-bg-color-solid, not a translucent tint
    *                          (the button has nothing solid behind it to
    *                          tint)
+   *   --accent-color         the app's ONE interactive brand accent -
+   *                          consolidates what used to be a hardcoded
+   *                          Tailwind `indigo-*` scattered across
+   *                          components with no shared token, into a
+   *                          single source of truth so every one of these
+   *                          controls inverts together between themes: the
+   *                          'dabble' wordmark, the '+' add-entry button,
+   *                          TimeRangeSelector's selected-range fill/
+   *                          handles, the sort-mode toggle's active state,
+   *                          and EditModeToggle/ResetButton/ThemeToggle's
+   *                          focus ring (EditModeToggle's active fill too).
+   *                          Deliberately separate from --star-highlight-
+   *                          color (below) - that one marks entry
+   *                          SELECTION on a canvas, this one is plain
+   *                          interactive-control chrome; conflating them
+   *                          would make an opened star and, say, a pressed
+   *                          button read as the same kind of signal when
+   *                          they're not. Also NOT the same token as
+   *                          --indigo-accent-text just below - that one is
+   *                          a low-saturation informational tint (tag
+   *                          chips, links), this one is the saturated
+   *                          "primary action" color.
+   *   --accent-foreground-color the text/icon color to use ON TOP of a
+   *                          solid --accent-color fill (the '+' button,
+   *                          EditModeToggle's active state) - a second
+   *                          token rather than a hardcoded `text-white`,
+   *                          because --accent-color itself flips from dark
+   *                          (light theme) to light (dark theme), so a
+   *                          fixed white foreground would still contrast
+   *                          fine in light theme but nearly disappear
+   *                          against dark theme's pale periwinkle fill.
+   *                          Swaps oppositely from --accent-color for
+   *                          exactly that reason: white on light theme's
+   *                          dark navy fill, a near-black navy (the same
+   *                          shade as dark theme's own --bg-color) on dark
+   *                          theme's pale periwinkle fill.
    *   --indigo-accent-text   indigo text sitting on an indigo-tinted chip/
    *                          background (Tags in EntryPanel, linkify.ts's
    *                          link color, VizEmptyState's messages) - needs
@@ -222,6 +226,8 @@
    * --field-tint-3:          rgba(255,255,255,.22)  --field-tint-3:      rgba(17,24,39,.16)
    * --field-border-strong:   rgba(255,255,255,.22)  --field-border-strong: rgba(17,24,39,.22)
    * --chrome-hover-bg-color: #16203d               --chrome-hover-bg-color: #ebe4d3
+   * --accent-color:          #A9B4E8               --accent-color:          #212D66
+   * --accent-foreground-color: #0b1023             --accent-foreground-color: #ffffff
    * --indigo-accent-text:    #a5b4fc               --indigo-accent-text: #4338ca
    * --teal-accent-text:      #5eead4               --teal-accent-text:   #0f766e
    * --yellow-accent-text:    #fde047               --yellow-accent-text: #a16207
@@ -258,6 +264,8 @@
   --field-tint-3: rgba(255, 255, 255, 0.22);
   --field-border-strong: rgba(255, 255, 255, 0.22);
   --chrome-hover-bg-color: #16203d;
+  --accent-color: #a9b4e8; /* periwinkle - light enough to read on the dark canvas */
+  --accent-foreground-color: #0b1023; /* same navy as --bg-color, for text/icons on a solid --accent-color fill */
   --indigo-accent-text: #a5b4fc; /* indigo-300 */
   --teal-accent-text: #5eead4; /* teal-300 */
   --yellow-accent-text: #fde047; /* yellow-300 */
@@ -299,6 +307,8 @@
   --field-tint-3: rgba(17, 24, 39, 0.16);
   --field-border-strong: rgba(17, 24, 39, 0.22);
   --chrome-hover-bg-color: #ebe4d3;
+  --accent-color: #212d66; /* deep navy - dark enough to read on the cream canvas */
+  --accent-foreground-color: #ffffff; /* white, for text/icons on a solid --accent-color fill */
   --indigo-accent-text: #4338ca; /* indigo-700 - dark enough to read on a pale indigo tint */
   --teal-accent-text: #0f766e; /* teal-700 */
   --yellow-accent-text: #a16207; /* yellow-700 - dark enough to read on a pale yellow tint */

@@ -232,19 +232,23 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
       // presentation attributes of its own; overriding them here, right
       // after `.call(brush)`, is the same "restyle d3's own output"
       // pattern LinearTimeline.tsx's AXIS EFFECT uses for its tick text.
-      // Fixed indigo values, deliberately NOT theme tokens: like a
-      // category's own color, indigo here is a brand accent that supplies
-      // its own contrast against either theme's background, the same
-      // reasoning the indigo CTA buttons elsewhere in the app follow.
+      // Driven entirely by --accent-color (the app's one shared accent
+      // token - see index.css) via CSS `color-mix()`, rather than fixed
+      // indigo values, so this brush inverts along with every other
+      // accent-colored control between themes instead of staying a fixed
+      // color that only happened to read well against one theme.
       selection
         .select('.selection')
-        .attr('fill', 'rgba(99, 102, 241, 0.35)') // indigo-500 tint
-        .attr('stroke', 'rgba(199, 210, 254, 0.8)') // indigo-200-ish
+        .attr(
+          'fill',
+          'color-mix(in srgb, var(--accent-color) 35%, transparent)'
+        )
+        .attr('stroke', 'color-mix(in srgb, var(--accent-color) 55%, white)')
         .attr('stroke-width', 1)
         .attr('rx', TRACK_HEIGHT / 2);
       selection
         .selectAll('.handle')
-        .attr('fill', '#a5b4fc') // indigo-300
+        .attr('fill', 'var(--accent-color)')
         .attr('stroke', 'none')
         .attr('rx', HANDLE_WIDTH / 2)
         .attr('cursor', 'ew-resize');

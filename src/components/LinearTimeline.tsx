@@ -667,6 +667,14 @@ export default function LinearTimeline({
   // and get no explicit class of their own - pick up the same muted color
   // via `currentColor`. Same convention D3Chart.tsx used for its bar
   // chart's axes.
+  //
+  // `.style('font-family', ...)` is set explicitly (not left to CSS
+  // inheritance) because these tick `<text>` elements otherwise render in
+  // the browser's own SVG UA-stylesheet default font rather than
+  // --font-body ('Sen') - unlike an HTML element, an SVG `<text>` isn't
+  // guaranteed to inherit `font-family` from its ancestors, so it has to
+  // be set directly on the element itself, the same as the `fill`/
+  // `text-xs` class right above it.
   useEffect(() => {
     if (!axisRef.current || innerWidth === 0) return;
 
@@ -680,7 +688,8 @@ export default function LinearTimeline({
     d3.select(axisRef.current)
       .call(axis)
       .selectAll('text')
-      .attr('class', 'fill-[var(--text-muted-color)] text-xs');
+      .attr('class', 'fill-[var(--text-muted-color)] text-xs')
+      .style('font-family', 'var(--font-body)');
   }, [xScale, innerWidth]);
 
   // ─── Entry points ───

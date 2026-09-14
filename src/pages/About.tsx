@@ -163,6 +163,11 @@ export default function About() {
                 description:
                   "Categories aren't fixed in advance. Add a new one the moment you pick up a new hobby, and it's woven into the visualizations right away with its own color.",
               },
+              {
+                name: 'Edit entries',
+                description:
+                  'Update any entry after the fact — correct a date, add a location, reclassify its category — or switch on Edit Mode to jump straight from any star, point, or arc into its editor.',
+              },
             ]}
           />
         </div>
@@ -173,13 +178,17 @@ export default function About() {
           </h2>
           <FeatureList
             items={[
-              'Edit event data',
               'Visualizing connections between events (e.g., locations, feelings, life events)',
               'Custom positioning of the points in the constellation view',
               'Media attachments (photos, voice notes, ...)',
               "Retroactive reflections/annotations on past events — add a dated note or reflection to an existing entry after the fact (with its own timestamp and emotional state at the time of writing), while staying linked to the original event. The reflection's own date can be backdated to any point between the original event and today (e.g. transcribing an old journal entry that reflected on a past event sometime after it happened).",
               'Robust location input — attach a real, mappable location to an entry (via a geocoding-based location search) rather than just plain text, while still supporting simple free-text location entries. This lays the groundwork for future connections between entries based on shared geographic location.',
               'List/table view — browse all entries as a sortable, filterable table or database-style list, with a toggle to switch between a compact table view and a card/block-based view (similar to Notion), as an alternative way to explore entries outside of the visualizations.',
+              'Video thumbnails and previews from linked media (YouTube, Instagram, etc.)',
+              '3D renderings of the visualizations using Three.js',
+              'Backend development for real cross-device sync (likely via Cloudflare Workers)',
+              'User authentication, potentially replacing the current JSON import/export as the primary way to save and restore your data',
+              "Multi-category entries — associate an entry with more than one category (e.g. a trip that involved both shuffle dancing and pole dance & calisthenics training), represented visually maybe with a gradient blending each category's color.",
             ]}
           />
         </div>

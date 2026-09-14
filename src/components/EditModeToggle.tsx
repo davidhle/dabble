@@ -16,10 +16,10 @@
  * EditModeContext.tsx's own top-of-file comment for why), so every page
  * that renders this button can do so with no props at all.
  *
- * ACTIVE STATE: filled indigo background (matching the app's one
- * consistent primary-action color - Layout.tsx's + button, AddEntryForm's
- * CTAs) plus `aria-pressed` while on, instead of just swapping the icon
- * like ThemeToggle does - Edit Mode changes what clicking ANYWHERE on the
+ * ACTIVE STATE: filled --accent-color background (the app's one shared
+ * accent token - see index.css - matching Layout.tsx's + button) plus
+ * `aria-pressed` while on, instead of just swapping the icon like
+ * ThemeToggle does - Edit Mode changes what clicking ANYWHERE on the
  * canvas does, a much bigger behavior change than a color theme, so it
  * needs a harder-to-miss "this is currently active" signal than an icon
  * swap alone would give. Each page also shows a text banner in its
@@ -40,9 +40,9 @@ export default function EditModeToggle() {
       // z-40: same layer as ResetButton/ThemeToggle - above a canvas
       // (z-0) and the header stack (z-10), below the AddEntryForm modal
       // (z-50). bottom-[136px]: see the header comment above.
-      className={`fixed bottom-[136px] right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full border shadow-lg backdrop-blur transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-[var(--bg-color)] ${
+      className={`fixed bottom-[136px] right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full border shadow-lg backdrop-blur transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--accent-color)] focus:ring-offset-2 focus:ring-offset-[var(--bg-color)] ${
         isEditMode
-          ? 'border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-700'
+          ? 'border-[var(--accent-color)] bg-[var(--accent-color)] text-[var(--accent-foreground-color)] hover:brightness-90'
           : 'border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] text-[var(--text-color)] hover:bg-[var(--chrome-hover-bg-color)]'
       }`}
       aria-label={isEditMode ? 'Exit Edit Mode' : 'Enter Edit Mode'}

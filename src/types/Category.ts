@@ -92,4 +92,10 @@ export const DEFAULT_CATEGORIES: Category[] = [
     color: '#f87171', 
     domain: 'Movement' 
   }, // salmon
+  {
+    id: 'ContemporaryDance',
+    name: 'Contemporary Dance',
+    color: 'c084fc',
+    domain: 'Movement'
+  } // purple
 ];

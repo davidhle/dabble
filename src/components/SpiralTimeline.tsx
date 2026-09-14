@@ -221,15 +221,23 @@
  *
  * WHY THIS MAKES HIGHLIGHTING A SINGLE, CLEAN OPERATION:
  * Every "opened entry" treatment below - the blurred glow behind it, and
- * the crisp ring around it - is now just ANOTHER `d3.arc()` call with the
- * same `startAngle`/`endAngle`, at a slightly larger (glow) or smaller
- * (none needed here - see the render below) radius spread. There's
- * exactly one shape's boundary to trace a ring around, and exactly one
- * shape's silhouette to blur into a glow - no coordinating three separate
- * elements' geometry, tuning three opacity/width numbers to read as one
- * strength, or discovering that an outline drawn "outside" one piece
- * (a circle) looks completely different from the same outline drawn
- * "outside" a different piece (a thin centerline stroke) of what's
+ * the crisp ring around it - is a STROKE on this exact same closed path
+ * (`fill="none"`, a thicker or thinner `strokeWidth`), not a second,
+ * differently-sized `d3.arc()` shape. A closed path's stroke always
+ * traces its FULL boundary as one continuous line - both long curved
+ * edges AND both rounded end caps - for free, with no separate geometry
+ * to build or keep in sync. (An earlier version generated separate wider/
+ * narrower `d3.arc()` calls for the glow/ring instead; resizing an
+ * annulus segment's radii doesn't uniformly "grow" it the way offsetting
+ * a rounded rectangle does, so those extra shapes' rounded corners landed
+ * in the wrong place and never wrapped around the band's own ends - see
+ * the "ARC BAND HIGHLIGHT" comment further below for the full story.)
+ * There's exactly one shape's boundary to trace a ring around, and
+ * exactly one shape's silhouette to blur into a glow - no coordinating
+ * three separate elements' geometry, tuning three opacity/width numbers
+ * to read as one strength, or discovering that an outline drawn "outside"
+ * one piece (a circle) looks completely different from the same outline
+ * drawn "outside" a different piece (a thin centerline stroke) of what's
  * supposed to be a single visual highlight.
  *
  * ──────────────────────────────────────────────────────────────────────
@@ -252,6 +260,63 @@
  * `domainRange.start === domainRange.end`) even though
  * TimeRangeContext's own `computeFullRange` already pads a degenerate
  * range the same way.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * "NOW" MARKER: DOMAIN EXTENSION, THE DOTTED CONTINUATION, AND THE SUN/
+ * MOON GLYPH
+ * ──────────────────────────────────────────────────────────────────────
+ * DOMAIN EXTENSION: `domainRange.end` is, at most, the most recent
+ * entry's own date - there's no reason for the spiral's outer rim (t=1)
+ * to represent anything LATER than that otherwise. But in practice
+ * "now" is always later than your last logged entry (nobody logs an
+ * entry for a moment that hasn't happened yet), so pinning t=1 to
+ * whichever entry happens to be most recent would make the spiral's own
+ * edge silently drift further "in the past" the longer someone goes
+ * between visits - there's no visual cue that today isn't actually
+ * where the timeline ends. Extending `maxDate` out to `now` whenever
+ * `now` is later fixes t=1 to mean "the present moment," with the
+ * actual latest entry sitting slightly inside it (at whatever `t` its
+ * own date normalizes to) - exactly like a real archive: the most
+ * recent thing you wrote down usually isn't "right now," it's some time
+ * ago. This is a MAX-only extension - it never touches `domain[0]` - so
+ * it can't reintroduce the "DOMAIN COMES FROM domainRange" bug just
+ * above (entries clustering away from a SHRUNK edge): it only ever
+ * pushes t=1 further OUTWARD than `domainRange` itself already
+ * resolved to, never inward.
+ *
+ * THE DOTTED LINE + GLYPH: drawn as a second, much shorter sampled
+ * polyline (same `spiralPoint`-per-sample technique the main curve
+ * itself uses - see "DRAWING THE SPIRAL LINE" above - just scoped to
+ * `[latestEntryDate's t, now's t]` instead of the full `[0, 1]`), with a
+ * `strokeDasharray` added so it reads as a continuation of, not a
+ * replacement for, the main gridline's solid stroke. `latestEntryDate`
+ * (the line's inner endpoint) is computed directly from `entries`, NOT
+ * reused from `domainRange.end`: someone can drag TimeRangeSelector's
+ * own handle to an arbitrary date no entry actually falls on, and
+ * anchoring this line there instead would leave it starting in empty
+ * space rather than at a real entry. A small sun/moon text glyph sits
+ * at the line's outer end (`now`'s own position) - a sun for local
+ * hours [6, 18), a moon otherwise (see `NOW_DAY_START_HOUR`/
+ * `NOW_DAY_END_HOUR` below), using nothing more than `new Date()` and
+ * `getHours()` - no timezone lookup or geolocation, since "day or
+ * night" here just means the VIEWER's own local clock, the same way a
+ * device's own OS decides when to switch to a dark wallpaper.
+ *
+ * FROZEN AT MOUNT: `now` itself (the Date instance behind both the
+ * domain extension above and the glyph's day/night check) is captured
+ * ONCE, in a lazy `useState` initializer, not read fresh on every
+ * render - see the "now" useState below. Without that, `now` would
+ * advance by however many milliseconds elapsed between renders (small,
+ * but nonzero, and non-deterministic), making the exact rendered
+ * position of this line's outer endpoint - and therefore `totalRotations`,
+ * which the domain extension can also nudge - technically different
+ * every render, for no visible benefit; freezing it at mount makes the
+ * marker's position (and the sun-vs-moon choice) a single, stable fact
+ * about when this view was opened. The ONE exception is the tooltip
+ * shown on hovering the glyph (see the "Hover tooltip" comment further
+ * down) - that's expected to visibly tick while actively hovered, so it
+ * reads fresh `new Date()` values on its own separate one-second
+ * interval, entirely independent of this frozen `now`.
  *
  * ──────────────────────────────────────────────────────────────────────
  * FULL-BLEED CANVAS + CLICK-TO-CENTER: SAME AS StarMap, NOT LinearTimeline
@@ -366,6 +431,10 @@ import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
 import { DateRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
+// Same date/time formatting the "now" marker's tooltip uses for its live
+// clock - see the top-of-file "NOW MARKER" comment and formatSingleDate's
+// own comment in formatEntryDate.ts.
+import { formatSingleDate } from '../utils/formatEntryDate';
 // Shared with StarMap.tsx/LinearTimeline.tsx's own hover tooltip - see
 // EntryTooltip.tsx's header comment for why this is a shared pattern
 // across every visualization view rather than duplicated per-component.
@@ -488,43 +557,44 @@ const ARC_CORNER_RADIUS = 3;
 
 /**
  * ──────────────────────────────────────────────────────────────────────
- * ARC BAND HIGHLIGHT: ONE SHAPE'S GLOW + RING, MATCHED TO THE POINT
- * GLOW'S STRENGTH
+ * ARC BAND HIGHLIGHT: STROKE THE ONE CLOSED PATH, DON'T BUILD A SECOND
+ * SHAPE
  * ──────────────────────────────────────────────────────────────────────
  * Now that a range entry is a single `d3.arc()` band (see the top-of-file
- * "RANGE ENTRIES" comment) rather than a thin centerline stroke plus two
- * endpoint circles, its "opened entry" glow and ring are just two MORE
- * `d3.arc()` calls at the same `startAngle`/`endAngle` but a larger
- * radius spread - see the render below. `OPENED_ARC_GLOW_EXTRA_RADIUS`
- * reuses the exact numeric value (4) an earlier, stroke-based version of
- * this glow used as its "extra width" - that number was already tuned
- * (see this file's own git history) to read as comparably strong to the
- * plain point glow's `GLOW_OPACITY`/`GLOW_BLUR_STD_DEVIATION`, so a fixed
- * band's glow reuses it directly as a radius extra instead of a stroke
- * width extra, rather than re-tuning from scratch. Blur still uses its
- * OWN dedicated `opened-arc-glow` filter (see the `<defs>` below) at
+ * "RANGE ENTRIES" comment), its "opened entry" glow and ring are a
+ * STROKE on that EXACT SAME path (`fill="none"`, `stroke=...`) - see the
+ * render below - not a second, differently-sized `d3.arc()` shape. An
+ * earlier version tried the latter (a wider/narrower band for the glow, a
+ * band entirely outside `outerRadius` for the ring), and it looked
+ * broken: resizing an annulus segment's `innerRadius`/`outerRadius` does
+ * NOT uniformly "grow" it the way offsetting a rounded rectangle's own
+ * edges does (LinearTimeline.tsx's `capsuleOutlineRect`) - a differently-
+ * sized arc's rounded corners land at a different position than the
+ * original's, so the highlight only showed up as extra arcs parallel to
+ * the two long curved edges, never wrapping around the rounded end caps.
+ * `pathD` is already a single CLOSED path (outer arc, corner, inner arc,
+ * corner, back to start); stroking it directly makes SVG trace that
+ * entire boundary as one continuous line, corners included, with no
+ * separate geometry to keep in sync.
+ *
+ * `OPENED_ARC_GLOW_EXTRA_RADIUS`/`ARC_RING_WIDTH` are each still the same
+ * numeric values earlier versions of this glow/ring already used (4 and
+ * 1.5 - see this file's own git history for how those were tuned to read
+ * as comparably strong to the plain point glow/ring), just applied
+ * differently now: `strokeWidth` at render time is DOUBLE each of these,
+ * since a stroke straddles its path (half spills inward, half outward) -
+ * only the outward half ends up visible once the opaque colored band is
+ * drawn on top of both, covering the inward half. Blur uses its OWN
+ * dedicated `opened-arc-glow` filter (see the `<defs>` below) at
  * `ARC_GLOW_BLUR_STD_DEVIATION`, decoupled from the plain point/star
  * glow's own `opened-spiral-glow` filter so this doesn't also blur every
  * plain point.
- *
- * `ARC_RING_GAP`/`ARC_RING_WIDTH` are this band's equivalent of
- * StarMap's/the plain point's own crisp ring "outside the shape's own
- * edge" - traced as a THIN filled `d3.arc()` band starting `ARC_RING_GAP`
- * past the main band's own `outerRadius`, the direct replacement for the
- * old per-endpoint-circle ring (removed along with the endpoint circles
- * themselves). An earlier version of the LINE's own highlight tried
- * tracing a ring along that thin stroke's own centerline and had to
- * remove it entirely - there was no "outside" for a 1D line to have - but
- * a real 2D band has a genuine outer boundary, so this ring can exist
- * here in a way it structurally couldn't before.
  */
 const OPENED_ARC_GLOW_EXTRA_RADIUS = 4;
 const OPENED_ARC_GLOW_OPACITY = GLOW_OPACITY;
 /** Blur radius (px) for JUST the arc band's own glow - see the "ARC BAND HIGHLIGHT" comment above for why this is bumped above (and kept decoupled from) the shared point/star `GLOW_BLUR_STD_DEVIATION`. */
 const ARC_GLOW_BLUR_STD_DEVIATION = 3;
-/** Gap (px) between a range entry's band's own `outerRadius` and its ring's inner edge - see the "ARC BAND HIGHLIGHT" comment above. */
-const ARC_RING_GAP = 1;
-/** Thickness (px) of a range entry's ring - matches the plain point ring's own `strokeWidth` (1.5). */
+/** Visible thickness (px) of a range entry's ring once drawn - see the "ARC BAND HIGHLIGHT" comment above for why the render's actual `strokeWidth` is double this. */
 const ARC_RING_WIDTH = 1.5;
 
 /**
@@ -586,6 +656,41 @@ const YEAR_GLYPH_FONT_SIZE_PX = 9;
  */
 const YEAR_GLYPH_OPACITY = 0.45;
 const YEAR_GLYPH_HOVER_OPACITY = 0.85;
+
+/**
+ * Local hour range (inclusive start, exclusive end) during which the
+ * "now" marker's glyph renders as a sun rather than a moon - see the
+ * top-of-file "NOW MARKER" comment. A plain `Date.getHours()` comparison
+ * against the VIEWER's own device clock - no timezone lookup or
+ * geolocation, matching the task's own "just simple local hour
+ * comparison" ask.
+ */
+const NOW_DAY_START_HOUR = 6;
+const NOW_DAY_END_HOUR = 18;
+
+/**
+ * Dash pattern (SVG `stroke-dasharray`, px-on/px-off) for the "now"
+ * continuation line - same `currentColor`/opacity/width as the main
+ * spiral gridline it extends (see the render below), just dashed so it
+ * reads as a continuation past real data rather than more of the solid
+ * curve.
+ */
+const NOW_LINE_DASH = '2,3';
+
+/**
+ * Font size (px) of the sun/moon "now" glyph - a bit larger than
+ * `YEAR_GLYPH_FONT_SIZE_PX`, since this marks the live present moment
+ * (arguably the single most important waypoint on the whole spiral),
+ * not just a quiet year boundary.
+ */
+const NOW_GLYPH_FONT_SIZE_PX = 14;
+
+/** Resting / hovered opacity of the "now" glyph - same idea as `YEAR_GLYPH_OPACITY`/`YEAR_GLYPH_HOVER_OPACITY`, just a bit stronger at rest so it doesn't read as quietly as a plain year waypoint. */
+const NOW_GLYPH_OPACITY = 0.7;
+const NOW_GLYPH_HOVER_OPACITY = 1;
+
+/** How often (ms) the "now" glyph's hover tooltip re-renders its displayed clock while actively hovered - see the "Hover tooltip" comment further down. */
+const NOW_TOOLTIP_TICK_MS = 1000;
 
 /**
  * How close (px, on screen) a year glyph's raw position needs to be to an
@@ -773,11 +878,25 @@ export default function SpiralTimeline({
     return () => observer.disconnect();
   }, []);
 
+  // ─── "Now", frozen at mount ───
+  // See the top-of-file "NOW MARKER" comment's own "FROZEN AT MOUNT"
+  // section for why this is captured once, in a lazy useState
+  // initializer (which React guarantees only ever runs on the very
+  // first render), rather than read fresh on every render.
+  const [now] = useState(() => new Date());
+
   // ─── Date domain ───
   // See the DOMAIN COMES FROM domainRange comment above - this no longer
-  // derives from `entries`' own extent.
+  // derives from `entries`' own extent. The one addition is the "NOW
+  // MARKER" extension - see that top-of-file comment for the full
+  // reasoning - which pushes `domain[1]` out to `now` whenever `now` is
+  // later, and ONLY then; it never touches `domain[0]`.
   const [minDate, maxDate] = useMemo(() => {
     const domain: [Date, Date] = [domainRange.start, domainRange.end];
+
+    if (now.getTime() > domain[1].getTime()) {
+      domain[1] = now;
+    }
 
     if (domain[0].getTime() === domain[1].getTime()) {
       domain[0] = d3.timeDay.offset(domain[0], -1);
@@ -785,7 +904,7 @@ export default function SpiralTimeline({
     }
 
     return domain;
-  }, [domainRange]);
+  }, [domainRange, now]);
 
   const normalize = (date: Date): number => {
     const span = maxDate.getTime() - minDate.getTime();
@@ -1024,11 +1143,11 @@ export default function SpiralTimeline({
       LANE_GAP_PX
     );
 
-    // One shared generator, reused for the main band, its glow, and its
-    // ring below - all three are the same shape at a different radius
-    // spread, not three independently-built shapes - see the top-of-file
-    // "RANGE ENTRIES" comment's "WHY THIS MAKES HIGHLIGHTING A SINGLE,
-    // CLEAN OPERATION" section.
+    // One generator, reused for every range entry's single path below -
+    // the "opened" glow/ring (rendered further down) STROKE this SAME
+    // path rather than needing their own separately-generated shapes -
+    // see the top-of-file "RANGE ENTRIES" comment's "WHY THIS MAKES
+    // HIGHLIGHTING A SINGLE, CLEAN OPERATION" section.
     const arcGenerator = d3.arc();
 
     const ranges = laned.map(({ entry, tStart, tEnd, color, lane }) => {
@@ -1046,12 +1165,13 @@ export default function SpiralTimeline({
       // center could otherwise compute a negative innerRadius, which
       // `d3.arc()` doesn't accept.
       //
-      // `.cornerRadius(x)` is called on the shared generator immediately
-      // before each invocation (it configures the generator itself,
-      // rather than being a per-datum property `d3.arc()`'s TypeScript
-      // types accept inline) - the three shapes below each need a
-      // different corner radius, so each sets its own right before
-      // calling.
+      // This is the ONLY path generated per range entry - the "opened"
+      // glow/ring below (in the render) both STROKE this exact same `d`
+      // string rather than generating their own differently-sized
+      // shapes; see that render's own comment for why stroking the one
+      // closed path directly, instead of building separate offset
+      // arcs, is what makes the highlight wrap continuously around the
+      // ENTIRE shape (both long edges AND both rounded end caps).
       const pathD =
         arcGenerator.cornerRadius(ARC_CORNER_RADIUS)({
           innerRadius: Math.max(0, bandRadius - ARC_BAND_HALF_THICKNESS),
@@ -1060,37 +1180,9 @@ export default function SpiralTimeline({
           endAngle,
         }) ?? '';
 
-      const glowPathD =
-        arcGenerator.cornerRadius(
-          ARC_CORNER_RADIUS + OPENED_ARC_GLOW_EXTRA_RADIUS
-        )({
-          innerRadius: Math.max(
-            0,
-            bandRadius - ARC_BAND_HALF_THICKNESS - OPENED_ARC_GLOW_EXTRA_RADIUS
-          ),
-          outerRadius:
-            bandRadius + ARC_BAND_HALF_THICKNESS + OPENED_ARC_GLOW_EXTRA_RADIUS,
-          startAngle,
-          endAngle,
-        }) ?? '';
-
-      const ringPathD =
-        arcGenerator.cornerRadius(ARC_RING_WIDTH / 2)({
-          innerRadius: bandRadius + ARC_BAND_HALF_THICKNESS + ARC_RING_GAP,
-          outerRadius:
-            bandRadius +
-            ARC_BAND_HALF_THICKNESS +
-            ARC_RING_GAP +
-            ARC_RING_WIDTH,
-          startAngle,
-          endAngle,
-        }) ?? '';
-
       return {
         entry,
         pathD,
-        glowPathD,
-        ringPathD,
         start: spiralPointAtRadius(t0, bandRadius, spiralParams),
         end: spiralPointAtRadius(t1, bandRadius, spiralParams),
         midpoint: spiralPointAtRadius(tMid, bandRadius, spiralParams),
@@ -1189,6 +1281,68 @@ export default function SpiralTimeline({
     );
     return collidesAt(backwardT) ? forwardT : backwardT;
   };
+
+  // ─── "Now" marker ───
+  // See the top-of-file "NOW MARKER" comment for the full reasoning.
+  // `isDaytime` is derived from the SAME frozen `now` the domain
+  // extension above uses - not `new Date()` read fresh here - so the
+  // sun/moon choice is fixed for this view's lifetime rather than
+  // flipping mid-session if it happens to be open across 6am/6pm.
+  const isDaytime =
+    now.getHours() >= NOW_DAY_START_HOUR && now.getHours() < NOW_DAY_END_HOUR;
+
+  // The line's INNER endpoint - deliberately the latest entry's own
+  // date, computed directly from `entries` (each entry's `endTimestamp`
+  // when present, else its plain `timestamp`), NOT reused from
+  // `domainRange.end` - see the top-of-file comment's "THE DOTTED LINE +
+  // GLYPH" section for why.
+  const latestEntryDate = useMemo(() => {
+    if (entries.length === 0) return null;
+
+    return entries.reduce(
+      (latest, entry) => {
+        const entryEnd = new Date(entry.endTimestamp ?? entry.timestamp);
+        return entryEnd.getTime() > latest.getTime() ? entryEnd : latest;
+      },
+      new Date(entries[0].endTimestamp ?? entries[0].timestamp)
+    );
+  }, [entries]);
+
+  const nowMarker = useMemo(() => {
+    // No entries at all, or (an unusual edge case - a future-dated
+    // entry) the latest entry is somehow already later than "now" -
+    // either way there's no sensible forward-in-time line to draw.
+    if (!latestEntryDate || now.getTime() < latestEntryDate.getTime()) {
+      return null;
+    }
+
+    const tStart = normalize(latestEntryDate);
+    const tEnd = normalize(now);
+    if (tEnd <= tStart) return null;
+
+    // Same sampled-polyline technique (and the SAME per-rotation sample
+    // density) as the main spiral curve itself - see the top-of-file
+    // "DRAWING THE SPIRAL LINE" comment - just scoped to this much
+    // shorter `[tStart, tEnd]` sub-span instead of the full `[0, 1]`.
+    const sampleCount = Math.max(
+      2,
+      Math.round(
+        (tEnd - tStart) * spiralParams.totalRotations * SAMPLES_PER_ROTATION
+      )
+    );
+    const samples: { x: number; y: number }[] = [];
+    for (let i = 0; i <= sampleCount; i++) {
+      samples.push(
+        spiralPoint(tStart + ((tEnd - tStart) * i) / sampleCount, spiralParams)
+      );
+    }
+
+    return {
+      pathD: buildPolylinePath(samples),
+      glyphPosition: samples[samples.length - 1],
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `normalize` closes over minDate/maxDate, already listed directly below (same pattern `points`/`ranges` use above)
+  }, [latestEntryDate, now, spiralParams, minDate, maxDate]);
 
   // ─── Pan/zoom behavior ───
   // Same mechanism as StarMap.tsx: attached once, and the 'zoom' handler
@@ -1327,16 +1481,43 @@ export default function SpiralTimeline({
   // Same shape/tracking as LinearTimeline.tsx/StarMap.tsx - see the
   // "Hover tooltip" comment in LinearTimeline.tsx - EXTENDED with a
   // `kind` discriminant so the SAME piece of state can also track a
-  // hovered YEAR GLYPH (see the "YEAR GLYPHS" comment below), not just a
-  // hovered entry point/arc. `EntryTooltip` below is rendered with either
-  // its `entry` prop (unchanged behavior) or its `label` prop (the bare
-  // year), depending on which branch is set - see EntryTooltip.tsx's own
-  // "ENTRY vs. LABEL VARIANT" comment.
+  // hovered YEAR GLYPH (see the "YEAR GLYPHS" comment below) or the
+  // hovered "NOW" GLYPH (see the top-of-file "NOW MARKER" comment), not
+  // just a hovered entry point/arc. `EntryTooltip` below is rendered
+  // with either its `entry` prop (unchanged behavior) or its `label`
+  // prop (the bare year, or the live current date/time), depending on
+  // which branch is set - see EntryTooltip.tsx's own "ENTRY vs. LABEL
+  // VARIANT" comment.
   const [hovered, setHovered] = useState<
     | { kind: 'entry'; entry: Entry; x: number; y: number }
     | { kind: 'year'; year: number; x: number; y: number }
+    | { kind: 'now'; x: number; y: number }
     | null
   >(null);
+
+  // While the "now" glyph is actively hovered, its tooltip should
+  // visibly tick once a second rather than staying frozen at whatever
+  // instant the hover started - see the top-of-file "NOW MARKER"
+  // comment's "FROZEN AT MOUNT" section for why this is deliberately
+  // its OWN separate live clock, not the frozen `now` state used
+  // everywhere else in this component. This effect only manages a
+  // re-render counter, not a `Date` itself - the tooltip's own render
+  // below reads a fresh `new Date()` each time this fires, so the
+  // interval is what makes that happen, not what stores the time. The
+  // interval is created (and torn down) only while
+  // `hovered?.kind === 'now'`, which is what makes it stop the instant
+  // the mouse leaves rather than continuing to tick in the background.
+  const [, setNowTooltipTick] = useState(0);
+
+  useEffect(() => {
+    if (hovered?.kind !== 'now') return;
+
+    const interval = window.setInterval(() => {
+      setNowTooltipTick(tick => tick + 1);
+    }, NOW_TOOLTIP_TICK_MS);
+
+    return () => window.clearInterval(interval);
+  }, [hovered?.kind]);
 
   const isReady =
     size.width > 0 && size.height > 0 && spiralParams.maxRadius > 0;
@@ -1408,7 +1589,59 @@ export default function SpiralTimeline({
                 strokeWidth={1.5}
               />
 
-              {ranges.map(({ entry, pathD, glowPathD, ringPathD, color }) => {
+              {/*
+               * "NOW" MARKER - see the top-of-file "NOW MARKER" comment.
+               * Same stroke color/opacity/width as the main gridline
+               * path just above (this IS that same gridline, just
+               * continuing past the last real entry), with
+               * `strokeDasharray` added so it visibly reads as a
+               * continuation rather than more of the solid curve.
+               */}
+              {nowMarker && (
+                <>
+                  <path
+                    d={nowMarker.pathD}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeOpacity={0.35}
+                    strokeWidth={1.5}
+                    strokeDasharray={NOW_LINE_DASH}
+                  />
+                  <text
+                    x={nowMarker.glyphPosition.x}
+                    y={nowMarker.glyphPosition.y}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fill="currentColor"
+                    fontSize={NOW_GLYPH_FONT_SIZE_PX}
+                    opacity={
+                      hovered?.kind === 'now'
+                        ? NOW_GLYPH_HOVER_OPACITY
+                        : NOW_GLYPH_OPACITY
+                    }
+                    className="cursor-default select-none transition-opacity duration-150"
+                    onMouseEnter={event =>
+                      setHovered({
+                        kind: 'now',
+                        x: event.clientX,
+                        y: event.clientY,
+                      })
+                    }
+                    onMouseMove={event =>
+                      setHovered(current =>
+                        current && current.kind === 'now'
+                          ? { ...current, x: event.clientX, y: event.clientY }
+                          : current
+                      )
+                    }
+                    onMouseLeave={() => setHovered(null)}
+                  >
+                    {isDaytime ? '☀' : '☾'}
+                  </text>
+                </>
+              )}
+
+              {ranges.map(({ entry, pathD, color }) => {
                 const isOpened = openedEntryIdSet.has(entry.id);
                 const isFilteredOut = !activeCategorySet.has(
                   entry.activityType
@@ -1450,45 +1683,63 @@ export default function SpiralTimeline({
                     onClick={() => onEntryClick(entry)}
                   >
                     {isOpened && (
-                      // OPENED-ENTRY HIGHLIGHT (band glow) - LAYERING:
-                      // this glow <path> is deliberately the FIRST child
-                      // rendered inside this <g>, BEFORE the colored band
-                      // <path> below it - in SVG (as in HTML), a later
-                      // sibling paints ON TOP of an earlier one, so
-                      // ordering the glow first is what puts it BEHIND
-                      // the colored band, the same "glow element added to
-                      // the DOM before the main shape" layering
-                      // StarMap.tsx's per-star <g> and the point
-                      // highlight below both use. `glowPathD` is the SAME
-                      // `d3.arc()` shape as `pathD`, just at a larger
-                      // radius spread (see `OPENED_ARC_GLOW_EXTRA_RADIUS`'s
-                      // own comment) - filled, not stroked, since this
-                      // whole band is a fill now, not a line.
-                      <path
-                        d={glowPathD}
-                        fill={OPENED_HIGHLIGHT_COLOR}
-                        fillOpacity={OPENED_ARC_GLOW_OPACITY}
-                        filter="url(#opened-arc-glow)"
-                        className="pointer-events-none"
-                      />
+                      // OPENED-ENTRY HIGHLIGHT (band glow + ring) -
+                      // STROKING THE SAME CLOSED PATH, NOT TWO SEPARATE
+                      // OFFSET SHAPES:
+                      //
+                      // An earlier version generated a second, WIDER
+                      // `d3.arc()` shape for the glow (different
+                      // innerRadius/outerRadius/cornerRadius from
+                      // `pathD`) and a THIRD, entirely-outside-outerRadius
+                      // shape for the ring. Resizing an annulus segment's
+                      // radii like that does NOT uniformly "grow" it the
+                      // way offsetting a rounded rectangle's own edges
+                      // does (LinearTimeline.tsx's `capsuleOutlineRect`) -
+                      // a wider/narrower arc's rounded corners land at a
+                      // DIFFERENT position than the original's, so the
+                      // result reads as extra arcs parallel to the two
+                      // long curved edges that never wrap around the
+                      // rounded end caps at all.
+                      //
+                      // `pathD` is already a single CLOSED path (outer
+                      // arc, corner, inner arc, corner, back to start) -
+                      // stroking it directly, with `fill="none"`, makes
+                      // SVG trace that entire closed boundary as one
+                      // continuous line, corners included, for free - no
+                      // separate geometry needed. The stroke straddles
+                      // the boundary (half in, half out); both are drawn
+                      // BEHIND the opaque colored band below, which
+                      // covers the inward half, leaving only a clean
+                      // outward halo/ring - the same "glow circle, then
+                      // solid shape" layering StarMap.tsx's per-star <g>
+                      // uses, just both glow AND ring behind the fill
+                      // here (unlike a plain point's ring, which sits at
+                      // an already-larger radius with no overlap to hide,
+                      // this ring traces the SAME boundary the fill does,
+                      // so it also needs the fill drawn after it).
+                      // `strokeWidth` is doubled from the visually-tuned
+                      // "how much should show" value, since only half of
+                      // a straddling stroke ends up visible.
+                      <>
+                        <path
+                          d={pathD}
+                          fill="none"
+                          stroke={OPENED_HIGHLIGHT_COLOR}
+                          strokeWidth={OPENED_ARC_GLOW_EXTRA_RADIUS * 2}
+                          strokeOpacity={OPENED_ARC_GLOW_OPACITY}
+                          filter="url(#opened-arc-glow)"
+                          className="pointer-events-none"
+                        />
+                        <path
+                          d={pathD}
+                          fill="none"
+                          stroke={OPENED_HIGHLIGHT_COLOR}
+                          strokeWidth={ARC_RING_WIDTH * 2}
+                          className="pointer-events-none"
+                        />
+                      </>
                     )}
                     <path d={pathD} fill={color} />
-                    {isOpened && (
-                      // OPENED-ENTRY HIGHLIGHT (band ring): a thin, crisp
-                      // `d3.arc()` band starting `ARC_RING_GAP` past this
-                      // band's own `outerRadius` - the same "ring outside
-                      // the shape's own edge" role StarMap's/the plain
-                      // point's own ring plays, now possible here because
-                      // a real 2D band (unlike the old thin centerline
-                      // line this replaced) has an actual outer boundary
-                      // to trace - see the "ARC BAND HIGHLIGHT" comment
-                      // above `ARC_RING_GAP` for the full reasoning.
-                      <path
-                        d={ringPathD}
-                        fill={OPENED_HIGHLIGHT_COLOR}
-                        className="pointer-events-none"
-                      />
-                    )}
                   </g>
                 );
               })}
@@ -1622,9 +1873,22 @@ export default function SpiralTimeline({
       {hovered &&
         (hovered.kind === 'entry' ? (
           <EntryTooltip entry={hovered.entry} x={hovered.x} y={hovered.y} />
-        ) : (
+        ) : hovered.kind === 'year' ? (
           <EntryTooltip
             label={String(hovered.year)}
+            x={hovered.x}
+            y={hovered.y}
+          />
+        ) : (
+          // "NOW" GLYPH TOOLTIP - see the top-of-file "NOW MARKER"
+          // comment and the `setNowTooltipTick` effect above: `new
+          // Date()` is read fresh right here (not the frozen `now` used
+          // everywhere else in this component) so this label re-renders
+          // with the actual current time on each one-second tick while
+          // this glyph is being hovered, same date/time format
+          // (`formatSingleDate`) an entry's own tooltip uses.
+          <EntryTooltip
+            label={formatSingleDate(new Date(), true)}
             x={hovered.x}
             y={hovered.y}
           />

@@ -198,19 +198,25 @@ export default function Layout({
             aria-label="Site links"
           >
             {/*
-             * style (not a Tailwind class): --font-heading (Young Serif -
+             * style (not a Tailwind class): --font-wordmark (Chonburi -
              * see index.css's own comment) has no Tailwind utility of its
              * own, the same reason VizPageHeader.tsx reaches for inline
              * `style` to apply its own CSS-variable-driven text-shadow.
-             * Stylizes the wordmark to read as a brand mark consistent
-             * with the page titles, rather than plain UI chrome text.
+             * A distinct display face from --font-heading's 'Bree Serif',
+             * reserved just for this one brand mark rather than general
+             * heading use. text-[var(--accent-color)] (not a hardcoded
+             * text-indigo-600) so this stays in sync with every other
+             * control that uses the app's one shared accent token - see
+             * that variable's own comment in index.css. Lowercase
+             * 'dabble' (not 'Dabble') is a deliberate brand-mark styling
+             * choice, independent of Title (page titles, etc.) casing.
              */}
             <Link
               to="/"
-              className="text-lg font-bold text-indigo-600"
-              style={{ fontFamily: 'var(--font-heading)' }}
+              className="text-lg font-bold text-[var(--accent-color)]"
+              style={{ fontFamily: 'var(--font-wordmark)' }}
             >
-              Dabble
+              dabble
             </Link>
             <Link
               to="/about"
@@ -253,9 +259,17 @@ export default function Layout({
              * This '+' button is the primary entry point for creating new entries.
              * Design considerations:
              * - Positioned on the right for visibility and common UX patterns
-             * - Uses indigo color to match brand and indicate primary action
+             * - Uses --accent-color (the app's one shared accent token -
+             *   see index.css) to match brand and indicate primary action;
+             *   --accent-foreground-color for the icon/text on top of it,
+             *   since --accent-color itself flips light/dark per theme
+             *   (see that token's own comment for why a fixed text-white
+             *   wouldn't stay legible in both)
              * - Circle shape with '+' icon follows common mobile/web patterns
-             * - Hover state provides visual feedback
+             * - hover:brightness-90 darkens whichever accent shade is
+             *   currently active, rather than a hardcoded hover shade
+             *   (Tailwind's indigo-700) that only made sense for one fixed
+             *   accent color
              * - aria-label for accessibility (screen readers)
              *
              * EditModeBanner.tsx/VizEmptyState.tsx's shared top-right
@@ -267,7 +281,7 @@ export default function Layout({
              */}
             <button
               onClick={handleOpenModal}
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-white shadow-md transition-all hover:bg-indigo-700 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent-color)] text-[var(--accent-foreground-color)] shadow-md transition-all hover:shadow-lg hover:brightness-90 focus:outline-none focus:ring-2 focus:ring-[var(--accent-color)] focus:ring-offset-2"
               aria-label="Add new entry"
               title="Add new entry"
             >

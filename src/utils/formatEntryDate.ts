@@ -10,7 +10,15 @@
 
 import { Entry } from '../types/Entry';
 
-function formatSingleDate(date: Date, includeTime: boolean): string {
+/**
+ * Exported (not just used internally by `formatEntryDate` below) so
+ * SpiralTimeline.tsx's "now" marker tooltip can format a live
+ * current-moment `Date` - which isn't an `Entry` at all - the exact same
+ * "weekday, month day, year, h:mm am/pm" way an entry's own timestamp is
+ * shown, rather than a second, separately-maintained date format just
+ * for that one tooltip.
+ */
+export function formatSingleDate(date: Date, includeTime: boolean): string {
   const dateOptions: Intl.DateTimeFormatOptions = {
     weekday: 'short',
     year: 'numeric',

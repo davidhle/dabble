@@ -83,13 +83,20 @@
  * Labels/body text use the same --text-color/--text-secondary-color/
  * --text-muted-color scale EntryPanel.tsx uses (--text-color for headings,
  * the dimmer two for secondary/muted text) - see index.css's THEME TOKENS
- * comment for both themes' values; the indigo CTA buttons (Next, Create,
- * Add Entry) are unchanged, since indigo-600 already reads clearly
- * regardless of theme - it's the primary-action color used elsewhere in
- * the app too (Layout.tsx's + button).
+ * comment for both themes' values; the CTA buttons (Next, Create, Add/
+ * Update Entry), the step indicator's active badge, checkbox accents, and
+ * every input/select/textarea's focus ring all use --accent-color/
+ * --accent-foreground-color - the app's one shared primary-action accent
+ * token (also Layout.tsx's + button, EditModeToggle, etc.) - rather than a
+ * hardcoded indigo, so this modal inverts along with everything else
+ * between themes. The Tags/Mood preview chips are the one deliberate
+ * exception: those use --indigo-accent-text/--teal-accent-text instead,
+ * matching EntryPanel.tsx's own saved-entry chips exactly (see each
+ * chip's own comment below) - they're a data-identity color, not a
+ * primary-action one, so they don't follow --accent-color either.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Entry,
   MediaLink,
@@ -521,7 +528,11 @@ export default function AddEntryForm({
     onClose();
   };
 
-  const resetForm = () => {
+  // useCallback (not a plain function) so handleCancel below - and in
+  // turn the ESCAPE-TO-CANCEL effect further down, which needs a stable
+  // reference to correctly depend on it - doesn't get a new function
+  // identity, and re-attach its window listener, on every render.
+  const resetForm = useCallback(() => {
     setCurrentStep(1);
     setSlideDirection('forward');
     setActivityType(categories[0]?.id ?? DEFAULT_CATEGORIES[0].id);
@@ -545,12 +556,60 @@ export default function AddEntryForm({
     setEndDate('');
     setMediaUrl('');
     setErrors({});
-  };
+  }, [categories]);
 
-  const handleCancel = () => {
+  const handleCancel = useCallback(() => {
     resetForm();
     onClose();
-  };
+  }, [resetForm, onClose]);
+
+  // ─── ESCAPE-TO-CANCEL ───
+  //
+  // Pressing Escape while this modal is open should just cancel it (same
+  // as clicking Cancel/×) - and do NOTHING else. Left alone, it wouldn't:
+  // EntrySelectionContext.tsx's own Escape handling (collapse an expanded
+  // sidebar panel, or the two-press full canvas reset) is a plain
+  // BUBBLE-phase `window.addEventListener('keydown', ...)`, registered as
+  // soon as its provider mounts - which is well before this modal ever
+  // opens, since that provider wraps the page sitting BEHIND it. A second
+  // bubble-phase listener registered here, on the same `window` target,
+  // would run AFTER that earlier one in a plain keydown - too late to stop
+  // it via `stopPropagation()` (which only blocks propagation to nodes/
+  // phases still ahead of it, not other listeners already invoked on the
+  // very same node) - so Escape would still collapse a panel or advance
+  // the reset countdown UNDERNEATH this modal while also (or instead of)
+  // closing it.
+  //
+  // Registering this listener in the CAPTURE phase (the `true` 3rd arg)
+  // sidesteps that: capture-phase listeners on `window` always fire
+  // before ANY bubble-phase listener anywhere in the tree - including
+  // that other bubble-phase listener also on `window` - regardless of
+  // which was registered first. Calling `stopPropagation()` here during
+  // capture halts the event before it ever reaches the bubble phase, so
+  // that other handler never runs at all while this modal is open.
+  //
+  // ONE exception: while the inline "add new category" sub-form's own
+  // name input has focus, Escape should cancel just THAT sub-form (see
+  // its own `onKeyDown` above), not the whole modal - this effect
+  // deliberately ignores Escape when the event's target is that specific
+  // input, letting it fall through to that input's own (bubble-phase)
+  // handler instead, which stops propagation itself once it's done.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if ((event.target as HTMLElement | null)?.id === 'newCategoryName') {
+        return;
+      }
+
+      event.stopPropagation();
+      handleCancel();
+    };
+
+    window.addEventListener('keydown', handleEscape, true);
+    return () => window.removeEventListener('keydown', handleEscape, true);
+  }, [isOpen, handleCancel]);
 
   // ─── Tag Management ───
 
@@ -630,11 +689,18 @@ export default function AddEntryForm({
      * - max-h-[60vh]: Modal takes at most 60% of viewport height
      * - overflow-y-auto on the content area: scrolls internally, not the page
      * - Responsive width: w-[90vw] on mobile, max-w-[500px] on desktop
+     *
+     * NO onClick HERE (deliberately): clicking the dark overlay outside
+     * the card does NOT close the form - only Escape (see the ESCAPE-TO-
+     * CANCEL effect above), the header's × button, or a Cancel button
+     * do. This prevents an accidental stray click outside the card from
+     * silently discarding an in-progress add/edit. The inner card below
+     * still calls `e.stopPropagation()` on its own clicks - now mostly
+     * defensive (there's no longer a backdrop handler for a click to
+     * reach), but harmless to keep, and it'd matter again if this
+     * overlay ever gained its own click behavior in the future.
      */
-    <div
-      className="fixed inset-0 z-50 bg-black bg-opacity-50"
-      onClick={handleCancel}
-    >
+    <div className="fixed inset-0 z-50 bg-black bg-opacity-50">
       <div className="flex h-full items-center justify-center p-4">
         <div
           className="flex w-[90vw] max-w-[500px] flex-col rounded-lg border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] shadow-xl"
@@ -675,9 +741,17 @@ export default function AddEntryForm({
                 <div
                   className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
                     currentStep === 1
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-indigo-400/20 text-indigo-300'
+                      ? 'bg-[var(--accent-color)] text-[var(--accent-foreground-color)]'
+                      : 'text-[var(--accent-color)]'
                   }`}
+                  style={
+                    currentStep === 1
+                      ? undefined
+                      : {
+                          backgroundColor:
+                            'color-mix(in srgb, var(--accent-color) 20%, transparent)',
+                        }
+                  }
                 >
                   1
                 </div>
@@ -696,7 +770,7 @@ export default function AddEntryForm({
                 <div
                   className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium ${
                     currentStep === 2
-                      ? 'bg-indigo-600 text-white'
+                      ? 'bg-[var(--accent-color)] text-[var(--accent-foreground-color)]'
                       : 'bg-[var(--field-tint-2)] text-[var(--text-muted-color)]'
                   }`}
                 >
@@ -763,7 +837,7 @@ export default function AddEntryForm({
                         id="activityType"
                         value={activityType}
                         onChange={e => handleActivityTypeChange(e.target.value)}
-                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                       >
                         {categories.map(category => (
                           <option key={category.id} value={category.id}>
@@ -792,7 +866,15 @@ export default function AddEntryForm({
                      * category; confirming or cancelling closes it again.
                      */}
                     {isAddingCategory && (
-                      <div className="rounded-md border border-indigo-400/30 bg-indigo-400/10 p-3">
+                      <div
+                        className="rounded-md border p-3"
+                        style={{
+                          borderColor:
+                            'color-mix(in srgb, var(--accent-color) 30%, transparent)',
+                          backgroundColor:
+                            'color-mix(in srgb, var(--accent-color) 10%, transparent)',
+                        }}
+                      >
                         <label
                           htmlFor="newCategoryName"
                           className="block text-sm font-medium text-[var(--text-secondary-color)]"
@@ -819,11 +901,21 @@ export default function AddEntryForm({
                                 handleCreateCategory();
                               } else if (e.key === 'Escape') {
                                 e.preventDefault();
+                                // stopPropagation (not just preventDefault) -
+                                // this Escape is scoped to cancelling ONLY
+                                // this sub-form. Without it, the event would
+                                // still bubble up into the ESCAPE-TO-CANCEL
+                                // effect below/EntrySelectionContext.tsx's
+                                // own window listener and additionally close
+                                // the whole modal (or reach past it into the
+                                // canvas's reset logic), instead of just
+                                // collapsing this one inline form back down.
+                                e.stopPropagation();
                                 handleCancelAddCategory();
                               }
                             }}
                             placeholder="e.g., Pottery, Skateboarding"
-                            className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                           />
                         </div>
                         <div className="mt-2 flex justify-end gap-2">
@@ -838,7 +930,7 @@ export default function AddEntryForm({
                             type="button"
                             onClick={handleCreateCategory}
                             disabled={!newCategoryName.trim()}
-                            className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="rounded-md bg-[var(--accent-color)] px-3 py-1.5 text-sm font-medium text-[var(--accent-foreground-color)] hover:brightness-90 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             Create
                           </button>
@@ -863,7 +955,7 @@ export default function AddEntryForm({
                         className={`mt-1 block w-full rounded-md border bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:outline-none focus:ring-1 ${
                           errors.title
                             ? 'border-red-500/60 focus:border-red-500 focus:ring-red-500'
-                            : 'border-[var(--panel-border-color)] focus:border-indigo-500 focus:ring-indigo-500'
+                            : 'border-[var(--panel-border-color)] focus:border-[var(--accent-color)] focus:ring-[var(--accent-color)]'
                         }`}
                       />
                       {errors.title && (
@@ -886,7 +978,7 @@ export default function AddEntryForm({
                             onChange={e => setTagInput(e.target.value)}
                             onKeyDown={handleTagInputKeyDown}
                             placeholder="Add tags (press Enter)"
-                            className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                           />
                           <button
                             type="button"
@@ -902,18 +994,22 @@ export default function AddEntryForm({
                             {tags.map(tag => (
                               <span
                                 key={tag}
-                                // Same bg-indigo-400/20 + text-indigo-300
-                                // pill EntryPanel.tsx uses for this exact
-                                // entry's tags once saved, so the preview
-                                // while composing already looks like the
-                                // real thing.
-                                className="inline-flex items-center rounded-full bg-indigo-400/20 px-3 py-1 text-sm font-medium text-indigo-300"
+                                // Same bg-indigo-400/20 + text-[var(--indigo-
+                                // accent-text)] pill EntryPanel.tsx uses for
+                                // this exact entry's tags once saved, so the
+                                // preview while composing already looks like
+                                // the real thing. --indigo-accent-text (not
+                                // --accent-color) deliberately - this is the
+                                // app's informational "tag" identity, kept
+                                // separate from the primary-action accent -
+                                // see index.css's own comment on that token.
+                                className="inline-flex items-center rounded-full bg-indigo-400/20 px-3 py-1 text-sm font-medium text-[var(--indigo-accent-text)]"
                               >
                                 {tag}
                                 <button
                                   type="button"
                                   onClick={() => removeTag(tag)}
-                                  className="ml-1 text-indigo-400 hover:text-indigo-300"
+                                  className="ml-1 text-[var(--indigo-accent-text)] hover:opacity-80"
                                 >
                                   &times;
                                 </button>
@@ -960,7 +1056,7 @@ export default function AddEntryForm({
                         id="dateOnly"
                         value={dateOnly}
                         onChange={e => setDateOnly(e.target.value)}
-                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                       />
 
                       {/*
@@ -978,7 +1074,7 @@ export default function AddEntryForm({
                           id="hasSpecificTime"
                           checked={hasSpecificTime}
                           onChange={e => setHasSpecificTime(e.target.checked)}
-                          className="h-4 w-4 rounded border-[var(--field-border-strong)] bg-[var(--field-tint-1)] text-indigo-500 focus:ring-indigo-500"
+                          className="h-4 w-4 rounded border-[var(--field-border-strong)] bg-[var(--field-tint-1)] text-[var(--accent-color)] focus:ring-[var(--accent-color)]"
                         />
                         <label
                           htmlFor="hasSpecificTime"
@@ -1001,7 +1097,7 @@ export default function AddEntryForm({
                             id="timeOnly"
                             value={timeOnly}
                             onChange={e => setTimeOnly(e.target.value)}
-                            className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                           />
                         </div>
                       )}
@@ -1018,7 +1114,7 @@ export default function AddEntryForm({
                           id="isMultiDay"
                           checked={isMultiDay}
                           onChange={handleToggleMultiDay}
-                          className="h-4 w-4 rounded border-[var(--field-border-strong)] bg-[var(--field-tint-1)] text-indigo-500 focus:ring-indigo-500"
+                          className="h-4 w-4 rounded border-[var(--field-border-strong)] bg-[var(--field-tint-1)] text-[var(--accent-color)] focus:ring-[var(--accent-color)]"
                         />
                         <label
                           htmlFor="isMultiDay"
@@ -1044,7 +1140,7 @@ export default function AddEntryForm({
                             className={`mt-1 block w-full rounded-md border bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:outline-none focus:ring-1 ${
                               errors.endDate || isEndDateBeforeStart
                                 ? 'border-red-500/60 focus:border-red-500 focus:ring-red-500'
-                                : 'border-[var(--panel-border-color)] focus:border-indigo-500 focus:ring-indigo-500'
+                                : 'border-[var(--panel-border-color)] focus:border-[var(--accent-color)] focus:ring-[var(--accent-color)]'
                             }`}
                           />
                           {(errors.endDate || isEndDateBeforeStart) && (
@@ -1077,7 +1173,7 @@ export default function AddEntryForm({
                         id="country"
                         value={country}
                         onChange={e => setCountry(e.target.value)}
-                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                       >
                         <option value="">Select a country</option>
                         {COUNTRIES.map(countryName => (
@@ -1102,7 +1198,7 @@ export default function AddEntryForm({
                           value={city}
                           onChange={e => setCity(e.target.value)}
                           placeholder="e.g., Paris"
-                          className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                         />
                       </div>
                       <div>
@@ -1118,7 +1214,7 @@ export default function AddEntryForm({
                           value={place}
                           onChange={e => setPlace(e.target.value)}
                           placeholder="e.g., Djoon Club"
-                          className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                         />
                       </div>
                     </div>
@@ -1138,7 +1234,7 @@ export default function AddEntryForm({
                         onChange={e => setDuration(e.target.value)}
                         placeholder="Minutes"
                         min="0"
-                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                       />
                     </div>
 
@@ -1156,7 +1252,7 @@ export default function AddEntryForm({
                         onChange={e => setDescription(e.target.value)}
                         rows={3}
                         placeholder="What did you do? What happened?"
-                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:outline-none focus:ring-1 focus:border-indigo-500 focus:ring-indigo-500"
+                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:outline-none focus:ring-1 focus:border-[var(--accent-color)] focus:ring-[var(--accent-color)]"
                       />
                     </div>
                   </div>
@@ -1177,9 +1273,17 @@ export default function AddEntryForm({
                             key={mood}
                             type="button"
                             onClick={() => toggleMood(mood)}
+                            // bg-teal-400/20 + text-[var(--teal-accent-text)]
+                            // (not --accent-color) deliberately - the same
+                            // Mood pill EntryPanel.tsx uses for this exact
+                            // entry's moods once saved (see its own
+                            // comment), so the preview while composing
+                            // already looks like the real thing, and Mood
+                            // stays visually distinct from a plain
+                            // primary-action control.
                             className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
                               moods.includes(mood)
-                                ? 'bg-indigo-600 text-white'
+                                ? 'bg-teal-400/20 text-[var(--teal-accent-text)]'
                                 : 'bg-[var(--field-tint-2)] text-[var(--text-secondary-color)] hover:bg-[var(--field-tint-3)]'
                             }`}
                           >
@@ -1203,7 +1307,7 @@ export default function AddEntryForm({
                         onChange={e => setNotes(e.target.value)}
                         rows={3}
                         placeholder="What did you learn? How do you feel about it?"
-                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                       />
                     </div>
 
@@ -1221,7 +1325,7 @@ export default function AddEntryForm({
                           value={mediaUrl}
                           onChange={e => setMediaUrl(e.target.value)}
                           placeholder="https://youtube.com/watch?v=..."
-                          className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                         />
                         <button
                           type="button"
@@ -1332,7 +1436,7 @@ export default function AddEntryForm({
                       disabled={!canProceedToStep2}
                       className={`rounded-md px-4 py-2 text-sm font-medium ${
                         canProceedToStep2
-                          ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                          ? 'bg-[var(--accent-color)] text-[var(--accent-foreground-color)] hover:brightness-90'
                           : 'cursor-not-allowed bg-[var(--field-tint-2)] text-[var(--text-muted-color)]'
                       }`}
                     >
@@ -1353,7 +1457,7 @@ export default function AddEntryForm({
                       type="button"
                       onClick={e => handleSubmit(e)}
                       disabled={isSubmitting}
-                      className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-md bg-[var(--accent-color)] px-4 py-2 text-sm font-medium text-[var(--accent-foreground-color)] hover:brightness-90 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {isSubmitting
                         ? isEditMode
