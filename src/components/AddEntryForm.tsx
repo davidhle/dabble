@@ -109,7 +109,7 @@ import { Category, DEFAULT_CATEGORIES } from '../types/Category';
 import {
   loadCategories,
   addCategory,
-  previewNextCategoryColor,
+  previewCategoryColorOptions,
 } from '../utils/categories';
 import { COUNTRIES } from '../data/countries';
 
@@ -170,7 +170,16 @@ export default function AddEntryForm({
   // Computed once when the sub-form opens (not on every keystroke) since
   // the color a new category will get depends only on which colors
   // existing categories already use, not on the name being typed.
+  // `newCategoryColorPreview` is whichever color is CURRENTLY selected -
+  // the default (colorOptions[0]) until the user clicks a different swatch
+  // in the override grid below, at which point it tracks that pick
+  // instead. `colorOptions` is the fixed set of choices shown in that
+  // grid: the next several colors in the golden-angle sequence (see
+  // getCategoryColorOptions's own comment in utils/categories.ts) - a
+  // small, distinct alternative-swatches picker, not an arbitrary
+  // RGB/hex color input.
   const [newCategoryColorPreview, setNewCategoryColorPreview] = useState('');
+  const [colorOptions, setColorOptions] = useState<string[]>([]);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -216,6 +225,12 @@ export default function AddEntryForm({
 
   // ─── Step 2 Fields: Reflections & Media ───
   const [moods, setMoods] = useState<string[]>([]);
+  // Free-text entry for a custom mood not covered by COMMON_MOODS' preset
+  // chips - same "type + Enter/Add button" interaction as the Tags input
+  // above, so a mood the user types is added to `moods` (and rendered
+  // with the same selected-chip styling as a toggled preset) rather than
+  // requiring a fixed vocabulary.
+  const [moodInput, setMoodInput] = useState('');
   const [notes, setNotes] = useState('');
   const [mediaLinks, setMediaLinks] = useState<MediaLink[]>([]);
   const [mediaUrl, setMediaUrl] = useState('');
@@ -245,6 +260,7 @@ export default function AddEntryForm({
     setIsAddingCategory(false);
     setNewCategoryName('');
     setTagInput('');
+    setMoodInput('');
     setMediaUrl('');
     setErrors({});
 
@@ -393,7 +409,12 @@ export default function AddEntryForm({
    */
   const handleActivityTypeChange = (value: string) => {
     if (value === ADD_NEW_CATEGORY_VALUE) {
-      setNewCategoryColorPreview(previewNextCategoryColor());
+      // colorOptions[0] is always the same default previewNextCategoryColor()
+      // would return - computing both from one call keeps the single
+      // preview swatch and the grid's first cell in sync by construction.
+      const options = previewCategoryColorOptions(6);
+      setColorOptions(options);
+      setNewCategoryColorPreview(options[0]);
       setIsAddingCategory(true);
       return;
     }
@@ -402,16 +423,17 @@ export default function AddEntryForm({
 
   /**
    * Confirms the inline "add new category" sub-form: persists a real
-   * category via addCategory (assigning it the previewed color), then
-   * immediately selects it as this entry's activityType and closes the
-   * sub-form. A blank/whitespace-only name is ignored rather than
-   * creating an empty category.
+   * category via addCategory (assigning it whichever color is currently
+   * selected - the default suggestion, or a swatch the user overrode it
+   * with), then immediately selects it as this entry's activityType and
+   * closes the sub-form. A blank/whitespace-only name is ignored rather
+   * than creating an empty category.
    */
   const handleCreateCategory = () => {
     const trimmedName = newCategoryName.trim();
     if (!trimmedName) return;
 
-    const newCategory = addCategory(trimmedName);
+    const newCategory = addCategory(trimmedName, newCategoryColorPreview);
     setCategories(loadCategories());
     setActivityType(newCategory.id);
     setIsAddingCategory(false);
@@ -543,6 +565,7 @@ export default function AddEntryForm({
     setTags([]);
     setTagInput('');
     setMoods([]);
+    setMoodInput('');
     setMediaLinks([]);
     setCountry('');
     setCity('');
@@ -639,6 +662,26 @@ export default function AddEntryForm({
       setMoods(moods.filter(m => m !== mood));
     } else {
       setMoods([...moods, mood]);
+    }
+  };
+
+  // Mirrors addTag's shape exactly (trim, ignore blank/duplicate, clear the
+  // input) so a custom mood is added with the same interaction as a tag -
+  // the one difference is moods aren't lowercased, since (unlike tags)
+  // they're displayed back to the user as typed ("Excited", not
+  // "excited") to match COMMON_MOODS' own capitalized presets.
+  const addMood = (mood: string) => {
+    const trimmedMood = mood.trim();
+    if (trimmedMood && !moods.includes(trimmedMood)) {
+      setMoods([...moods, trimmedMood]);
+    }
+    setMoodInput('');
+  };
+
+  const handleMoodInputKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addMood(moodInput);
     }
   };
 
@@ -918,6 +961,42 @@ export default function AddEntryForm({
                             className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                           />
                         </div>
+
+                        {/*
+                         * Manual color override: a small grid of the next
+                         * few colors in the golden-angle sequence (see
+                         * getCategoryColorOptions in utils/categories.ts),
+                         * not an arbitrary RGB/hex picker - clicking one
+                         * just swaps which procedurally-generated color is
+                         * selected. The swatch preview above always
+                         * reflects the current pick, so this grid's
+                         * highlighted cell and that preview never disagree.
+                         */}
+                        {colorOptions.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {colorOptions.map(colorOption => (
+                              <button
+                                key={colorOption}
+                                type="button"
+                                onClick={() =>
+                                  setNewCategoryColorPreview(colorOption)
+                                }
+                                aria-label={`Use color ${colorOption}`}
+                                aria-pressed={
+                                  newCategoryColorPreview === colorOption
+                                }
+                                className="h-6 w-6 flex-shrink-0 rounded-full border-2 transition-transform hover:scale-110"
+                                style={{
+                                  backgroundColor: colorOption,
+                                  borderColor:
+                                    newCategoryColorPreview === colorOption
+                                      ? 'var(--text-color)'
+                                      : 'transparent',
+                                }}
+                              />
+                            ))}
+                          </div>
+                        )}
                         <div className="mt-2 flex justify-end gap-2">
                           <button
                             type="button"
@@ -1290,6 +1369,52 @@ export default function AddEntryForm({
                             {mood}
                           </button>
                         ))}
+                        {/*
+                         * Custom (non-preset) moods the user has typed in
+                         * below - rendered with the exact same selected-
+                         * chip classNames as a toggled COMMON_MOODS button
+                         * above, and removed the same way (click to
+                         * toggle off via the shared toggleMood), so a
+                         * custom mood is visually and behaviorally
+                         * indistinguishable from a preset one once added.
+                         */}
+                        {moods
+                          .filter(mood => !COMMON_MOODS.includes(mood))
+                          .map(mood => (
+                            <button
+                              key={mood}
+                              type="button"
+                              onClick={() => toggleMood(mood)}
+                              className="rounded-full bg-teal-400/20 px-3 py-1 text-sm font-medium text-[var(--teal-accent-text)] transition-colors"
+                            >
+                              {mood}
+                            </button>
+                          ))}
+                      </div>
+
+                      {/*
+                       * Custom mood text input - same interaction pattern
+                       * as the Tags input on Step 1 (type + Enter, or
+                       * click Add) rather than a separate "Other" field,
+                       * so a mood not covered by the preset chips above
+                       * is just as quick to add as a tag is.
+                       */}
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          type="text"
+                          value={moodInput}
+                          onChange={e => setMoodInput(e.target.value)}
+                          onKeyDown={handleMoodInputKeyDown}
+                          placeholder="Add a custom mood (press Enter)"
+                          className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => addMood(moodInput)}
+                          className="rounded-md bg-[var(--field-tint-2)] px-4 py-2 text-sm font-medium text-[var(--text-secondary-color)] hover:bg-[var(--field-tint-3)]"
+                        >
+                          Add
+                        </button>
                       </div>
                     </div>
 
