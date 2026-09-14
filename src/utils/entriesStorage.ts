@@ -42,3 +42,57 @@ export function loadEntries(): Entry[] {
 export function saveEntries(entries: Entry[]): void {
   localStorage.setItem(ENTRIES_STORAGE_KEY, JSON.stringify(entries));
 }
+
+/**
+ * DELETED-ENTRY TOMBSTONES
+ *
+ * A separate, append-only list of entry ids the user has explicitly
+ * deleted (see AddEntryForm's DELETE ENTRY flow) - persisted independently
+ * of `entries` itself, and consulted by
+ * utils/initializeFirstVisit.ts's backfillNewBundledDefaults.
+ *
+ * WHY THIS EXISTS: that backfill function re-adds any bundled
+ * DEFAULT_ENTRIES entry whose id is missing from stored `entries`, on the
+ * theory that "missing" only ever means "added to the bundle after this
+ * visitor's last load" (see its own comment - written before an
+ * individual-entry-delete feature existed, which it explicitly assumed
+ * away: "no 'the visitor deliberately removed this bundled entry' case to
+ * accidentally undo here"). Now that AddEntryForm can delete any entry,
+ * including one of the bundled ones, that assumption no longer holds: a
+ * bundled entry's id would go missing from `entries` for a second reason -
+ * the visitor deleted it - which is indistinguishable from "not yet
+ * backfilled" without this list. Recording the id here lets that backfill
+ * tell the two apart and skip re-adding an id the visitor deleted on
+ * purpose, without weakening the "add anything new to the bundle" behavior
+ * it exists for. A purely user-created entry's id was never in
+ * DEFAULT_ENTRIES to begin with, so deleting one never needs this list at
+ * all - it's only ever consulted against bundled ids.
+ */
+const DELETED_ENTRY_IDS_STORAGE_KEY = 'dabble-deleted-entry-ids';
+
+/** Loads the tombstone list of deleted entry ids, or [] if none recorded/parseable. */
+export function loadDeletedEntryIds(): string[] {
+  const raw = localStorage.getItem(DELETED_ENTRY_IDS_STORAGE_KEY);
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed as string[];
+    }
+  } catch {
+    // Corrupt or unexpected data - fall through to the empty array below.
+  }
+
+  return [];
+}
+
+/** Appends `entryId` to the tombstone list (a no-op if already recorded). */
+export function recordDeletedEntryId(entryId: string): void {
+  const existing = loadDeletedEntryIds();
+  if (existing.includes(entryId)) return;
+  localStorage.setItem(
+    DELETED_ENTRY_IDS_STORAGE_KEY,
+    JSON.stringify([...existing, entryId])
+  );
+}

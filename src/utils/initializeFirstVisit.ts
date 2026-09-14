@@ -47,10 +47,15 @@
 
 import { DEFAULT_CATEGORIES } from '../types/Category';
 import { DEFAULT_ENTRIES } from '../data/defaultEntries';
-import { loadCategories, saveCategories } from './categories';
+import {
+  loadCategories,
+  saveCategories,
+  loadDeletedCategoryIds,
+} from './categories';
 import {
   loadEntries,
   saveEntries,
+  loadDeletedEntryIds,
   ENTRIES_STORAGE_KEY,
 } from './entriesStorage';
 
@@ -83,26 +88,40 @@ export function initializeDefaultDataForFirstVisit(): void {
  * This only ADDS bundled categories/entries whose `id` isn't already
  * present in storage - it never touches, reorders, or removes anything
  * already stored, so a visitor's own added/edited entries and categories
- * are completely unaffected. There is no individual-entry-delete feature
- * (only the full "Start Your Own Constellation" reset in Home.tsx, which
- * writes genuinely empty arrays rather than removing the storage keys -
- * see the comment up top), so there's no "the visitor deliberately
- * removed this bundled entry" case to accidentally undo here.
+ * are completely unaffected.
+ *
+ * TOMBSTONES - THE "VISITOR DELETED THIS BUNDLED ENTRY" CASE, NOW HANDLED:
+ * AddEntryForm's edit-mode "Delete Entry" flow means a bundled id can now
+ * go missing from storage for a second reason beyond "not yet
+ * backfilled": the visitor deleted it on purpose. Those two cases are
+ * indistinguishable from the stored list alone, so deleteEntry/
+ * deleteCategory separately record every id they remove into a small
+ * tombstone list (see recordDeletedEntryId in entriesStorage.ts and
+ * recordDeletedCategoryId in categories.ts) - `missingCategories`/
+ * `missingEntries` below exclude anything tombstoned, so a deliberately
+ * deleted bundled category/entry stays gone instead of reappearing on the
+ * next load, while a genuinely new bundled id (one this visitor has never
+ * seen, and so never had the chance to delete) still gets backfilled as
+ * before.
  */
 function backfillNewBundledDefaults(): void {
+  const deletedCategoryIds = new Set(loadDeletedCategoryIds());
   const storedCategories = loadCategories();
   const storedCategoryIds = new Set(storedCategories.map(category => category.id));
   const missingCategories = DEFAULT_CATEGORIES.filter(
-    category => !storedCategoryIds.has(category.id)
+    category =>
+      !storedCategoryIds.has(category.id) &&
+      !deletedCategoryIds.has(category.id)
   );
   if (missingCategories.length > 0) {
     saveCategories([...storedCategories, ...missingCategories]);
   }
 
+  const deletedEntryIds = new Set(loadDeletedEntryIds());
   const storedEntries = loadEntries();
   const storedEntryIds = new Set(storedEntries.map(entry => entry.id));
   const missingEntries = DEFAULT_ENTRIES.filter(
-    entry => !storedEntryIds.has(entry.id)
+    entry => !storedEntryIds.has(entry.id) && !deletedEntryIds.has(entry.id)
   );
   if (missingEntries.length > 0) {
     saveEntries([...storedEntries, ...missingEntries]);

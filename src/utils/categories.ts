@@ -242,6 +242,62 @@ export function previewCategoryColorOptions(count: number): string[] {
 }
 
 /**
+ * Removes a category from the persisted list by id. Used when deleting the
+ * last remaining entry of a category (see AddEntryForm's DELETE ENTRY /
+ * ORPHANED-CATEGORY CASCADE comment) - mirrors addCategory's own
+ * read-mutate-write pattern. A no-op (silently) if `categoryId` doesn't
+ * match any category, rather than throwing.
+ *
+ * Also records `categoryId` as a tombstone (see loadDeletedCategoryIds
+ * below) - necessary for the same reason recordDeletedEntryId is: if this
+ * happens to be one of the bundled DEFAULT_CATEGORIES ids,
+ * utils/initializeFirstVisit.ts's backfillNewBundledDefaults would
+ * otherwise see it "missing" from storage on the very next load and
+ * silently re-add it, undoing the delete.
+ */
+export function deleteCategory(categoryId: string): void {
+  const existingCategories = loadCategories();
+  saveCategories(
+    existingCategories.filter(category => category.id !== categoryId)
+  );
+  recordDeletedCategoryId(categoryId);
+}
+
+/**
+ * DELETED-CATEGORY TOMBSTONES - see recordDeletedEntryId in
+ * entriesStorage.ts for the full reasoning; this is the category-list
+ * equivalent, consulted by the same backfillNewBundledDefaults.
+ */
+const DELETED_CATEGORY_IDS_STORAGE_KEY = 'dabble-deleted-category-ids';
+
+/** Loads the tombstone list of deleted category ids, or [] if none recorded/parseable. */
+export function loadDeletedCategoryIds(): string[] {
+  const raw = localStorage.getItem(DELETED_CATEGORY_IDS_STORAGE_KEY);
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed as string[];
+    }
+  } catch {
+    // Corrupt or unexpected data - fall through to the empty array below.
+  }
+
+  return [];
+}
+
+/** Appends `categoryId` to the tombstone list (a no-op if already recorded). */
+function recordDeletedCategoryId(categoryId: string): void {
+  const existing = loadDeletedCategoryIds();
+  if (existing.includes(categoryId)) return;
+  localStorage.setItem(
+    DELETED_CATEGORY_IDS_STORAGE_KEY,
+    JSON.stringify([...existing, categoryId])
+  );
+}
+
+/**
  * Looks up a category's display name by id, falling back to the raw id
  * itself if no matching category exists (e.g. its category was deleted).
  * Used anywhere an Entry's activityType needs to be shown as a label

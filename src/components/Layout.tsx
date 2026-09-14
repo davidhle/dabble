@@ -38,13 +38,18 @@ import { Link, Outlet } from 'react-router-dom';
 import AddEntryForm from './AddEntryForm';
 import ThemeToggle from './ThemeToggle';
 import { Entry } from '../types/Entry';
+import { useEntrySelectionContext } from '../context/EntrySelectionContext';
 
 /** Props interface for Layout component */
 interface LayoutProps {
+  /** The full, unfiltered entries array (App.tsx's own `entries` state) - passed through to AddEntryForm, which needs it to check whether an entry being deleted is the last one in its category. */
+  entries: Entry[];
   /** Callback to add a new entry to the app state (defined in App.tsx) */
   onAddEntry: (entry: Entry) => void;
   /** Callback to replace an existing entry (by id) in the app state (defined in App.tsx) */
   onUpdateEntry: (entry: Entry) => void;
+  /** Callback to remove an entry (by id) from the app state (defined in App.tsx) */
+  onDeleteEntry: (entryId: string) => void;
   /** The entry currently open in AddEntryForm's edit mode, or null - see App.tsx's `editingEntry` state. */
   editingEntry: Entry | null;
   /** Setter for `editingEntry` (App.tsx's `setEditingEntry`) - used here to clear it once the form closes. */
@@ -52,11 +57,22 @@ interface LayoutProps {
 }
 
 export default function Layout({
+  entries,
   onAddEntry,
   onUpdateEntry,
+  onDeleteEntry,
   editingEntry,
   onEditEntry,
 }: LayoutProps) {
+  // Read directly from the context (not the per-page useEntrySelection
+  // hook) so this doesn't register/unregister a page-level `onFullReset`
+  // handler here - Layout isn't a page, and doing so via the thin hook
+  // would clobber whichever page (Constellation/Timeline/Spiral) is
+  // currently mounted and has already registered its own canvas reset -
+  // see EntrySelectionContext.tsx's "onFullReset STAYS PAGE-SPECIFIC"
+  // comment. `handleClosePanel` itself doesn't touch that registration,
+  // so reading it straight from the context is safe here.
+  const { handleClosePanel } = useEntrySelectionContext();
   /**
    * LOCAL STATE: Modal visibility
    *
@@ -109,6 +125,21 @@ export default function Layout({
   const handleAddEntry = (entry: Entry) => {
     onAddEntry(entry);
     // Modal closing is handled by AddEntryForm calling onClose
+  };
+
+  /**
+   * Handles a confirmed entry deletion from AddEntryForm's edit-mode
+   * "Delete Entry" flow. Two things need to happen beyond removing the
+   * entry from App.tsx's state (onDeleteEntry): if that entry's panel is
+   * currently open in the sidebar stack, it needs to come out of there
+   * too - `handleClosePanel` is the exact same removal EntryPanel.tsx's
+   * own close button already triggers, so a deleted entry disappears from
+   * the sidebar the same way a manually-closed one does. (AddEntryForm
+   * itself calls onClose to dismiss the modal once this returns.)
+   */
+  const handleDeleteEntry = (entryId: string) => {
+    onDeleteEntry(entryId);
+    handleClosePanel(entryId);
   };
 
   return (
@@ -363,7 +394,9 @@ export default function Layout({
         onClose={handleCloseModal}
         onSubmit={handleAddEntry}
         onUpdate={onUpdateEntry}
+        onDelete={handleDeleteEntry}
         editingEntry={editingEntry}
+        entries={entries}
       />
 
       {/*
