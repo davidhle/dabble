@@ -95,7 +95,7 @@ export const DEFAULT_CATEGORIES: Category[] = [
   {
     id: 'ContemporaryDance',
     name: 'Contemporary Dance',
-    color: 'c084fc',
+    color: '#c084fc',
     domain: 'Movement'
   } // purple
 ];
