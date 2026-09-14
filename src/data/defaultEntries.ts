@@ -18,7 +18,7 @@
  * DEFAULT_CATEGORIES' existing fixed ids directly.
  */
 
-import { Entry, MediaLink, MediaType } from '../types/Entry';
+import { Entry, EntryLocation, MediaLink, MediaType } from '../types/Entry';
 import seedEntries from './seedEntries.json';
 
 /** The shape of one record in seedEntries.json. */
@@ -30,12 +30,11 @@ interface RawSeedEntry {
   notes: string;
   tags: string[];
   mediaLinks: { type: string; url: string; title?: string }[];
-  location: string | null;
-  duration: number | null;
-  mood: string | null;
+  location?: string | EntryLocation | null;
+  duration?: number | null;
+  mood?: string | null;
   timestamp: string;
-  dateDisplay: string | null;
-  dateNeedsReview: boolean;
+  dateDisplay?: string | null;
   /** Optional multi-day end date - see the endTimestamp field comment in types/Entry.ts. */
   endTimestamp?: string | null;
 }
