@@ -43,9 +43,20 @@ import { Entry } from '../types/Entry';
 interface LayoutProps {
   /** Callback to add a new entry to the app state (defined in App.tsx) */
   onAddEntry: (entry: Entry) => void;
+  /** Callback to replace an existing entry (by id) in the app state (defined in App.tsx) */
+  onUpdateEntry: (entry: Entry) => void;
+  /** The entry currently open in AddEntryForm's edit mode, or null - see App.tsx's `editingEntry` state. */
+  editingEntry: Entry | null;
+  /** Setter for `editingEntry` (App.tsx's `setEditingEntry`) - used here to clear it once the form closes. */
+  onEditEntry: (entry: Entry | null) => void;
 }
 
-export default function Layout({ onAddEntry }: LayoutProps) {
+export default function Layout({
+  onAddEntry,
+  onUpdateEntry,
+  editingEntry,
+  onEditEntry,
+}: LayoutProps) {
   /**
    * LOCAL STATE: Modal visibility
    *
@@ -67,10 +78,21 @@ export default function Layout({ onAddEntry }: LayoutProps) {
 
   /**
    * Closes the entry form modal
-   * Called by AddEntryForm on cancel or successful submit
+   * Called by AddEntryForm on cancel or successful submit.
+   *
+   * ADD VS. EDIT: AddEntryForm renders through this ONE modal regardless
+   * of mode (see `isOpen`/`editingEntry` on the AddEntryForm below), so
+   * this one handler needs to close whichever mode is actually active -
+   * clearing `editingEntry` (back to add-mode's null) when a specific
+   * entry was being edited, or just hiding the modal via `isModalOpen`
+   * when it was in plain add mode.
    */
   const handleCloseModal = () => {
-    setIsModalOpen(false);
+    if (editingEntry) {
+      onEditEntry(null);
+    } else {
+      setIsModalOpen(false);
+    }
   };
 
   /**
@@ -90,151 +112,216 @@ export default function Layout({ onAddEntry }: LayoutProps) {
   };
 
   return (
-    // canvas-vignette-bg (see index.css): this outer shell (not just the
-    // <nav> below, which also uses this class) used to be a flat
-    // bg-[var(--bg-color)] - which would still show through behind/around
-    // Home.tsx/About.tsx's content (the padding around `main` below, and
-    // any shorter-than-viewport page) as a visibly FLATTER background than
-    // StarMap.tsx's own vignetted canvas on Constellation. Both this shell
-    // and the navbar below now paint the exact same radial vignette
-    // StarMap does - see .canvas-vignette-bg's own comment in index.css
-    // for why `background-attachment: fixed` is what keeps the two
-    // perfectly seamless with each other despite being separate elements.
+    // canvas-vignette-bg (see index.css): this outer shell used to be a
+    // flat bg-[var(--bg-color)] - which would still show through behind/
+    // around Home.tsx/About.tsx's content (the padding around `main`
+    // below, and any shorter-than-viewport page) as a visibly FLATTER
+    // background than StarMap.tsx's own vignetted canvas on Constellation.
+    // This shell paints the exact same radial vignette StarMap does - see
+    // .canvas-vignette-bg's own comment in index.css for why
+    // `background-attachment: fixed` is what keeps the two perfectly
+    // seamless with each other despite being separate elements. The
+    // navbar below no longer paints its own copy of this (see its own
+    // comment) - now that it's three separate floating pills rather than
+    // one solid bar, this shell's own background is what shows through
+    // the transparent gaps between/around them.
     <div className="canvas-vignette-bg min-h-screen">
       {/*
-       * Navigation Bar
-       * relative z-10: Constellation.tsx's StarMap now renders a `fixed`
-       * full-viewport canvas (z-0). CSS always paints positioned elements
-       * above non-positioned ones regardless of DOM order, so without an
-       * explicit position + z-index here, that canvas would render on
-       * top of this non-positioned navbar and cover it. z-10 keeps the
-       * navbar on top, same tier as Constellation's page header/FilterBar
-       * (also z-10); both stay below the sidebar overlay (z-30) and the
-       * AddEntryForm modal (z-50).
+       * ─────────────────────────────────────────────────────────────
+       * NAVIGATION: THREE FLOATING PILLS, NOT ONE SOLID BAR
+       * ─────────────────────────────────────────────────────────────
+       * Three independent capsule-shaped groups instead of one
+       * full-width bar (Open Foundry's navbar pattern), grouped by what
+       * each link actually DOES rather than by left/right positioning
+       * alone:
+       *   - LEFT: 'Dabble' (the home link - clicking the wordmark itself
+       *     now navigates to '/', replacing the old separate "Home" text
+       *     link entirely) + 'About' - the two non-visualization,
+       *     informational pages.
+       *   - CENTER: the three visualization views (Constellation, Linear
+       *     Timeline, Spiral Timeline) - grouped together since they're
+       *     the app's actual content views, distinct from the
+       *     informational pages on the left. No divider needed between
+       *     them the way the old single-bar layout needed one between
+       *     Home/About and this group - three separate pills ARE the
+       *     divider now.
+       *   - RIGHT: the '+' add-entry button alone - the one action
+       *     (create something) rather than a place to navigate to,
+       *     visually distinct from both link groups by being its own
+       *     pill rather than just the rightmost item in a shared bar.
        *
-       * canvas-vignette-bg: same class (and therefore the exact same
-       * fixed-attachment gradient) as the outer shell above, so the
-       * navbar matches rather than being a visibly flatter bar - see that
-       * class's own comment in index.css. Still fully OPAQUE (a gradient
-       * fill, not transparency) so it continues to hide the real
-       * StarMap/LinearTimeline/SpiralTimeline canvas rendering directly
-       * behind it on visualization pages, exactly as the old flat
-       * --bg-color did. text-[var(--text-muted-color)]/
-       * hover:text-[var(--text-color)] below stay legible against this
-       * background in either theme - see index.css's THEME TOKENS
-       * comment.
+       * TRANSPARENT NEGATIVE SPACE - MUST STAY CLICK/DRAG-THROUGH:
+       * `<nav>` itself is `pointer-events-none` and paints no background
+       * of its own - it's purely a positioning/landmark wrapper, not a
+       * visible bar. Only each individual pill re-enables
+       * `pointer-events-auto`. This matters because StarMap.tsx/
+       * LinearTimeline.tsx/SpiralTimeline.tsx's canvases render `fixed
+       * inset-0` UNDERNEATH this nav (z-0 vs. z-10) - the old navbar was
+       * fully OPAQUE and covered its entire strip, so it never mattered
+       * that a plain full-width `<nav>` div also captures pointer events
+       * across its whole box by default (transparent background does NOT
+       * stop hit-testing - only `pointer-events: none` does). Now that
+       * the space between/around the three pills is meant to show (and
+       * stay interactive with) the canvas underneath, a naively opaque-
+       * looking-but-still-hit-testing full-width wrapper would silently
+       * swallow every drag/click/scroll in that entire top strip except
+       * where a pill happens to sit - exactly the bug this
+       * pointer-events-none/pointer-events-auto split prevents.
+       *
+       * z-10: same tier as before - above a canvas (z-0), below the
+       * sidebar overlay (z-30) and the AddEntryForm modal (z-50). `fixed`
+       * (not the old normal-flow block) since three separately-shaped
+       * pills can't stack into a single predictable height the way one
+       * `h-16` bar did - `main`'s own `pt-24` below compensates with a
+       * fixed clearance instead of relying on flow height.
        */}
-      <nav className="canvas-vignette-bg relative z-10 shadow-sm">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 justify-between">
-            {/* Left side: Logo and navigation links */}
-            <div className="flex">
-              <div className="flex flex-shrink-0 items-center">
-                <span className="text-xl font-bold text-indigo-600">
-                  Dabble
-                </span>
-              </div>
-              <div className="ml-6 flex space-x-8">
-                {/*
-                 * text-[var(--text-muted-color)]/hover:text-[var(--text-color)]:
-                 * these used to be fixed text-gray-400/hover:text-gray-200 -
-                 * tuned for the dark theme only, and effectively invisible
-                 * (near-white on near-white) once --bg-color switches to the
-                 * light theme's cream - see index.css's THEME TOKENS
-                 * comment. hover:border-[var(--panel-border-color)]
-                 * replaces hover:border-gray-500 for the same reason.
-                 */}
-                <Link
-                  to="/"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
-                >
-                  Home
-                </Link>
-                <Link
-                  to="/about"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
-                >
-                  About
-                </Link>
-                {/*
-                 * DIVIDER: a thin vertical rule separating the two
-                 * informational pages (Home, About) from the three
-                 * visualization views (Timeline, Spiral, Constellation) -
-                 * `self-center` + a fixed height keeps it vertically
-                 * centered against the links' own line-height rather than
-                 * stretching to the nav's full height. --panel-border-color
-                 * (same translucent token every other subtle border in the
-                 * app uses) so it stays a faint hairline against
-                 * --bg-color in both themes, not a jarring hardcoded gray.
-                 * aria-hidden since it's purely decorative, not a
-                 * navigable/announceable element.
-                 */}
-                <div
-                  aria-hidden="true"
-                  className="h-5 w-px self-center bg-[var(--panel-border-color)]"
-                />
-                <Link
-                  to="/constellation"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
-                >
-                  Constellation
-                </Link>
-                <Link
-                  to="/linear"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
-                >
-                  Linear Timeline
-                </Link>
-                <Link
-                  to="/spiral"
-                  className="inline-flex items-center border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-[var(--text-muted-color)] hover:border-[var(--panel-border-color)] hover:text-[var(--text-color)]"
-                >
-                  Spiral Timeline
-                </Link>
-              </div>
-            </div>
+      <nav
+        className="pointer-events-none fixed inset-x-0 top-0 z-10"
+        aria-label="Main navigation"
+      >
+        <div className="mx-auto grid max-w-7xl grid-cols-[1fr_auto_1fr] items-start gap-4 px-4 pt-4 sm:px-6 lg:px-8">
+          {/*
+           * Shared pill styling across all three: `--panel-bg-color-solid`
+           * + `--panel-border-color` + `shadow-lg` + `backdrop-blur` is
+           * the exact same "floating chrome sitting directly over a
+           * canvas" language ResetButton.tsx/ThemeToggle.tsx already use,
+           * reused here rather than inventing a second visual style for
+           * the same kind of floating object. `rounded-full` (not
+           * `rounded-lg`/`rounded-xl`) is what makes each a true
+           * capsule/pill given their fixed heights, matching Open
+           * Foundry's fully-rounded segments.
+           */}
 
-            {/* Right side: Add Entry button */}
-            <div className="flex items-center gap-3">
-              {/**
-               * ADD ENTRY BUTTON
-               *
-               * This '+' button is the primary entry point for creating new entries.
-               * Design considerations:
-               * - Positioned on the right for visibility and common UX patterns
-               * - Uses indigo color to match brand and indicate primary action
-               * - Circle shape with '+' icon follows common mobile/web patterns
-               * - Hover state provides visual feedback
-               * - aria-label for accessibility (screen readers)
-               */}
-              <button
-                onClick={handleOpenModal}
-                className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-600 text-white shadow-md transition-all hover:bg-indigo-700 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                aria-label="Add new entry"
-                title="Add new entry"
+          {/* LEFT PILL: Dabble (home) + About */}
+          <div
+            className="pointer-events-auto flex items-center gap-6 justify-self-start rounded-full border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] px-5 py-2.5 shadow-lg backdrop-blur"
+            aria-label="Site links"
+          >
+            {/*
+             * style (not a Tailwind class): --font-wordmark (Chonburi -
+             * see index.css's own comment) has no Tailwind utility of its
+             * own, the same reason VizPageHeader.tsx reaches for inline
+             * `style` to apply its own CSS-variable-driven text-shadow.
+             * A distinct display face from --font-heading's 'Bree Serif',
+             * reserved just for this one brand mark rather than general
+             * heading use. text-[var(--accent-color)] (not a hardcoded
+             * text-indigo-600) so this stays in sync with every other
+             * control that uses the app's one shared accent token - see
+             * that variable's own comment in index.css. Lowercase
+             * 'dabble' (not 'Dabble') is a deliberate brand-mark styling
+             * choice, independent of Title (page titles, etc.) casing.
+             */}
+            <Link
+              to="/"
+              className="text-lg font-bold text-[var(--accent-color)]"
+              style={{ fontFamily: 'var(--font-wordmark)' }}
+            >
+              dabble
+            </Link>
+            <Link
+              to="/about"
+              className="text-sm font-medium text-[var(--text-muted-color)] transition-colors hover:text-[var(--text-color)]"
+            >
+              About
+            </Link>
+          </div>
+
+          {/* CENTER PILL: the three visualization views */}
+          <div
+            className="pointer-events-auto flex items-center gap-6 justify-self-center rounded-full border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] px-5 py-2.5 shadow-lg backdrop-blur"
+            aria-label="Visualization views"
+          >
+            <Link
+              to="/constellation"
+              className="text-sm font-medium text-[var(--text-muted-color)] transition-colors hover:text-[var(--text-color)]"
+            >
+              Constellation
+            </Link>
+            <Link
+              to="/linear"
+              className="text-sm font-medium text-[var(--text-muted-color)] transition-colors hover:text-[var(--text-color)]"
+            >
+              Linear Timeline
+            </Link>
+            <Link
+              to="/spiral"
+              className="text-sm font-medium text-[var(--text-muted-color)] transition-colors hover:text-[var(--text-color)]"
+            >
+              Spiral Timeline
+            </Link>
+          </div>
+
+          {/* RIGHT PILL: '+' add-entry button alone */}
+          <div className="pointer-events-auto flex items-center justify-self-end rounded-full border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] p-1.5 shadow-lg backdrop-blur">
+            {/**
+             * ADD ENTRY BUTTON
+             *
+             * This '+' button is the primary entry point for creating new entries.
+             * Design considerations:
+             * - Positioned on the right for visibility and common UX patterns
+             * - Uses --accent-color (the app's one shared accent token -
+             *   see index.css) to match brand and indicate primary action;
+             *   --accent-foreground-color for the icon/text on top of it,
+             *   since --accent-color itself flips light/dark per theme
+             *   (see that token's own comment for why a fixed text-white
+             *   wouldn't stay legible in both)
+             * - Circle shape with '+' icon follows common mobile/web patterns
+             * - hover:brightness-90 darkens whichever accent shade is
+             *   currently active, rather than a hardcoded hover shade
+             *   (Tailwind's indigo-700) that only made sense for one fixed
+             *   accent color
+             * - aria-label for accessibility (screen readers)
+             *
+             * EditModeBanner.tsx/VizEmptyState.tsx's shared top-right
+             * tooltip stack (see utils/topRightTooltipStack.ts) anchors
+             * directly below THIS button/pill - its `TOP_SLOT` constant
+             * assumes this pill's own top offset (`pt-4`) and height
+             * (`p-1.5` around this `h-10` button), so changing either
+             * here means revisiting that constant too.
+             */}
+            <button
+              onClick={handleOpenModal}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent-color)] text-[var(--accent-foreground-color)] shadow-md transition-all hover:shadow-lg hover:brightness-90 focus:outline-none focus:ring-2 focus:ring-[var(--accent-color)] focus:ring-offset-2"
+              aria-label="Add new entry"
+              title="Add new entry"
+            >
+              {/* Plus icon using SVG for crisp rendering at any size */}
+              <svg
+                className="h-6 w-6"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
               >
-                {/* Plus icon using SVG for crisp rendering at any size */}
-                <svg
-                  className="h-6 w-6"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M12 4v16m8-8H4"
-                  />
-                </svg>
-              </button>
-            </div>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+            </button>
           </div>
         </div>
       </nav>
 
       {/* Main Content Area */}
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      {/*
+       * pt-24 (not the old py-8's uniform top/bottom): the navbar above
+       * is now `fixed` (out of normal document flow) instead of a
+       * `h-16` block pushing this down for free - see the nav's own
+       * comment for why three independently-shaped pills can't do that
+       * the way one fixed-height bar could. This fixed clearance keeps
+       * page content (and Constellation.tsx/Timeline.tsx/Spiral.tsx's
+       * own measured header block - see e.g. Constellation.tsx's
+       * `headerLayout` comment) starting safely below the tallest pill
+       * regardless, and remains a LIVE measurement wherever it reads off
+       * this element's actual rendered position, so nothing downstream
+       * needs updating if this value changes. `px-4 sm:px-6 lg:px-8`/
+       * `mx-auto max-w-7xl` are unchanged from before - Constellation.tsx's
+       * own `left` measurement comment explicitly depends on this exact
+       * horizontal class set staying put.
+       */}
+      <main className="mx-auto max-w-7xl px-4 pb-8 pt-24 sm:px-6 lg:px-8">
         {/**
          * OUTLET - React Router's placeholder for nested routes
          *
@@ -258,14 +345,25 @@ export default function Layout({ onAddEntry }: LayoutProps) {
        * 3. Its state (open/close) is managed by Layout
        *
        * Props passed to AddEntryForm:
-       * - isOpen: Controls visibility (from local state)
-       * - onClose: Callback to close modal (local handler)
-       * - onSubmit: Callback to add entry (passed from App.tsx)
+       * - isOpen: Controls visibility - true for plain add mode
+       *   (isModalOpen, from local state) OR edit mode (editingEntry set,
+       *   from App.tsx)
+       * - onClose: Callback to close modal (local handleCloseModal, which
+       *   itself picks the right thing to clear - see its own comment)
+       * - onSubmit: Callback to add a brand-new entry (passed from App.tsx)
+       * - onUpdate: Callback to replace-by-id an existing entry (passed
+       *   from App.tsx) - used instead of onSubmit whenever `editingEntry`
+       *   is set
+       * - editingEntry: The entry being edited, or null for add mode - see
+       *   AddEntryForm.tsx's own ADD VS. EDIT MODE comment for how it
+       *   changes the form's behavior
        */}
       <AddEntryForm
-        isOpen={isModalOpen}
+        isOpen={isModalOpen || editingEntry !== null}
         onClose={handleCloseModal}
         onSubmit={handleAddEntry}
+        onUpdate={onUpdateEntry}
+        editingEntry={editingEntry}
       />
 
       {/*

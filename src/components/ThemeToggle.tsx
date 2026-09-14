@@ -32,7 +32,7 @@ export default function ThemeToggle() {
       // AddEntryForm modal (z-50). bottom-6: the corner-most slot - see
       // the header comment above for why ResetButton's own bottom-20
       // sits exactly 12px above this.
-      className="fixed bottom-6 right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] text-[var(--text-color)] shadow-lg backdrop-blur transition-colors hover:bg-[var(--chrome-hover-bg-color)] focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-[var(--bg-color)]"
+      className="fixed bottom-6 right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] text-[var(--text-color)] shadow-lg backdrop-blur transition-colors hover:bg-[var(--chrome-hover-bg-color)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-color)] focus:ring-offset-2 focus:ring-offset-[var(--bg-color)]"
       aria-label={isLight ? 'Switch to dark theme' : 'Switch to light theme'}
       title={isLight ? 'Switch to dark theme' : 'Switch to light theme'}
     >

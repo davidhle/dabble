@@ -22,6 +22,7 @@
 import { forwardRef } from 'react';
 import EntryPanel from './EntryPanel';
 import { SortMode } from './FilterBar';
+import { Entry } from '../types/Entry';
 import { CategoryGroup, SelectedEntry } from '../hooks/useEntrySelection';
 
 interface SidebarPanelStackProps {
@@ -29,7 +30,16 @@ interface SidebarPanelStackProps {
   sortMode: SortMode;
   categoryGroups: CategoryGroup[];
   onExpand: (entryId: string) => void;
+  /** Wired to useEntrySelection's `handleMinimizePanel` - see EntryPanel.tsx. */
+  onMinimize: (entryId: string) => void;
   onClose: (entryId: string) => void;
+  /**
+   * Opens `entry` in the shared AddEntryForm's edit mode - takes the full
+   * Entry (not just an id) since that's what App.tsx's `editingEntry`
+   * state needs, and this is the one place already holding each panel's
+   * full entry object.
+   */
+  onEdit: (entry: Entry) => void;
   /** The calling page's measured header bottom edge - see the header comment above. */
   top: number;
   /** The calling page's measured header left edge - see the header comment above. */
@@ -38,7 +48,17 @@ interface SidebarPanelStackProps {
 
 const SidebarPanelStack = forwardRef<HTMLDivElement, SidebarPanelStackProps>(
   function SidebarPanelStack(
-    { selectedEntries, sortMode, categoryGroups, onExpand, onClose, top, left },
+    {
+      selectedEntries,
+      sortMode,
+      categoryGroups,
+      onExpand,
+      onMinimize,
+      onClose,
+      onEdit,
+      top,
+      left,
+    },
     ref
   ) {
     return (
@@ -99,7 +119,9 @@ const SidebarPanelStack = forwardRef<HTMLDivElement, SidebarPanelStackProps>(
                 entry={entry}
                 expanded={expanded}
                 onExpand={() => onExpand(entry.id)}
+                onMinimize={() => onMinimize(entry.id)}
                 onClose={() => onClose(entry.id)}
+                onEdit={() => onEdit(entry)}
               />
             ))}
           </>
@@ -118,7 +140,9 @@ const SidebarPanelStack = forwardRef<HTMLDivElement, SidebarPanelStackProps>(
                   entry={entry}
                   expanded={expanded}
                   onExpand={() => onExpand(entry.id)}
+                  onMinimize={() => onMinimize(entry.id)}
                   onClose={() => onClose(entry.id)}
+                  onEdit={() => onEdit(entry)}
                 />
               ))}
             </div>

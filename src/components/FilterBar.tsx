@@ -181,7 +181,7 @@ export default function FilterBar({
               aria-pressed={sortMode === mode}
               className={`flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
                 sortMode === mode
-                  ? 'bg-indigo-500 text-white'
+                  ? 'bg-[var(--accent-color)] text-[var(--accent-foreground-color)]'
                   : 'text-[var(--text-muted-color)] hover:text-[var(--text-color)]'
               }`}
             >

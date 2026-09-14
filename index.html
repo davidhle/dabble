@@ -5,6 +5,29 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>David Dabbles :)</title>
+    <!--
+      Three Google Fonts (all OFL-licensed, like every Google Font):
+      - 'Sen' - the app's BODY font (see src/index.css's --font-body
+        comment) - everything that isn't a heading: paragraphs, buttons,
+        form inputs, nav links, tags, panel content, tooltips, etc.
+        wght@400/500/600/700/800 covers every Tailwind font-weight class
+        actually used in the app (font-normal/medium/semibold/bold).
+      - 'Bree Serif' - headings (h1/h2, and the shared EntryPanel.tsx
+        expanded-panel title - see --font-heading's own comment).
+        EXCLUDES the 'Dabble' wordmark, which uses 'Chonburi' instead
+        (below). Ships exactly one weight (400/Regular), so only its
+        default weight is loaded.
+      - 'Chonburi' - the 'Dabble' wordmark ONLY (see --font-wordmark's
+        own comment) - a distinct display face reserved for this one
+        short, fixed brand mark rather than general heading use. Also
+        ships just the one 400/Regular weight.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Sen:wght@400;500;600;700;800&family=Bree+Serif&family=Chonburi&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
     <div id="root"></div>

@@ -3,9 +3,61 @@
 @tailwind utilities;
 
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: var(--font-body);
   line-height: 1.5;
   font-weight: 400;
+
+  /*
+   * --font-body: the app's default font - everything that ISN'T a
+   * heading (paragraphs, buttons, form inputs, nav links, tags, panel
+   * content, tooltips, etc.). Assigned to `font-family` on this same
+   * :root above (rather than left as a plain hardcoded stack) so both
+   * this rule AND anything that wants to explicitly reassert the body
+   * font (e.g. after a descendant's own font-family override) can
+   * reference one shared value. 'Sen' (loaded via the Google Fonts
+   * <link> in index.html, OFL-licensed) keeps the same
+   * `system-ui, Avenir, Helvetica, Arial, sans-serif` fallback chain as
+   * before, so a slow/failed font load degrades the same way it always
+   * did. wght@400/500/600/700/800 are all loaded since the app actually
+   * uses all four Tailwind weight classes (font-normal/medium/semibold/
+   * bold) somewhere on body text, plus Sen's own 800 cut for anything
+   * bolder.
+   *
+   * --font-heading: headings (h1/h2, and the shared EntryPanel.tsx
+   * expanded-panel title - any component-level "page title" element,
+   * e.g. VizPageHeader.tsx's title, which is already a plain <h1> so the
+   * tag-level rule below covers it with no extra class needed) - but NOT
+   * the 'Dabble' wordmark in Layout.tsx's left nav pill, which uses
+   * --font-wordmark instead (below). Tailwind's Preflight
+   * (@tailwind base) already makes form controls inherit font-family
+   * from their ancestors rather than defaulting to the browser's own UA
+   * font, so nothing needs to opt back INTO --font-body explicitly; only
+   * h1/h2 opt into --font-heading instead.
+   *
+   * 'Bree Serif' is loaded via the same Google Fonts <link> in
+   * index.html - OFL-licensed, like every other Google Font. It ships
+   * exactly ONE weight on Google Fonts (400/Regular - confirmed against
+   * the Google Fonts CSS API; no bold/heavier cut exists to request), so
+   * an h1/h2 styled `font-bold`/`font-semibold` renders the browser's own
+   * SYNTHESIZED (faux) bold rather than a true bold glyph design -
+   * acceptable here since it's still legible and on-brand, just worth
+   * knowing this isn't a real bold weight under the hood. `serif` is the
+   * fallback - not --font-body's `sans-serif` - so a slow/failed font
+   * load still reads as "a serif heading" rather than silently reverting
+   * to the body font.
+   *
+   * --font-wordmark: Layout.tsx's 'Dabble' wordmark ONLY - a distinct
+   * display face ('Chonburi') reserved just for this one short, fixed
+   * brand mark rather than general heading use, so it doesn't get reused
+   * anywhere --font-heading is. Also ships just one weight on Google
+   * Fonts (400/Regular). Falls back to --font-heading's own 'Bree Serif'
+   * family, THEN serif, rather than straight to serif, so a failed font
+   * load still lands on the closest available serif heading face instead
+   * of jumping straight to a generic fallback.
+   */
+  --font-body: 'Sen', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  --font-heading: 'Bree Serif', serif;
+  --font-wordmark: 'Chonburi', 'Bree Serif', serif;
 
   /*
    * ════════════════════════════════════════════════════════════════════
@@ -75,6 +127,42 @@
    *                          --panel-bg-color-solid, not a translucent tint
    *                          (the button has nothing solid behind it to
    *                          tint)
+   *   --accent-color         the app's ONE interactive brand accent -
+   *                          consolidates what used to be a hardcoded
+   *                          Tailwind `indigo-*` scattered across
+   *                          components with no shared token, into a
+   *                          single source of truth so every one of these
+   *                          controls inverts together between themes: the
+   *                          'dabble' wordmark, the '+' add-entry button,
+   *                          TimeRangeSelector's selected-range fill/
+   *                          handles, the sort-mode toggle's active state,
+   *                          and EditModeToggle/ResetButton/ThemeToggle's
+   *                          focus ring (EditModeToggle's active fill too).
+   *                          Deliberately separate from --star-highlight-
+   *                          color (below) - that one marks entry
+   *                          SELECTION on a canvas, this one is plain
+   *                          interactive-control chrome; conflating them
+   *                          would make an opened star and, say, a pressed
+   *                          button read as the same kind of signal when
+   *                          they're not. Also NOT the same token as
+   *                          --indigo-accent-text just below - that one is
+   *                          a low-saturation informational tint (tag
+   *                          chips, links), this one is the saturated
+   *                          "primary action" color.
+   *   --accent-foreground-color the text/icon color to use ON TOP of a
+   *                          solid --accent-color fill (the '+' button,
+   *                          EditModeToggle's active state) - a second
+   *                          token rather than a hardcoded `text-white`,
+   *                          because --accent-color itself flips from dark
+   *                          (light theme) to light (dark theme), so a
+   *                          fixed white foreground would still contrast
+   *                          fine in light theme but nearly disappear
+   *                          against dark theme's pale periwinkle fill.
+   *                          Swaps oppositely from --accent-color for
+   *                          exactly that reason: white on light theme's
+   *                          dark navy fill, a near-black navy (the same
+   *                          shade as dark theme's own --bg-color) on dark
+   *                          theme's pale periwinkle fill.
    *   --indigo-accent-text   indigo text sitting on an indigo-tinted chip/
    *                          background (Tags in EntryPanel, linkify.ts's
    *                          link color, VizEmptyState's messages) - needs
@@ -83,12 +171,29 @@
    *                          keep reading against a pale tint either way
    *   --teal-accent-text     same idea as --indigo-accent-text, for Mood
    *                          chips (EntryPanel.tsx)
+   *   --yellow-accent-text   same idea as --indigo-accent-text, for
+   *                          EditModeBanner.tsx's "Edit Mode is on" notice -
+   *                          yellow specifically to read as a distinct
+   *                          "heads up" tone rather than the app's usual
+   *                          indigo (informational/neutral) or teal (mood)
    *   --star-highlight-color the "opened entry" ring/glow color in
    *                          StarMap/LinearTimeline/SpiralTimeline -
    *                          deliberately not tied to any activityType
    *                          color (see those files' own comments) so it
    *                          reads clearly against every entry color AND
-   *                          against the canvas background itself
+   *                          against the canvas background itself. SWAPS
+   *                          per theme, like every other token here - an
+   *                          earlier version tried making this ONE fixed
+   *                          value (--bg-color's own dark navy, #0b1023)
+   *                          in both themes, but on the light theme's
+   *                          cream canvas that near-black tone just read
+   *                          as black, not navy - reverted back to a
+   *                          real per-theme swap: dark mode keeps white
+   *                          (bright against the night-sky canvas), light
+   *                          mode gets its OWN distinct, more saturated
+   *                          navy (#2d3a6b - clearly blue-toned, not
+   *                          --bg-color's near-black) rather than reusing
+   *                          any other existing token's value.
    *   --viz-label-color      subtle overlay label text painted directly on
    *                          a canvas with no backing box of its own -
    *                          StarMap's category labels, SpiralTimeline's
@@ -121,9 +226,12 @@
    * --field-tint-3:          rgba(255,255,255,.22)  --field-tint-3:      rgba(17,24,39,.16)
    * --field-border-strong:   rgba(255,255,255,.22)  --field-border-strong: rgba(17,24,39,.22)
    * --chrome-hover-bg-color: #16203d               --chrome-hover-bg-color: #ebe4d3
+   * --accent-color:          #A9B4E8               --accent-color:          #212D66
+   * --accent-foreground-color: #0b1023             --accent-foreground-color: #ffffff
    * --indigo-accent-text:    #a5b4fc               --indigo-accent-text: #4338ca
    * --teal-accent-text:      #5eead4               --teal-accent-text:   #0f766e
-   * --star-highlight-color:  #ffffff               --star-highlight-color: #1c1917
+   * --yellow-accent-text:    #fde047               --yellow-accent-text: #a16207
+   * --star-highlight-color:  #ffffff               --star-highlight-color: #2d3a6b
    * --viz-label-color:       rgba(255,255,255,.35)  --viz-label-color:   rgba(17,24,39,.4)
    * --viz-header-text-shadow: 0 1px 3px rgba(0,0,0,.9), 0 2px 10px rgba(0,0,0,.7)
    *                          --viz-header-text-shadow: 0 1px 3px rgba(245,241,232,.9), 0 2px 10px rgba(245,241,232,.8)
@@ -156,8 +264,11 @@
   --field-tint-3: rgba(255, 255, 255, 0.22);
   --field-border-strong: rgba(255, 255, 255, 0.22);
   --chrome-hover-bg-color: #16203d;
+  --accent-color: #a9b4e8; /* periwinkle - light enough to read on the dark canvas */
+  --accent-foreground-color: #0b1023; /* same navy as --bg-color, for text/icons on a solid --accent-color fill */
   --indigo-accent-text: #a5b4fc; /* indigo-300 */
   --teal-accent-text: #5eead4; /* teal-300 */
+  --yellow-accent-text: #fde047; /* yellow-300 */
   --star-highlight-color: #ffffff;
   --viz-label-color: rgba(255, 255, 255, 0.35);
   --viz-header-text-shadow:
@@ -196,9 +307,18 @@
   --field-tint-3: rgba(17, 24, 39, 0.16);
   --field-border-strong: rgba(17, 24, 39, 0.22);
   --chrome-hover-bg-color: #ebe4d3;
+  --accent-color: #212d66; /* deep navy - dark enough to read on the cream canvas */
+  --accent-foreground-color: #ffffff; /* white, for text/icons on a solid --accent-color fill */
   --indigo-accent-text: #4338ca; /* indigo-700 - dark enough to read on a pale indigo tint */
   --teal-accent-text: #0f766e; /* teal-700 */
-  --star-highlight-color: #1c1917;
+  --yellow-accent-text: #a16207; /* yellow-700 - dark enough to read on a pale yellow tint */
+  /*
+   * A distinct, more saturated navy - NOT --bg-color's own near-black
+   * (#0b1023), which reads as plain black rather than blue against this
+   * theme's bright cream canvas. See this token's own description in the
+   * THEME TOKENS comment above for the full reasoning/history.
+   */
+  --star-highlight-color: #2d3a6b;
   --viz-label-color: rgba(17, 24, 39, 0.4);
   --viz-header-text-shadow:
     0 1px 3px rgba(245, 241, 232, 0.9), 0 2px 10px rgba(245, 241, 232, 0.8);
@@ -213,6 +333,23 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+}
+
+/*
+ * Every h1/h2 in the app - page titles (VizPageHeader.tsx's
+ * Constellation/Linear Timeline/Spiral Timeline; Home.tsx's "Welcome to
+ * Dabble"; About.tsx's "About Dabble" and its own section h2s), the
+ * shared EntryPanel.tsx expanded-panel title, and AddEntryForm.tsx's
+ * modal step headers - picks up --font-heading (see its own comment in
+ * the :root block above for what it is and isn't applied to). One tag
+ * selector rather than a class threaded through every one of those
+ * components individually: a heading is a heading regardless of which
+ * component renders it, so this can't quietly miss one the way
+ * duplicating a Tailwind class at each call site could.
+ */
+h1,
+h2 {
+  font-family: var(--font-heading);
 }
 
 /*

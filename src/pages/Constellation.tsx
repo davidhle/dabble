@@ -140,7 +140,9 @@
  * work on Timeline.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import EditModeBanner from '../components/EditModeBanner';
+import EditModeToggle from '../components/EditModeToggle';
 import FilterBar from '../components/FilterBar';
 import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
@@ -153,12 +155,18 @@ import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
 import { useEntrySelection } from '../hooks/useEntrySelection';
 import { useTimeRange } from '../context/TimeRangeContext';
+import { useEditMode } from '../context/EditModeContext';
 
 interface ConstellationProps {
   entries: Entry[];
+  /** Opens `entry` in the shared AddEntryForm's edit mode - see App.tsx's `editingEntry` state. */
+  onEditEntry: (entry: Entry) => void;
 }
 
-export default function Constellation({ entries }: ConstellationProps) {
+export default function Constellation({
+  entries,
+  onEditEntry,
+}: ConstellationProps) {
   // The dynamic category list - recomputed whenever entries change, since
   // that's exactly when a new category could have appeared (a fresh "+
   // Add new category" in AddEntryForm always creates its new entry in the
@@ -195,6 +203,7 @@ export default function Constellation({ entries }: ConstellationProps) {
     expandedEntryId,
     handleEntryClick,
     handleExpandPanel,
+    handleMinimizePanel,
     handleClosePanel,
     sortMode,
     handleSortModeChange,
@@ -228,6 +237,30 @@ export default function Constellation({ entries }: ConstellationProps) {
     },
   });
 
+  const { isEditMode } = useEditMode();
+
+  /**
+   * Composes StarMap's single `onStarClick` callback around the shared
+   * `isEditMode` flag - see EditModeContext.tsx's top-of-file "WHY THIS IS
+   * A GLOBAL CLICK-BEHAVIOR OVERRIDE" comment for why this branch lives
+   * here (in the page) rather than inside StarMap.tsx itself. While Edit
+   * Mode is on, a star click goes STRAIGHT to `onEditEntry` and never
+   * touches `handleEntryClick` at all - the sidebar panel stack is
+   * completely bypassed, not just left as-is, so clicking a star that's
+   * already open/expanded doesn't toggle or close its panel while editing
+   * is the whole point of clicking.
+   */
+  const handleCanvasEntryClick = useCallback(
+    (entry: Entry) => {
+      if (isEditMode) {
+        onEditEntry(entry);
+        return;
+      }
+      handleEntryClick(entry);
+    },
+    [isEditMode, onEditEntry, handleEntryClick]
+  );
+
   // The sidebar overlay's live rendered width, passed to StarMap so it
   // can keep its click-to-center math accurate - see the layout comment
   // above and StarMap.tsx's CLICK-TO-CENTER comment. Measured off the DOM
@@ -254,50 +287,6 @@ export default function Constellation({ entries }: ConstellationProps) {
     observer.observe(el);
     return () => observer.disconnect();
   }, [hasSelection]);
-
-  // TimeRangeSelector's own CARD's live rendered position - forwarded via
-  // TimeRangeSelector.tsx's `forwardRef` (see its own comment) - so
-  // VizEmptyState's "filtered" message (below, via StarMap) can position
-  // itself immediately to the card's right, on the same row, instead of
-  // guessing at a fixed offset. Re-measured whenever `sidebarWidth`
-  // changes (a dependency, not just mount) because TimeRangeSelector
-  // re-centers its card within a narrower `[sidebarWidth, viewport
-  // right]` box as the sidebar opens/closes - a pure horizontal
-  // TRANSLATION of the same-sized card, which a ResizeObserver alone
-  // would miss (it only fires on size changes, not position). The window
-  // resize listener alongside it catches the OTHER way this position can
-  // change: the viewport itself resizing. `useLayoutEffect` (not
-  // `useEffect`) so this is measured before the first paint the message
-  // could appear in, avoiding a one-frame flash at the wrong position.
-  const timeRangeSelectorCardRef = useRef<HTMLDivElement>(null);
-  const [timeRangeSelectorRect, setTimeRangeSelectorRect] = useState({
-    top: 0,
-    right: 0,
-    height: 0,
-  });
-
-  useLayoutEffect(() => {
-    const el = timeRangeSelectorCardRef.current;
-    if (!el) return;
-
-    const updateRect = () => {
-      const rect = el.getBoundingClientRect();
-      setTimeRangeSelectorRect({
-        top: rect.top,
-        right: rect.right,
-        height: rect.height,
-      });
-    };
-    updateRect();
-
-    const observer = new ResizeObserver(updateRect);
-    observer.observe(el);
-    window.addEventListener('resize', updateRect);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', updateRect);
-    };
-  }, [sidebarWidth]);
 
   // Where the header stack (title/subtitle + FilterBar) actually sits in
   // the viewport, so SidebarPanelStack below can start just past its
@@ -433,25 +422,30 @@ export default function Constellation({ entries }: ConstellationProps) {
        * positions itself via `fixed inset-0`.
        */}
       {/*
-       * onStarClick={handleEntryClick}: StarMap forwards every star click
-       * straight to this one hook function - open-new / expand-minimized
+       * onStarClick={handleCanvasEntryClick}: StarMap forwards every star
+       * click straight to this one function - open-new / expand-minimized
        * / deselect-expanded is decided entirely inside
-       * useEntrySelection.ts now (see its CLICK OUTCOMES comment), not
-       * split across a separate onStarDeselect prop the way it used to
-       * be - see StarMap.tsx's own STAR CLICK OUTCOMES comment.
+       * useEntrySelection.ts's `handleEntryClick` now (see its CLICK
+       * OUTCOMES comment), not split across a separate onStarDeselect prop
+       * the way it used to be - see StarMap.tsx's own STAR CLICK OUTCOMES
+       * comment. `handleCanvasEntryClick` (defined above) wraps that with
+       * the Edit Mode branch - StarMap's own `isEditMode` prop below is
+       * unrelated to this and purely presentational (see its own comment
+       * in StarMap.tsx) - StarMap still has no click-behavior notion of
+       * Edit Mode at all.
        */}
       <StarMap
         entries={timeFilteredEntries}
         hasAnyEntries={entries.length > 0}
         categories={categories}
-        onStarClick={handleEntryClick}
+        onStarClick={handleCanvasEntryClick}
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}
         filterCategories={filterCategories}
         sidebarWidth={sidebarWidth}
         resetViewSignal={resetViewSignal}
         topOffset={headerLayout.top}
-        timeRangeSelectorRect={timeRangeSelectorRect}
+        isEditMode={isEditMode}
       />
 
       {/*
@@ -462,14 +456,11 @@ export default function Constellation({ entries }: ConstellationProps) {
        * for its density ticks - same reasoning as Timeline.tsx's own
        * comment on this prop: the ticks need to show where data exists
        * across the entire `fullRange`, not just within the current
-       * selection. `ref` is the new TimeRangeSelector.tsx forwardRef -
-       * see the `timeRangeSelectorRect` measurement above for why.
+       * selection.
        */}
-      <TimeRangeSelector
-        ref={timeRangeSelectorCardRef}
-        entries={entries}
-        sidebarWidth={sidebarWidth}
-      />
+      <TimeRangeSelector entries={entries} sidebarWidth={sidebarWidth} />
+
+      {isEditMode && <EditModeBanner />}
 
       <ResetToast visible={resetPending} />
 
@@ -482,6 +473,7 @@ export default function Constellation({ entries }: ConstellationProps) {
        * nothing is open at all.
        */}
       <ResetButton onClick={resetAll} />
+      <EditModeToggle />
 
       {/*
        * Sidebar overlay - only rendered (and therefore only taking up
@@ -497,7 +489,9 @@ export default function Constellation({ entries }: ConstellationProps) {
           sortMode={sortMode}
           categoryGroups={categoryGroups}
           onExpand={handleExpandPanel}
+          onMinimize={handleMinimizePanel}
           onClose={handleClosePanel}
+          onEdit={onEditEntry}
           top={headerLayout.top}
           left={headerLayout.left}
         />

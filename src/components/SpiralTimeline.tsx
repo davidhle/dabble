@@ -181,17 +181,64 @@
  * blob.
  *
  * ──────────────────────────────────────────────────────────────────────
- * RANGE ENTRIES: ARCS THAT FOLLOW THE SPIRAL, NOT STRAIGHT CHORDS
+ * RANGE ENTRIES: ONE d3.arc() BAND, NOT TWO CIRCLES + A LINE
  * ──────────────────────────────────────────────────────────────────────
  * An entry with `endTimestamp` (see the field comment in types/Entry.ts)
- * spans two `t` values instead of one. A straight line between
- * `spiralPoint(tStart)` and `spiralPoint(tEnd)` would cut across empty
- * space and visually cross other loops of the spiral for anything but a
- * very short span. Instead, `sampleArcPoints` walks `t` from `tStart` to
- * `tEnd` in the same small-step, build-a-polyline way `spiralSamples`
- * does for the whole spiral - so the arc is a short run of the identical
- * parametric curve the spiral itself is drawn from, guaranteed to hug the
- * spiral's own curvature over that stretch rather than approximate it.
+ * spans two `t` values instead of one. This used to render as three
+ * independent SVG primitives sharing one visual idea - a thin `stroke`
+ * `<path>` sampled along the spiral's own curve between `tStart`/`tEnd`,
+ * plus a `<circle>` at each end to mark the boundaries - and every
+ * "opened entry" highlight treatment (glow, then later a ring) had to be
+ * built, and re-tuned, three times over: once for the line, once for
+ * EACH endpoint circle (see the git history of `OPENED_ARC_GLOW_*`/
+ * `OPENED_ARC_ENDPOINT_GLOW_*` below for just how much back-and-forth
+ * tuning three independently-drifting glow strengths took before they
+ * finally read as "one consistent highlight"). Highlighting three
+ * separate shapes as if they were one was the recurring source of bugs
+ * here: a crisp outline ring that looked fine traced around a circle
+ * turned into a distinct duplicate line when traced along the thin arc's
+ * own centerline (removed in an earlier pass - see the git history), and
+ * matching the line's glow strength to the point glow's took several
+ * rounds of tuning three numbers instead of one.
+ *
+ * This is now ONE shape: a single `d3.arc()` path, configured as a short
+ * curved BAND (an annulus segment - `innerRadius`/`outerRadius` a small
+ * fixed thickness apart, `cornerRadius` rounding its two ends into caps)
+ * rather than three. `startAngle`/`endAngle` come from the exact same
+ * per-`t` angle `spiralPoint` already uses for point positioning (see
+ * `spiralAngleForD3Arc` below - it just re-expresses `spiralPolarAngle`'s
+ * own angle in d3.arc()'s different zero-reference/direction convention,
+ * rather than computing a second, independently-drifting angle), so a
+ * range entry's start/end always land exactly where a POINT entry at
+ * those same two dates would. The one deliberate trade-off: this band
+ * sits at a single FIXED radius (the entry's radius at its own
+ * MIDPOINT `t`, `spiralPointAtRadius` below) rather than tracking the
+ * spiral's own increasing radius across the full span the way the old
+ * sampled-polyline arc did - for a short span this is visually
+ * indistinguishable from hugging the true curve, but a range spanning a
+ * large fraction of a rotation will now read as a flat curved band
+ * slightly off the spiral's own gridline rather than tracing it exactly.
+ *
+ * WHY THIS MAKES HIGHLIGHTING A SINGLE, CLEAN OPERATION:
+ * Every "opened entry" treatment below - the blurred glow behind it, and
+ * the crisp ring around it - is a STROKE on this exact same closed path
+ * (`fill="none"`, a thicker or thinner `strokeWidth`), not a second,
+ * differently-sized `d3.arc()` shape. A closed path's stroke always
+ * traces its FULL boundary as one continuous line - both long curved
+ * edges AND both rounded end caps - for free, with no separate geometry
+ * to build or keep in sync. (An earlier version generated separate wider/
+ * narrower `d3.arc()` calls for the glow/ring instead; resizing an
+ * annulus segment's radii doesn't uniformly "grow" it the way offsetting
+ * a rounded rectangle does, so those extra shapes' rounded corners landed
+ * in the wrong place and never wrapped around the band's own ends - see
+ * the "ARC BAND HIGHLIGHT" comment further below for the full story.)
+ * There's exactly one shape's boundary to trace a ring around, and
+ * exactly one shape's silhouette to blur into a glow - no coordinating
+ * three separate elements' geometry, tuning three opacity/width numbers
+ * to read as one strength, or discovering that an outline drawn "outside"
+ * one piece (a circle) looks completely different from the same outline
+ * drawn "outside" a different piece (a thin centerline stroke) of what's
+ * supposed to be a single visual highlight.
  *
  * ──────────────────────────────────────────────────────────────────────
  * DOMAIN COMES FROM domainRange, NOT `entries`
@@ -213,6 +260,63 @@
  * `domainRange.start === domainRange.end`) even though
  * TimeRangeContext's own `computeFullRange` already pads a degenerate
  * range the same way.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * "NOW" MARKER: DOMAIN EXTENSION, THE DOTTED CONTINUATION, AND THE SUN/
+ * MOON GLYPH
+ * ──────────────────────────────────────────────────────────────────────
+ * DOMAIN EXTENSION: `domainRange.end` is, at most, the most recent
+ * entry's own date - there's no reason for the spiral's outer rim (t=1)
+ * to represent anything LATER than that otherwise. But in practice
+ * "now" is always later than your last logged entry (nobody logs an
+ * entry for a moment that hasn't happened yet), so pinning t=1 to
+ * whichever entry happens to be most recent would make the spiral's own
+ * edge silently drift further "in the past" the longer someone goes
+ * between visits - there's no visual cue that today isn't actually
+ * where the timeline ends. Extending `maxDate` out to `now` whenever
+ * `now` is later fixes t=1 to mean "the present moment," with the
+ * actual latest entry sitting slightly inside it (at whatever `t` its
+ * own date normalizes to) - exactly like a real archive: the most
+ * recent thing you wrote down usually isn't "right now," it's some time
+ * ago. This is a MAX-only extension - it never touches `domain[0]` - so
+ * it can't reintroduce the "DOMAIN COMES FROM domainRange" bug just
+ * above (entries clustering away from a SHRUNK edge): it only ever
+ * pushes t=1 further OUTWARD than `domainRange` itself already
+ * resolved to, never inward.
+ *
+ * THE DOTTED LINE + GLYPH: drawn as a second, much shorter sampled
+ * polyline (same `spiralPoint`-per-sample technique the main curve
+ * itself uses - see "DRAWING THE SPIRAL LINE" above - just scoped to
+ * `[latestEntryDate's t, now's t]` instead of the full `[0, 1]`), with a
+ * `strokeDasharray` added so it reads as a continuation of, not a
+ * replacement for, the main gridline's solid stroke. `latestEntryDate`
+ * (the line's inner endpoint) is computed directly from `entries`, NOT
+ * reused from `domainRange.end`: someone can drag TimeRangeSelector's
+ * own handle to an arbitrary date no entry actually falls on, and
+ * anchoring this line there instead would leave it starting in empty
+ * space rather than at a real entry. A small sun/moon text glyph sits
+ * at the line's outer end (`now`'s own position) - a sun for local
+ * hours [6, 18), a moon otherwise (see `NOW_DAY_START_HOUR`/
+ * `NOW_DAY_END_HOUR` below), using nothing more than `new Date()` and
+ * `getHours()` - no timezone lookup or geolocation, since "day or
+ * night" here just means the VIEWER's own local clock, the same way a
+ * device's own OS decides when to switch to a dark wallpaper.
+ *
+ * FROZEN AT MOUNT: `now` itself (the Date instance behind both the
+ * domain extension above and the glyph's day/night check) is captured
+ * ONCE, in a lazy `useState` initializer, not read fresh on every
+ * render - see the "now" useState below. Without that, `now` would
+ * advance by however many milliseconds elapsed between renders (small,
+ * but nonzero, and non-deterministic), making the exact rendered
+ * position of this line's outer endpoint - and therefore `totalRotations`,
+ * which the domain extension can also nudge - technically different
+ * every render, for no visible benefit; freezing it at mount makes the
+ * marker's position (and the sun-vs-moon choice) a single, stable fact
+ * about when this view was opened. The ONE exception is the tooltip
+ * shown on hovering the glyph (see the "Hover tooltip" comment further
+ * down) - that's expected to visibly tick while actively hovered, so it
+ * reads fresh `new Date()` values on its own separate one-second
+ * interval, entirely independent of this frozen `now`.
  *
  * ──────────────────────────────────────────────────────────────────────
  * FULL-BLEED CANVAS + CLICK-TO-CENTER: SAME AS StarMap, NOT LinearTimeline
@@ -301,14 +405,18 @@
  * inside it is. A point with no conflicting arc anywhere keeps its
  * original always-lane-0 behavior, sitting directly on the curve.
  *
- * `spiralPoint`/`sampleArcPoints` both take a `radiusOffset` parameter
- * (default 0) to make a lane number a small additive term in the same
- * `radius = t*maxRadius` formula the top-of-file SPIRAL FORMULA comment
- * already describes, at the SAME theta it would
- * otherwise use - nudging only the radius leaves a point/arc's angular
- * position (and therefore which year-ring it reads against) completely
- * unchanged, just as LinearTimeline's vertical nudge leaves an entry's x
- * position (and therefore which axis tick it reads against) unchanged.
+ * `spiralPoint` takes a `radiusOffset` parameter (default 0) to make a
+ * lane number a small additive term in the same `radius = t*maxRadius`
+ * formula the top-of-file SPIRAL FORMULA comment already describes, at
+ * the SAME theta it would otherwise use - nudging only the radius leaves
+ * a point's angular position (and therefore which year-ring it reads
+ * against) completely unchanged, just as LinearTimeline's vertical nudge
+ * leaves an entry's x position (and therefore which axis tick it reads
+ * against) unchanged. A range entry's `d3.arc()` band (see the RANGE
+ * ENTRIES comment above) applies this exact same `lane *
+ * RADIAL_LANE_OFFSET_PX` term directly to its own fixed band radius
+ * instead - one number added once, rather than baked into every sampled
+ * point along a curve the way the old polyline arc needed.
  *
  * Because `start`/`end`/`midpoint`/`pathD` (for ranges) and `x`/`y` (for
  * points) below are all computed WITH each entry's own lane offset
@@ -323,11 +431,15 @@ import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
 import { DateRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
+// Same date/time formatting the "now" marker's tooltip uses for its live
+// clock - see the top-of-file "NOW MARKER" comment and formatSingleDate's
+// own comment in formatEntryDate.ts.
+import { formatSingleDate } from '../utils/formatEntryDate';
 // Shared with StarMap.tsx/LinearTimeline.tsx's own hover tooltip - see
 // EntryTooltip.tsx's header comment for why this is a shared pattern
 // across every visualization view rather than duplicated per-component.
 import EntryTooltip from './EntryTooltip';
-import VizEmptyState, { TimeRangeSelectorRect } from './VizEmptyState';
+import VizEmptyState from './VizEmptyState';
 import { assignLanes, assignLaneAroundRanges } from '../utils/laneAssignment';
 
 interface SpiralTimelineProps {
@@ -402,93 +514,88 @@ interface SpiralTimelineProps {
    */
   topOffset: number;
   /**
-   * TimeRangeSelector's own card's live rendered position
-   * (Spiral.tsx's own `timeRangeSelectorRect`) - passed straight through
-   * to VizEmptyState.tsx so it can position its "filtered" message
-   * immediately beside that card. See VizEmptyState.tsx's own
-   * POSITIONING comment.
+   * Whether the shared, cross-page Edit Mode flag (EditModeContext.tsx)
+   * is currently on - passed straight through to VizEmptyState.tsx so its
+   * "filtered" message knows whether EditModeBanner.tsx is ALSO occupying
+   * the shared top-right tooltip stack's top slot (see that file's own
+   * EDIT MODE STACKING comment). PURELY PRESENTATIONAL - see StarMap.tsx's
+   * identical `isEditMode` prop comment for why this doesn't change
+   * SpiralTimeline's own click behavior.
    */
-  timeRangeSelectorRect: TimeRangeSelectorRect;
+  isEditMode: boolean;
 }
 
 /** Small circle radius (px) for a single-point entry and for a range entry's end caps. */
 const POINT_RADIUS = 5;
 
-/** Stroke width (px) of a range entry's arc. */
-const ARC_STROKE_WIDTH = 3.5;
+/**
+ * Opacity of the "opened entry" glow - shared by the plain point glow
+ * (rendered further below) AND the arc's own line/endpoint glow (see the
+ * "ARC GLOW" comment further below for why the arc explicitly reuses this
+ * exact value instead of an independently-tuned one).
+ */
+const GLOW_OPACITY = 0.6;
 
 /**
- * Extra stroke width (px) added to a range entry's own colored arc when
- * it's opened - see the OPENED-ENTRY HIGHLIGHT (arc glow) comment below
- * for why a subtle thickness bump (not a dramatic one) is what actually
- * makes a highlighted arc read as connected to its start/end highlight
- * circles, rather than relying on the glow/ring alone.
+ * Blur radius (px) for the plain point/star glow specifically - see
+ * `ARC_GLOW_BLUR_STD_DEVIATION` below for why the arc's own line/endpoint
+ * glow uses a separate, higher value instead of sharing this one.
  */
-const OPENED_ARC_STROKE_WIDTH_BOOST = 1.5;
-
-/**
- * ──────────────────────────────────────────────────────────────────────
- * ARC GLOW: TUNED DOWN SO THE COLOR STAYS DOMINANT
- * ──────────────────────────────────────────────────────────────────────
- * A first pass at the arc glow used `ARC_STROKE_WIDTH + 8` (11.5px) at
- * `strokeOpacity={0.5}`, blurred with `stdDeviation={3}` (see
- * GLOW_BLUR_STD_DEVIATION below). Even with the glow correctly layered
- * BEHIND the colored arc (see the render below), that combination was
- * simply too big and too bright relative to the ~5px colored arc drawn
- * on top of it: a wide, half-opaque, heavily-blurred white stroke bleeds
- * far enough past the colored arc's own edges that the two visually
- * merge into one whitish shape instead of reading as "a colored arc with
- * a soft glow behind it" - the category color (e.g. Shuffle Dance's
- * green) got washed out rather than staying the dominant, legible color.
- * The same oversized footprint also meant two selected arcs running
- * close together on the spiral (e.g. two entries from the same
- * multi-week tournament) could have their glows overlap and blur into
- * one continuous highlighted region instead of reading as two distinct
- * selections.
- *
- * `OPENED_ARC_GLOW_EXTRA_WIDTH` (8 -> 4) and `OPENED_ARC_GLOW_OPACITY`
- * (0.5 -> 0.3) below are both cut roughly in half from that first pass,
- * and `GLOW_BLUR_STD_DEVIATION` (3 -> 2) tightens the blur radius on top
- * of that - together, the glow now extends only slightly past the
- * colored arc's own (already opened-boosted) width, at a low enough
- * opacity to read as a backdrop rather than competing with the
- * full-opacity color painted over it, and with a small enough spatial
- * footprint that two nearby selected arcs' halos stay visually separate
- * instead of bleeding together.
- */
-const OPENED_ARC_GLOW_EXTRA_WIDTH = 4;
-const OPENED_ARC_GLOW_OPACITY = 0.3;
 const GLOW_BLUR_STD_DEVIATION = 2;
 
 /**
- * ──────────────────────────────────────────────────────────────────────
- * ARC ENDPOINT GLOW: THE ACTUAL REMAINING SOURCE OF "WHITE OVERPOWERS
- * THE COLOR" - A SEPARATE GLOW ELEMENT THE FIRST TUNING PASS MISSED
- * ──────────────────────────────────────────────────────────────────────
- * The arc's own path glow above (OPENED_ARC_GLOW_EXTRA_WIDTH/_OPACITY)
- * was tuned down, but a range entry's two start/end highlight circles
- * (rendered further below, one per endpoint) use a COMPLETELY SEPARATE
- * glow - inherited unchanged from StarMap.tsx's own per-star glow values
- * (`POINT_RADIUS + 5` radius, `strokeWidth={4}`, `strokeOpacity={0.6}`).
- * That first pass fixed the LINE's color but left these two circles at
- * their original, much brighter/wider settings - and since EVERY visible
- * selected arc necessarily shows two of these large glowing rings
- * bookending it, they - not the line - are what actually dominated the
- * shape's overall appearance, which is why the "glow overpowers the
- * color" complaint persisted even after the line itself was already
- * rendering its category color correctly (confirmed directly: DOM order
- * for the line/glow was already correct - glow first, colored line
- * second - so this endpoint glow, not a layering bug, was the real
- * remaining cause).
- *
- * Tuned to the same restrained magnitude as the line's own glow -
- * `OPENED_ARC_GLOW_OPACITY` (0.3) reused directly rather than a second,
- * separately-tunable opacity constant, so the line and its endpoints
- * always read as ONE consistently-toned highlight instead of two
- * independently-drifting glow strengths.
+ * Half-thickness (px) of a range entry's `d3.arc()` band - the band's
+ * `innerRadius`/`outerRadius` sit this far to either side of the entry's
+ * own fixed band radius (see the top-of-file "RANGE ENTRIES" comment),
+ * for a total rendered thickness of `ARC_BAND_HALF_THICKNESS * 2` (8px) -
+ * a clearly visible filled band, not a thin line.
  */
-const OPENED_ARC_ENDPOINT_GLOW_RADIUS_EXTRA = 3; // was POINT_RADIUS + 5
-const OPENED_ARC_ENDPOINT_GLOW_STROKE_WIDTH = 3; // was 4
+const ARC_BAND_HALF_THICKNESS = 4;
+
+/** Corner radius (px) rounding a range entry's band into capsule-like rounded ends, rather than sharp square edges. */
+const ARC_CORNER_RADIUS = 3;
+
+/**
+ * ──────────────────────────────────────────────────────────────────────
+ * ARC BAND HIGHLIGHT: STROKE THE ONE CLOSED PATH, DON'T BUILD A SECOND
+ * SHAPE
+ * ──────────────────────────────────────────────────────────────────────
+ * Now that a range entry is a single `d3.arc()` band (see the top-of-file
+ * "RANGE ENTRIES" comment), its "opened entry" glow and ring are a
+ * STROKE on that EXACT SAME path (`fill="none"`, `stroke=...`) - see the
+ * render below - not a second, differently-sized `d3.arc()` shape. An
+ * earlier version tried the latter (a wider/narrower band for the glow, a
+ * band entirely outside `outerRadius` for the ring), and it looked
+ * broken: resizing an annulus segment's `innerRadius`/`outerRadius` does
+ * NOT uniformly "grow" it the way offsetting a rounded rectangle's own
+ * edges does (LinearTimeline.tsx's `capsuleOutlineRect`) - a differently-
+ * sized arc's rounded corners land at a different position than the
+ * original's, so the highlight only showed up as extra arcs parallel to
+ * the two long curved edges, never wrapping around the rounded end caps.
+ * `pathD` is already a single CLOSED path (outer arc, corner, inner arc,
+ * corner, back to start); stroking it directly makes SVG trace that
+ * entire boundary as one continuous line, corners included, with no
+ * separate geometry to keep in sync.
+ *
+ * `OPENED_ARC_GLOW_EXTRA_RADIUS`/`ARC_RING_WIDTH` are each still the same
+ * numeric values earlier versions of this glow/ring already used (4 and
+ * 1.5 - see this file's own git history for how those were tuned to read
+ * as comparably strong to the plain point glow/ring), just applied
+ * differently now: `strokeWidth` at render time is DOUBLE each of these,
+ * since a stroke straddles its path (half spills inward, half outward) -
+ * only the outward half ends up visible once the opaque colored band is
+ * drawn on top of both, covering the inward half. Blur uses its OWN
+ * dedicated `opened-arc-glow` filter (see the `<defs>` below) at
+ * `ARC_GLOW_BLUR_STD_DEVIATION`, decoupled from the plain point/star
+ * glow's own `opened-spiral-glow` filter so this doesn't also blur every
+ * plain point.
+ */
+const OPENED_ARC_GLOW_EXTRA_RADIUS = 4;
+const OPENED_ARC_GLOW_OPACITY = GLOW_OPACITY;
+/** Blur radius (px) for JUST the arc band's own glow - see the "ARC BAND HIGHLIGHT" comment above for why this is bumped above (and kept decoupled from) the shared point/star `GLOW_BLUR_STD_DEVIATION`. */
+const ARC_GLOW_BLUR_STD_DEVIATION = 3;
+/** Visible thickness (px) of a range entry's ring once drawn - see the "ARC BAND HIGHLIGHT" comment above for why the render's actual `strokeWidth` is double this. */
+const ARC_RING_WIDTH = 1.5;
 
 /**
  * Radial spacing (px) between stacked arc lanes - the spiral's equivalent
@@ -532,11 +639,6 @@ const SAMPLES_PER_ROTATION = 48;
 /** Hard cap on total main-spiral samples, so a very long-spanning (many-year) timeline doesn't build an unreasonably large path string. */
 const MAX_SPIRAL_SAMPLES = 2000;
 
-/** Segments-per-rotation used when sampling one range entry's (typically much shorter) arc - lower than the main spiral's since an arc only covers a fraction of a loop. */
-const ARC_SAMPLES_PER_ROTATION = 32;
-const MIN_ARC_SAMPLES = 6;
-const MAX_ARC_SAMPLES = 200;
-
 /**
  * Font size (px) of a year glyph - see the top-of-file "YEAR GLYPHS"
  * comment. Small and quiet by design: this marks a waypoint on the
@@ -554,6 +656,41 @@ const YEAR_GLYPH_FONT_SIZE_PX = 9;
  */
 const YEAR_GLYPH_OPACITY = 0.45;
 const YEAR_GLYPH_HOVER_OPACITY = 0.85;
+
+/**
+ * Local hour range (inclusive start, exclusive end) during which the
+ * "now" marker's glyph renders as a sun rather than a moon - see the
+ * top-of-file "NOW MARKER" comment. A plain `Date.getHours()` comparison
+ * against the VIEWER's own device clock - no timezone lookup or
+ * geolocation, matching the task's own "just simple local hour
+ * comparison" ask.
+ */
+const NOW_DAY_START_HOUR = 6;
+const NOW_DAY_END_HOUR = 18;
+
+/**
+ * Dash pattern (SVG `stroke-dasharray`, px-on/px-off) for the "now"
+ * continuation line - same `currentColor`/opacity/width as the main
+ * spiral gridline it extends (see the render below), just dashed so it
+ * reads as a continuation past real data rather than more of the solid
+ * curve.
+ */
+const NOW_LINE_DASH = '2,3';
+
+/**
+ * Font size (px) of the sun/moon "now" glyph - a bit larger than
+ * `YEAR_GLYPH_FONT_SIZE_PX`, since this marks the live present moment
+ * (arguably the single most important waypoint on the whole spiral),
+ * not just a quiet year boundary.
+ */
+const NOW_GLYPH_FONT_SIZE_PX = 14;
+
+/** Resting / hovered opacity of the "now" glyph - same idea as `YEAR_GLYPH_OPACITY`/`YEAR_GLYPH_HOVER_OPACITY`, just a bit stronger at rest so it doesn't read as quietly as a plain year waypoint. */
+const NOW_GLYPH_OPACITY = 0.7;
+const NOW_GLYPH_HOVER_OPACITY = 1;
+
+/** How often (ms) the "now" glyph's hover tooltip re-renders its displayed clock while actively hovered - see the "Hover tooltip" comment further down. */
+const NOW_TOOLTIP_TICK_MS = 1000;
 
 /**
  * How close (px, on screen) a year glyph's raw position needs to be to an
@@ -655,40 +792,43 @@ function buildPolylinePath(points: { x: number; y: number }[]): string {
 }
 
 /**
- * Samples the spiral curve between two `t` values (inclusive) - used to
- * draw a range entry's arc. See the top-of-file "RANGE ENTRIES" comment
- * for why this (walking the same parametric curve over a short span)
- * rather than a straight line between the two endpoints.
- *
- * `radiusOffset` is forwarded to every sampled `spiralPoint` call - see
- * that function's own comment - so a lane-assigned arc's ENTIRE path (not
- * just its endpoints) follows the same outward-shifted curve, rather than
- * only its start/end points moving while the arc between them still traces
- * the un-offset spiral.
+ * Converts a normalized time fraction `t` to the angle convention
+ * `d3.arc()` expects, for a range entry's `startAngle`/`endAngle` - see
+ * the top-of-file "RANGE ENTRIES" comment. `d3.arc()` measures its angle
+ * from 12 o'clock (not the positive x-axis `spiralPolarAngle` measures
+ * from), increasing clockwise - the SAME direction `spiralPolarAngle`
+ * already increases in on screen (`SPIRAL_START_ANGLE` happens to ALSO
+ * start the spiral at 12 o'clock), so the two conventions differ by
+ * exactly a constant quarter-turn: `spiralPolarAngle(0, params) ===
+ * -PI/2` (12 o'clock in THIS file's own cos/sin convention) needs to map
+ * to d3.arc()'s `0` (12 o'clock in ITS convention), so adding `PI/2`
+ * converts one to the other. Built on `spiralPolarAngle` itself (not a
+ * second, independently-derived formula) so a range entry's start/end
+ * angle can never drift out of sync with where a POINT entry at that
+ * same `t` actually renders.
  */
-function sampleArcPoints(
-  tStart: number,
-  tEnd: number,
-  params: SpiralParams,
-  radiusOffset = 0
-): { x: number; y: number }[] {
-  const t0 = Math.min(tStart, tEnd);
-  const t1 = Math.max(tStart, tEnd);
-  const span = t1 - t0;
-  const segmentCount = Math.min(
-    MAX_ARC_SAMPLES,
-    Math.max(
-      MIN_ARC_SAMPLES,
-      Math.round(span * params.totalRotations * ARC_SAMPLES_PER_ROTATION)
-    )
-  );
+function spiralAngleForD3Arc(t: number, params: SpiralParams): number {
+  return spiralPolarAngle(t, params) + Math.PI / 2;
+}
 
-  const points: { x: number; y: number }[] = [];
-  for (let i = 0; i <= segmentCount; i++) {
-    const t = t0 + (span * i) / segmentCount;
-    points.push(spiralPoint(t, params, radiusOffset));
-  }
-  return points;
+/**
+ * Cartesian position at a normalized time fraction `t`'s own angle, but
+ * at an EXPLICIT radius rather than that `t`'s natural `t * maxRadius`
+ * position. Used for a range entry's start/end/midpoint marker positions
+ * (year-glyph collision avoidance, CLICK-TO-CENTER) now that its `d3.arc()`
+ * band sits at one fixed radius rather than tracing the spiral's own
+ * increasing radius across its span - see the top-of-file "RANGE ENTRIES"
+ * comment. Implemented via `spiralPoint`'s own `radiusOffset` parameter:
+ * offsetting by exactly `radius - t*maxRadius` cancels out `t`'s natural
+ * radius and replaces it with the desired fixed one, at the same angle
+ * `spiralPoint` would otherwise use.
+ */
+function spiralPointAtRadius(
+  t: number,
+  radius: number,
+  params: SpiralParams
+): { x: number; y: number } {
+  return spiralPoint(t, params, radius - t * params.maxRadius);
 }
 
 export default function SpiralTimeline({
@@ -702,7 +842,7 @@ export default function SpiralTimeline({
   resetViewSignal,
   domainRange,
   topOffset,
-  timeRangeSelectorRect,
+  isEditMode,
 }: SpiralTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -738,11 +878,25 @@ export default function SpiralTimeline({
     return () => observer.disconnect();
   }, []);
 
+  // ─── "Now", frozen at mount ───
+  // See the top-of-file "NOW MARKER" comment's own "FROZEN AT MOUNT"
+  // section for why this is captured once, in a lazy useState
+  // initializer (which React guarantees only ever runs on the very
+  // first render), rather than read fresh on every render.
+  const [now] = useState(() => new Date());
+
   // ─── Date domain ───
   // See the DOMAIN COMES FROM domainRange comment above - this no longer
-  // derives from `entries`' own extent.
+  // derives from `entries`' own extent. The one addition is the "NOW
+  // MARKER" extension - see that top-of-file comment for the full
+  // reasoning - which pushes `domain[1]` out to `now` whenever `now` is
+  // later, and ONLY then; it never touches `domain[0]`.
   const [minDate, maxDate] = useMemo(() => {
     const domain: [Date, Date] = [domainRange.start, domainRange.end];
+
+    if (now.getTime() > domain[1].getTime()) {
+      domain[1] = now;
+    }
 
     if (domain[0].getTime() === domain[1].getTime()) {
       domain[0] = d3.timeDay.offset(domain[0], -1);
@@ -750,7 +904,7 @@ export default function SpiralTimeline({
     }
 
     return domain;
-  }, [domainRange]);
+  }, [domainRange, now]);
 
   const normalize = (date: Date): number => {
     const span = maxDate.getTime() - minDate.getTime();
@@ -932,26 +1086,33 @@ export default function SpiralTimeline({
 
   /**
    * ──────────────────────────────────────────────────────────────────────
-   * RANGE ENTRIES (with endTimestamp): LANE-ASSIGNED ARCS, LANE 0 = 0
-   * RADIAL OFFSET
+   * RANGE ENTRIES (with endTimestamp): LANE-ASSIGNED d3.arc() BANDS, LANE
+   * 0 = 0 RADIAL OFFSET
    * ──────────────────────────────────────────────────────────────────────
    * See the top-of-file "OVERLAPPING ARCS (AND POINTS)" comment for the
-   * full reasoning. In short: `assignLanes` (utils/laneAssignment.ts,
-   * shared verbatim with LinearTimeline.tsx) decides lane NUMBERS from
-   * each entry's arc-length span along the spiral path (`tToArcLength`,
-   * the spiral's stand-in for LinearTimeline's xScale pixel position, and
+   * lane-NUMBER-assignment reasoning (unchanged) and the "RANGE ENTRIES"
+   * comment for why this is now one `d3.arc()` band instead of a sampled
+   * polyline. In short: `assignLanes` (utils/laneAssignment.ts, shared
+   * verbatim with LinearTimeline.tsx) decides lane NUMBERS from each
+   * entry's arc-length span along the spiral path (`tToArcLength`, the
+   * spiral's stand-in for LinearTimeline's xScale pixel position, and
    * processed duration-descending, so a solitary or longest-overlapping
    * arc lands in lane 0); `radiusOffset` then turns a lane number into an
-   * outward radial nudge, re-sampling that entry's arc (and its
-   * start/end/midpoint) at the larger radius via `spiralPoint`/
-   * `sampleArcPoints`'s `radiusOffset` parameter - `lane * RADIAL_LANE_OFFSET_PX`,
-   * so lane 0 is exactly 0: it sits directly on the spiral's own drawn
-   * curve, not nudged outward at all.
+   * outward radial nudge added directly onto the band's own fixed
+   * `bandRadius` - `lane * RADIAL_LANE_OFFSET_PX`, so lane 0 is exactly 0:
+   * its band sits centered on the spiral's own drawn curve at that
+   * midpoint radius, not nudged outward at all.
    *
-   * `start`/`end`/`midpoint`/`pathD` below all already have this offset
-   * baked in - the hover/click/highlight JSX further down reads these same
-   * fields, so it automatically targets the lane-adjusted arc position, not
-   * the original un-offset spiral curve.
+   * `bandRadius` itself is the spiral's own `radius = t*maxRadius` at this
+   * entry's MIDPOINT `t` (`(t0+t1)/2`) - a single representative radius
+   * for the whole span, since a `d3.arc()` band (unlike the old sampled
+   * polyline) can only have one. `start`/`end`/`midpoint` below are then
+   * each recomputed at THIS SAME `bandRadius` (via `spiralPointAtRadius`)
+   * rather than each point's own natural t-based radius, so they sit
+   * exactly on the band that's actually drawn - the hover/click/highlight
+   * JSX further down, and the YEAR GLYPHS collision check, both read
+   * these same fields, so they automatically target where the band
+   * visually IS, not where the old un-banded curve would have put them.
    *
    * `lanedRangeItems` (the pre-radiusOffset `assignLanes` output, still
    * carrying `arcStart`/`arcEnd`) is kept alongside the final `ranges` list
@@ -982,20 +1143,49 @@ export default function SpiralTimeline({
       LANE_GAP_PX
     );
 
+    // One generator, reused for every range entry's single path below -
+    // the "opened" glow/ring (rendered further down) STROKE this SAME
+    // path rather than needing their own separately-generated shapes -
+    // see the top-of-file "RANGE ENTRIES" comment's "WHY THIS MAKES
+    // HIGHLIGHTING A SINGLE, CLEAN OPERATION" section.
+    const arcGenerator = d3.arc();
+
     const ranges = laned.map(({ entry, tStart, tEnd, color, lane }) => {
       const radiusOffset = lane * RADIAL_LANE_OFFSET_PX;
-      const arcPoints = sampleArcPoints(
-        tStart,
-        tEnd,
-        spiralParams,
-        radiusOffset
-      );
+      const t0 = Math.min(tStart, tEnd);
+      const t1 = Math.max(tStart, tEnd);
+      const tMid = (t0 + t1) / 2;
+      const bandRadius = tMid * spiralParams.maxRadius + radiusOffset;
+      const startAngle = spiralAngleForD3Arc(t0, spiralParams);
+      const endAngle = spiralAngleForD3Arc(t1, spiralParams);
+
+      // Math.max(0, ...) guards the innermost entries: `radius = t *
+      // maxRadius` starts at true 0 (see the SPIRAL FORMULA comment), so
+      // a range entry whose midpoint sits very close to the spiral's own
+      // center could otherwise compute a negative innerRadius, which
+      // `d3.arc()` doesn't accept.
+      //
+      // This is the ONLY path generated per range entry - the "opened"
+      // glow/ring below (in the render) both STROKE this exact same `d`
+      // string rather than generating their own differently-sized
+      // shapes; see that render's own comment for why stroking the one
+      // closed path directly, instead of building separate offset
+      // arcs, is what makes the highlight wrap continuously around the
+      // ENTIRE shape (both long edges AND both rounded end caps).
+      const pathD =
+        arcGenerator.cornerRadius(ARC_CORNER_RADIUS)({
+          innerRadius: Math.max(0, bandRadius - ARC_BAND_HALF_THICKNESS),
+          outerRadius: bandRadius + ARC_BAND_HALF_THICKNESS,
+          startAngle,
+          endAngle,
+        }) ?? '';
+
       return {
         entry,
-        pathD: buildPolylinePath(arcPoints),
-        start: arcPoints[0],
-        end: arcPoints[arcPoints.length - 1],
-        midpoint: spiralPoint((tStart + tEnd) / 2, spiralParams, radiusOffset),
+        pathD,
+        start: spiralPointAtRadius(t0, bandRadius, spiralParams),
+        end: spiralPointAtRadius(t1, bandRadius, spiralParams),
+        midpoint: spiralPointAtRadius(tMid, bandRadius, spiralParams),
         color,
         lane,
       };
@@ -1091,6 +1281,68 @@ export default function SpiralTimeline({
     );
     return collidesAt(backwardT) ? forwardT : backwardT;
   };
+
+  // ─── "Now" marker ───
+  // See the top-of-file "NOW MARKER" comment for the full reasoning.
+  // `isDaytime` is derived from the SAME frozen `now` the domain
+  // extension above uses - not `new Date()` read fresh here - so the
+  // sun/moon choice is fixed for this view's lifetime rather than
+  // flipping mid-session if it happens to be open across 6am/6pm.
+  const isDaytime =
+    now.getHours() >= NOW_DAY_START_HOUR && now.getHours() < NOW_DAY_END_HOUR;
+
+  // The line's INNER endpoint - deliberately the latest entry's own
+  // date, computed directly from `entries` (each entry's `endTimestamp`
+  // when present, else its plain `timestamp`), NOT reused from
+  // `domainRange.end` - see the top-of-file comment's "THE DOTTED LINE +
+  // GLYPH" section for why.
+  const latestEntryDate = useMemo(() => {
+    if (entries.length === 0) return null;
+
+    return entries.reduce(
+      (latest, entry) => {
+        const entryEnd = new Date(entry.endTimestamp ?? entry.timestamp);
+        return entryEnd.getTime() > latest.getTime() ? entryEnd : latest;
+      },
+      new Date(entries[0].endTimestamp ?? entries[0].timestamp)
+    );
+  }, [entries]);
+
+  const nowMarker = useMemo(() => {
+    // No entries at all, or (an unusual edge case - a future-dated
+    // entry) the latest entry is somehow already later than "now" -
+    // either way there's no sensible forward-in-time line to draw.
+    if (!latestEntryDate || now.getTime() < latestEntryDate.getTime()) {
+      return null;
+    }
+
+    const tStart = normalize(latestEntryDate);
+    const tEnd = normalize(now);
+    if (tEnd <= tStart) return null;
+
+    // Same sampled-polyline technique (and the SAME per-rotation sample
+    // density) as the main spiral curve itself - see the top-of-file
+    // "DRAWING THE SPIRAL LINE" comment - just scoped to this much
+    // shorter `[tStart, tEnd]` sub-span instead of the full `[0, 1]`.
+    const sampleCount = Math.max(
+      2,
+      Math.round(
+        (tEnd - tStart) * spiralParams.totalRotations * SAMPLES_PER_ROTATION
+      )
+    );
+    const samples: { x: number; y: number }[] = [];
+    for (let i = 0; i <= sampleCount; i++) {
+      samples.push(
+        spiralPoint(tStart + ((tEnd - tStart) * i) / sampleCount, spiralParams)
+      );
+    }
+
+    return {
+      pathD: buildPolylinePath(samples),
+      glyphPosition: samples[samples.length - 1],
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `normalize` closes over minDate/maxDate, already listed directly below (same pattern `points`/`ranges` use above)
+  }, [latestEntryDate, now, spiralParams, minDate, maxDate]);
 
   // ─── Pan/zoom behavior ───
   // Same mechanism as StarMap.tsx: attached once, and the 'zoom' handler
@@ -1229,16 +1481,43 @@ export default function SpiralTimeline({
   // Same shape/tracking as LinearTimeline.tsx/StarMap.tsx - see the
   // "Hover tooltip" comment in LinearTimeline.tsx - EXTENDED with a
   // `kind` discriminant so the SAME piece of state can also track a
-  // hovered YEAR GLYPH (see the "YEAR GLYPHS" comment below), not just a
-  // hovered entry point/arc. `EntryTooltip` below is rendered with either
-  // its `entry` prop (unchanged behavior) or its `label` prop (the bare
-  // year), depending on which branch is set - see EntryTooltip.tsx's own
-  // "ENTRY vs. LABEL VARIANT" comment.
+  // hovered YEAR GLYPH (see the "YEAR GLYPHS" comment below) or the
+  // hovered "NOW" GLYPH (see the top-of-file "NOW MARKER" comment), not
+  // just a hovered entry point/arc. `EntryTooltip` below is rendered
+  // with either its `entry` prop (unchanged behavior) or its `label`
+  // prop (the bare year, or the live current date/time), depending on
+  // which branch is set - see EntryTooltip.tsx's own "ENTRY vs. LABEL
+  // VARIANT" comment.
   const [hovered, setHovered] = useState<
     | { kind: 'entry'; entry: Entry; x: number; y: number }
     | { kind: 'year'; year: number; x: number; y: number }
+    | { kind: 'now'; x: number; y: number }
     | null
   >(null);
+
+  // While the "now" glyph is actively hovered, its tooltip should
+  // visibly tick once a second rather than staying frozen at whatever
+  // instant the hover started - see the top-of-file "NOW MARKER"
+  // comment's "FROZEN AT MOUNT" section for why this is deliberately
+  // its OWN separate live clock, not the frozen `now` state used
+  // everywhere else in this component. This effect only manages a
+  // re-render counter, not a `Date` itself - the tooltip's own render
+  // below reads a fresh `new Date()` each time this fires, so the
+  // interval is what makes that happen, not what stores the time. The
+  // interval is created (and torn down) only while
+  // `hovered?.kind === 'now'`, which is what makes it stop the instant
+  // the mouse leaves rather than continuing to tick in the background.
+  const [, setNowTooltipTick] = useState(0);
+
+  useEffect(() => {
+    if (hovered?.kind !== 'now') return;
+
+    const interval = window.setInterval(() => {
+      setNowTooltipTick(tick => tick + 1);
+    }, NOW_TOOLTIP_TICK_MS);
+
+    return () => window.clearInterval(interval);
+  }, [hovered?.kind]);
 
   const isReady =
     size.width > 0 && size.height > 0 && spiralParams.maxRadius > 0;
@@ -1261,17 +1540,14 @@ export default function SpiralTimeline({
       >
         <defs>
           {/*
-           * Soft blur used behind opened entries' highlight ring, so it
-           * reads as a glow rather than a hard-edged shape - same
+           * Soft blur used behind a plain OPENED POINT's highlight ring,
+           * so it reads as a glow rather than a hard-edged shape - same
            * pattern as StarMap.tsx's `opened-star-glow`/
            * LinearTimeline.tsx's `opened-point-glow` (kept as a separate
            * id here since defs ids are scoped per-<svg>, not shared
-           * across components). `stdDeviation` uses
-           * GLOW_BLUR_STD_DEVIATION (2, tuned down from an initial 3) -
-           * see the ARC GLOW comment above `OPENED_ARC_GLOW_EXTRA_WIDTH`
-           * for why: a smaller blur radius keeps each opened entry's
-           * halo from spreading far enough to wash out its own color or
-           * bleed into a nearby opened arc's halo.
+           * across components). NOT used by the arc's own glow below -
+           * see `opened-arc-glow` for why that one needs a different,
+           * decoupled blur value instead of sharing this one.
            */}
           <filter
             id="opened-spiral-glow"
@@ -1281,6 +1557,25 @@ export default function SpiralTimeline({
             height="300%"
           >
             <feGaussianBlur stdDeviation={GLOW_BLUR_STD_DEVIATION} />
+          </filter>
+          {/*
+           * Soft blur for an OPENED range entry's band glow - a separate
+           * filter, not a shared one with the plain point glow above,
+           * specifically so this can use a HIGHER blur radius
+           * (ARC_GLOW_BLUR_STD_DEVIATION) without also blurring every
+           * plain point's glow more than intended. See the "ARC BAND
+           * HIGHLIGHT" comment above `OPENED_ARC_GLOW_EXTRA_RADIUS` for
+           * why this needed a stronger blur than the plain point glow's
+           * own value in the first place.
+           */}
+          <filter
+            id="opened-arc-glow"
+            x="-100%"
+            y="-100%"
+            width="300%"
+            height="300%"
+          >
+            <feGaussianBlur stdDeviation={ARC_GLOW_BLUR_STD_DEVIATION} />
           </filter>
         </defs>
         <g ref={zoomLayerRef}>
@@ -1294,23 +1589,79 @@ export default function SpiralTimeline({
                 strokeWidth={1.5}
               />
 
-              {ranges.map(({ entry, pathD, start, end, color }) => {
+              {/*
+               * "NOW" MARKER - see the top-of-file "NOW MARKER" comment.
+               * Same stroke color/opacity/width as the main gridline
+               * path just above (this IS that same gridline, just
+               * continuing past the last real entry), with
+               * `strokeDasharray` added so it visibly reads as a
+               * continuation rather than more of the solid curve.
+               */}
+              {nowMarker && (
+                <>
+                  <path
+                    d={nowMarker.pathD}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeOpacity={0.35}
+                    strokeWidth={1.5}
+                    strokeDasharray={NOW_LINE_DASH}
+                  />
+                  <text
+                    x={nowMarker.glyphPosition.x}
+                    y={nowMarker.glyphPosition.y}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fill="currentColor"
+                    fontSize={NOW_GLYPH_FONT_SIZE_PX}
+                    opacity={
+                      hovered?.kind === 'now'
+                        ? NOW_GLYPH_HOVER_OPACITY
+                        : NOW_GLYPH_OPACITY
+                    }
+                    className="cursor-default select-none transition-opacity duration-150"
+                    onMouseEnter={event =>
+                      setHovered({
+                        kind: 'now',
+                        x: event.clientX,
+                        y: event.clientY,
+                      })
+                    }
+                    onMouseMove={event =>
+                      setHovered(current =>
+                        current && current.kind === 'now'
+                          ? { ...current, x: event.clientX, y: event.clientY }
+                          : current
+                      )
+                    }
+                    onMouseLeave={() => setHovered(null)}
+                  >
+                    {isDaytime ? '☀' : '☾'}
+                  </text>
+                </>
+              )}
+
+              {ranges.map(({ entry, pathD, color }) => {
                 const isOpened = openedEntryIdSet.has(entry.id);
                 const isFilteredOut = !activeCategorySet.has(
                   entry.activityType
                 );
                 return (
                   // OPENED-ENTRY HIGHLIGHT: one group per range, opacity
-                  // applied once to the whole group (glow + arc + ring +
-                  // end caps) so a filtered-out arc's highlight dims
-                  // along with it - same structure as StarMap.tsx's
-                  // per-star <g>/LinearTimeline.tsx's per-range <g>.
+                  // applied once to the whole group (glow + band + ring)
+                  // so a filtered-out arc's highlight dims along with it -
+                  // same structure as StarMap.tsx's per-star <g>/
+                  // LinearTimeline.tsx's per-range <g>. `transform`
+                  // translates every path inside from `d3.arc()`'s own
+                  // (0,0)-centered coordinate space to the spiral's actual
+                  // center - see the top-of-file "RANGE ENTRIES" comment.
                   <g
                     key={entry.id}
                     style={{
                       opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
                     }}
                     className="cursor-pointer transition-opacity duration-200"
+                    transform={`translate(${spiralParams.centerX},${spiralParams.centerY})`}
                     onMouseEnter={event =>
                       setHovered({
                         kind: 'entry',
@@ -1332,120 +1683,63 @@ export default function SpiralTimeline({
                     onClick={() => onEntryClick(entry)}
                   >
                     {isOpened && (
-                      // OPENED-ENTRY HIGHLIGHT (arc glow) - LAYERING:
-                      // this glow <path> is deliberately the FIRST child
-                      // rendered inside this <g>, BEFORE the colored arc
-                      // <path> below it - in SVG (as in HTML), a later
-                      // sibling paints ON TOP of an earlier one, so
-                      // ordering the glow first is what puts it BEHIND
-                      // the colored arc, the same "glow element added to
-                      // the DOM before the main shape" layering
-                      // StarMap.tsx's per-star <g> and the point
-                      // highlight below both use (glow circle, then the
-                      // solid point, then the ring). Traced along the
-                      // SAME path the colored arc itself uses (an arc
-                      // isn't a straight capsule, so there's no simple
-                      // inflated-rect outline the way
-                      // LinearTimeline.tsx's capsuleOutlineRect draws
-                      // one). Width/opacity/blur are all
-                      // OPENED_ARC_GLOW_*/GLOW_BLUR_STD_DEVIATION - see
-                      // the "ARC GLOW: TUNED DOWN" comment above
-                      // OPENED_ARC_GLOW_EXTRA_WIDTH for the specific
-                      // values and why they were tuned down from a
-                      // first, too-strong attempt.
-                      <path
-                        d={pathD}
-                        fill="none"
-                        stroke={OPENED_HIGHLIGHT_COLOR}
-                        strokeWidth={
-                          ARC_STROKE_WIDTH + OPENED_ARC_GLOW_EXTRA_WIDTH
-                        }
-                        strokeLinecap="round"
-                        strokeOpacity={OPENED_ARC_GLOW_OPACITY}
-                        filter="url(#opened-spiral-glow)"
-                        className="pointer-events-none"
-                      />
-                    )}
-                    <path
-                      d={pathD}
-                      fill="none"
-                      stroke={color}
-                      // Full opacity, painted AFTER (on top of) the glow
-                      // above - the category color is what should read
-                      // as the dominant, legible color of the arc, with
-                      // the glow only a backdrop peeking out past its
-                      // edges. Subtly thicker while opened (see
-                      // OPENED_ARC_STROKE_WIDTH_BOOST's own comment) so
-                      // it still reads as connected to the
-                      // equally-emphasized start/end highlight circles.
-                      strokeOpacity={1}
-                      strokeWidth={
-                        isOpened
-                          ? ARC_STROKE_WIDTH + OPENED_ARC_STROKE_WIDTH_BOOST
-                          : ARC_STROKE_WIDTH
-                      }
-                      strokeLinecap="round"
-                    />
-                    {isOpened && (
-                      // OPENED-ENTRY HIGHLIGHT (arc ring): a thin, crisp
-                      // bright stroke traced along the same path, drawn
-                      // AFTER (on top of) the colored arc above for a
-                      // defined edge against the glow - same visual role
-                      // as StarMap's/LinearTimeline's own ring.
-                      <path
-                        d={pathD}
-                        fill="none"
-                        stroke={OPENED_HIGHLIGHT_COLOR}
-                        strokeWidth={1.5}
-                        strokeLinecap="round"
-                        className="pointer-events-none"
-                      />
-                    )}
-                    {[start, end].map((endpoint, index) => (
-                      <g key={index}>
-                        {isOpened && (
-                          // See the "ARC ENDPOINT GLOW" comment above
-                          // OPENED_ARC_ENDPOINT_GLOW_RADIUS_EXTRA - this
-                          // used to be a much bigger/brighter glow
-                          // (radius +5, opacity 0.6) than the arc's own
-                          // line glow, and since every selected arc
-                          // shows two of these, THEY were the actual
-                          // dominant "white overpowers the color"
-                          // element, not the line.
-                          <circle
-                            cx={endpoint.x}
-                            cy={endpoint.y}
-                            r={
-                              POINT_RADIUS +
-                              OPENED_ARC_ENDPOINT_GLOW_RADIUS_EXTRA
-                            }
-                            fill="none"
-                            stroke={OPENED_HIGHLIGHT_COLOR}
-                            strokeWidth={OPENED_ARC_ENDPOINT_GLOW_STROKE_WIDTH}
-                            strokeOpacity={OPENED_ARC_GLOW_OPACITY}
-                            filter="url(#opened-spiral-glow)"
-                            className="pointer-events-none"
-                          />
-                        )}
-                        <circle
-                          cx={endpoint.x}
-                          cy={endpoint.y}
-                          r={POINT_RADIUS}
-                          fill={color}
+                      // OPENED-ENTRY HIGHLIGHT (band glow + ring) -
+                      // STROKING THE SAME CLOSED PATH, NOT TWO SEPARATE
+                      // OFFSET SHAPES:
+                      //
+                      // An earlier version generated a second, WIDER
+                      // `d3.arc()` shape for the glow (different
+                      // innerRadius/outerRadius/cornerRadius from
+                      // `pathD`) and a THIRD, entirely-outside-outerRadius
+                      // shape for the ring. Resizing an annulus segment's
+                      // radii like that does NOT uniformly "grow" it the
+                      // way offsetting a rounded rectangle's own edges
+                      // does (LinearTimeline.tsx's `capsuleOutlineRect`) -
+                      // a wider/narrower arc's rounded corners land at a
+                      // DIFFERENT position than the original's, so the
+                      // result reads as extra arcs parallel to the two
+                      // long curved edges that never wrap around the
+                      // rounded end caps at all.
+                      //
+                      // `pathD` is already a single CLOSED path (outer
+                      // arc, corner, inner arc, corner, back to start) -
+                      // stroking it directly, with `fill="none"`, makes
+                      // SVG trace that entire closed boundary as one
+                      // continuous line, corners included, for free - no
+                      // separate geometry needed. The stroke straddles
+                      // the boundary (half in, half out); both are drawn
+                      // BEHIND the opaque colored band below, which
+                      // covers the inward half, leaving only a clean
+                      // outward halo/ring - the same "glow circle, then
+                      // solid shape" layering StarMap.tsx's per-star <g>
+                      // uses, just both glow AND ring behind the fill
+                      // here (unlike a plain point's ring, which sits at
+                      // an already-larger radius with no overlap to hide,
+                      // this ring traces the SAME boundary the fill does,
+                      // so it also needs the fill drawn after it).
+                      // `strokeWidth` is doubled from the visually-tuned
+                      // "how much should show" value, since only half of
+                      // a straddling stroke ends up visible.
+                      <>
+                        <path
+                          d={pathD}
+                          fill="none"
+                          stroke={OPENED_HIGHLIGHT_COLOR}
+                          strokeWidth={OPENED_ARC_GLOW_EXTRA_RADIUS * 2}
+                          strokeOpacity={OPENED_ARC_GLOW_OPACITY}
+                          filter="url(#opened-arc-glow)"
+                          className="pointer-events-none"
                         />
-                        {isOpened && (
-                          <circle
-                            cx={endpoint.x}
-                            cy={endpoint.y}
-                            r={POINT_RADIUS + 3}
-                            fill="none"
-                            stroke={OPENED_HIGHLIGHT_COLOR}
-                            strokeWidth={1.5}
-                            className="pointer-events-none"
-                          />
-                        )}
-                      </g>
-                    ))}
+                        <path
+                          d={pathD}
+                          fill="none"
+                          stroke={OPENED_HIGHLIGHT_COLOR}
+                          strokeWidth={ARC_RING_WIDTH * 2}
+                          className="pointer-events-none"
+                        />
+                      </>
+                    )}
+                    <path d={pathD} fill={color} />
                   </g>
                 );
               })}
@@ -1473,7 +1767,7 @@ export default function SpiralTimeline({
                         fill="none"
                         stroke={OPENED_HIGHLIGHT_COLOR}
                         strokeWidth={4}
-                        strokeOpacity={0.6}
+                        strokeOpacity={GLOW_OPACITY}
                         filter="url(#opened-spiral-glow)"
                         className="pointer-events-none"
                       />
@@ -1579,9 +1873,22 @@ export default function SpiralTimeline({
       {hovered &&
         (hovered.kind === 'entry' ? (
           <EntryTooltip entry={hovered.entry} x={hovered.x} y={hovered.y} />
-        ) : (
+        ) : hovered.kind === 'year' ? (
           <EntryTooltip
             label={String(hovered.year)}
+            x={hovered.x}
+            y={hovered.y}
+          />
+        ) : (
+          // "NOW" GLYPH TOOLTIP - see the top-of-file "NOW MARKER"
+          // comment and the `setNowTooltipTick` effect above: `new
+          // Date()` is read fresh right here (not the frozen `now` used
+          // everywhere else in this component) so this label re-renders
+          // with the actual current time on each one-second tick while
+          // this glyph is being hovered, same date/time format
+          // (`formatSingleDate`) an entry's own tooltip uses.
+          <EntryTooltip
+            label={formatSingleDate(new Date(), true)}
             x={hovered.x}
             y={hovered.y}
           />
@@ -1592,7 +1899,7 @@ export default function SpiralTimeline({
           hasAnyEntries={hasAnyEntries}
           topOffset={topOffset}
           sidebarWidth={sidebarWidth}
-          timeRangeSelectorRect={timeRangeSelectorRect}
+          editModeBannerVisible={isEditMode}
         />
       )}
     </div>

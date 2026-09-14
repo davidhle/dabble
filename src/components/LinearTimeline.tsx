@@ -168,7 +168,7 @@ import { getActivityColor } from '../utils/colors';
 // header comment for why this was pulled out into one component instead
 // of each visualization keeping its own copy of the markup.
 import EntryTooltip from './EntryTooltip';
-import VizEmptyState, { TimeRangeSelectorRect } from './VizEmptyState';
+import VizEmptyState from './VizEmptyState';
 import { assignLanes } from '../utils/laneAssignment';
 
 interface LinearTimelineProps {
@@ -248,24 +248,26 @@ interface LinearTimelineProps {
    */
   domainRange: DateRange;
   /**
-   * TimeRangeSelector's own card's live rendered position
-   * (Timeline.tsx's own `timeRangeSelectorRect`) - passed straight
-   * through to VizEmptyState.tsx so it can position its "filtered"
-   * message immediately beside that card. See VizEmptyState.tsx's own
-   * POSITIONING comment.
+   * Whether the shared, cross-page Edit Mode flag (EditModeContext.tsx)
+   * is currently on - passed straight through to VizEmptyState.tsx so its
+   * "filtered" message knows whether EditModeBanner.tsx is ALSO occupying
+   * the shared top-right tooltip stack's top slot (see that file's own
+   * EDIT MODE STACKING comment). PURELY PRESENTATIONAL - see StarMap.tsx's
+   * identical `isEditMode` prop comment for why this doesn't change
+   * LinearTimeline's own click behavior.
    */
-  timeRangeSelectorRect: TimeRangeSelectorRect;
+  isEditMode: boolean;
 }
 
 /** Opacity applied to a point/range whose category is filtered out - same value as StarMap.tsx's FILTERED_OUT_OPACITY. */
 const FILTERED_OUT_OPACITY = 0.15;
 
 /**
- * Neutral, bright highlight color for the "opened entry" ring/glow -
- * same color, same reasoning as StarMap.tsx's OPENED_HIGHLIGHT_COLOR:
+ * Neutral, bright highlight color for the "opened entry" ring/glow - same
+ * color, same reasoning as StarMap.tsx's OPENED_HIGHLIGHT_COLOR:
  * deliberately not tied to any activityType color, so it reads clearly
- * against every entry color. A theme token (--star-highlight-color), not a
- * fixed hex value - see StarMap.tsx's own comment on its identical
+ * against every entry color. A theme token (--star-highlight-color), not
+ * a fixed hex value - see StarMap.tsx's own comment on its identical
  * constant for why.
  */
 const OPENED_HIGHLIGHT_COLOR = 'var(--star-highlight-color)';
@@ -382,7 +384,7 @@ export default function LinearTimeline({
   sidebarWidth,
   topOffset,
   domainRange,
-  timeRangeSelectorRect,
+  isEditMode,
 }: LinearTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -665,6 +667,14 @@ export default function LinearTimeline({
   // and get no explicit class of their own - pick up the same muted color
   // via `currentColor`. Same convention D3Chart.tsx used for its bar
   // chart's axes.
+  //
+  // `.style('font-family', ...)` is set explicitly (not left to CSS
+  // inheritance) because these tick `<text>` elements otherwise render in
+  // the browser's own SVG UA-stylesheet default font rather than
+  // --font-body ('Sen') - unlike an HTML element, an SVG `<text>` isn't
+  // guaranteed to inherit `font-family` from its ancestors, so it has to
+  // be set directly on the element itself, the same as the `fill`/
+  // `text-xs` class right above it.
   useEffect(() => {
     if (!axisRef.current || innerWidth === 0) return;
 
@@ -678,7 +688,8 @@ export default function LinearTimeline({
     d3.select(axisRef.current)
       .call(axis)
       .selectAll('text')
-      .attr('class', 'fill-[var(--text-muted-color)] text-xs');
+      .attr('class', 'fill-[var(--text-muted-color)] text-xs')
+      .style('font-family', 'var(--font-body)');
   }, [xScale, innerWidth]);
 
   // ─── Entry points ───
@@ -1209,7 +1220,7 @@ export default function LinearTimeline({
           hasAnyEntries={hasAnyEntries}
           topOffset={topOffset}
           sidebarWidth={sidebarWidth}
-          timeRangeSelectorRect={timeRangeSelectorRect}
+          editModeBannerVisible={isEditMode}
         />
       )}
     </div>

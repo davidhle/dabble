@@ -128,6 +128,14 @@ export interface EntrySelectionContextValue {
   expandedEntryId: string | null;
   handleEntryClick: (entry: Entry) => void;
   handleExpandPanel: (entryId: string) => void;
+  /**
+   * Collapses one specific expanded panel back to its minimized row - the
+   * mirror of handleExpandPanel, wired to EntryPanel.tsx's minimize button
+   * on an EXPANDED panel (see that file's PanelIconButton row). Targeted
+   * by entryId rather than just "collapse whichever is expanded" so it
+   * stays correct even though only one panel is ever expanded at a time.
+   */
+  handleMinimizePanel: (entryId: string) => void;
   handleClosePanel: (entryId: string) => void;
   sortMode: SortMode;
   handleSortModeChange: (mode: SortMode) => void;
@@ -192,6 +200,36 @@ export function EntrySelectionProvider({
   const categories = useMemo(() => loadCategories(), [entries]);
 
   const [selectedEntries, setSelectedEntries] = useState<SelectedEntry[]>([]);
+
+  // Keeps each open panel's `entry` object in sync with `entries` itself.
+  // `selectedEntries` stores its own snapshot of each Entry (captured at
+  // click time via handleEntryClick) rather than re-deriving from
+  // `entries` on every render, so a panel could otherwise go on
+  // displaying stale title/description/etc. forever after App.tsx's
+  // updateEntry replaces that same id with edited data - the whole
+  // point of AddEntryForm's edit mode is to see the change
+  // reflected immediately in the very panel the edit button was clicked
+  // from, not just after closing and re-opening it. Only swaps the
+  // reference when it's actually changed (by identity, not a deep
+  // equality check - updateEntry always constructs a new object even for
+  // a no-op save) and bails out to the same array (`prev`) otherwise, so
+  // this doesn't cause a render loop or a new array identity on every
+  // unrelated `entries` change (e.g. one merely appending a new entry).
+  useEffect(() => {
+    setSelectedEntries(prev => {
+      let changed = false;
+      const next = prev.map(selected => {
+        const fresh = entries.find(entry => entry.id === selected.entry.id);
+        if (fresh && fresh !== selected.entry) {
+          changed = true;
+          return { ...selected, entry: fresh };
+        }
+        return selected;
+      });
+      return changed ? next : prev;
+    });
+  }, [entries]);
+
   const [sortMode, setSortMode] = useState<SortMode>('date');
   const [filterCategories, setFilterCategories] = useState<string[]>(() =>
     categories.map(category => category.id)
@@ -300,6 +338,20 @@ export function EntrySelectionProvider({
           ...selected,
           expanded: selected.entry.id === entryId,
         }))
+      );
+    },
+    [cancelResetPending]
+  );
+
+  const handleMinimizePanel = useCallback(
+    (entryId: string) => {
+      cancelResetPending();
+      setSelectedEntries(prev =>
+        prev.map(selected =>
+          selected.entry.id === entryId
+            ? { ...selected, expanded: false }
+            : selected
+        )
       );
     },
     [cancelResetPending]
@@ -423,6 +475,7 @@ export function EntrySelectionProvider({
       expandedEntryId,
       handleEntryClick,
       handleExpandPanel,
+      handleMinimizePanel,
       handleClosePanel,
       sortMode,
       handleSortModeChange,
@@ -441,6 +494,7 @@ export function EntrySelectionProvider({
       expandedEntryId,
       handleEntryClick,
       handleExpandPanel,
+      handleMinimizePanel,
       handleClosePanel,
       sortMode,
       handleSortModeChange,

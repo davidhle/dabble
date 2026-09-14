@@ -47,7 +47,7 @@
 
 import { DEFAULT_CATEGORIES } from '../types/Category';
 import { DEFAULT_ENTRIES } from '../data/defaultEntries';
-import { saveCategories } from './categories';
+import { loadCategories, saveCategories } from './categories';
 import {
   loadEntries,
   saveEntries,
@@ -62,7 +62,51 @@ export function initializeDefaultDataForFirstVisit(): void {
     return;
   }
 
+  backfillNewBundledDefaults();
   backfillBundledFields();
+}
+
+/**
+ * ──────────────────────────────────────────────────────────────────────
+ * BACKFILLING NEWLY-ADDED BUNDLED CATEGORIES/ENTRIES FOR RETURNING VISITORS
+ * ──────────────────────────────────────────────────────────────────────
+ * DEFAULT_CATEGORIES/DEFAULT_ENTRIES grow over time (e.g. a new bundled
+ * category like 'ContemporaryDance' and its entries, added after
+ * visitors had already been initialized with an earlier, smaller
+ * version of this same bundled dataset). Without this, a returning
+ * visitor's already-stored copy would never pick up anything added to
+ * the bundle after their first visit, since "already initialized" (see
+ * above) is permanent - loadCategories()/loadEntries() would just keep
+ * reading the smaller stored lists forever, even though DEFAULT_ENTRIES
+ * itself has moved on.
+ *
+ * This only ADDS bundled categories/entries whose `id` isn't already
+ * present in storage - it never touches, reorders, or removes anything
+ * already stored, so a visitor's own added/edited entries and categories
+ * are completely unaffected. There is no individual-entry-delete feature
+ * (only the full "Start Your Own Constellation" reset in Home.tsx, which
+ * writes genuinely empty arrays rather than removing the storage keys -
+ * see the comment up top), so there's no "the visitor deliberately
+ * removed this bundled entry" case to accidentally undo here.
+ */
+function backfillNewBundledDefaults(): void {
+  const storedCategories = loadCategories();
+  const storedCategoryIds = new Set(storedCategories.map(category => category.id));
+  const missingCategories = DEFAULT_CATEGORIES.filter(
+    category => !storedCategoryIds.has(category.id)
+  );
+  if (missingCategories.length > 0) {
+    saveCategories([...storedCategories, ...missingCategories]);
+  }
+
+  const storedEntries = loadEntries();
+  const storedEntryIds = new Set(storedEntries.map(entry => entry.id));
+  const missingEntries = DEFAULT_ENTRIES.filter(
+    entry => !storedEntryIds.has(entry.id)
+  );
+  if (missingEntries.length > 0) {
+    saveEntries([...storedEntries, ...missingEntries]);
+  }
 }
 
 /**
