@@ -210,6 +210,27 @@
    *                          shows, instead of each defaulting back to a
    *                          flat --bg-color that visibly doesn't match it
    *   --scrollbar-thumb-color the .dark-scrollbar thumb color (see below)
+   *   --panel-bg-color-translucent the unified title/FilterBar/sidebar-panel-
+   *                          stack container's own background
+   *                          (Constellation.tsx/Timeline.tsx/Spiral.tsx -
+   *                          see each page's own layout comment) - the same
+   *                          base tone as --panel-bg-color-solid but at
+   *                          ~65-70% opacity rather than ~92%, so the canvas
+   *                          behind it stays faintly visible THROUGH the
+   *                          whole container instead of being fully hidden
+   *   --paper-grain-opacity  opacity of .bullet-journal-surface's faint SVG
+   *                          fractal-noise grain layer - see that class's
+   *                          own comment further down for the full
+   *                          three-layer breakdown. A separate per-theme
+   *                          token (not baked into the grain image itself)
+   *                          since the same overlay-blended grain still
+   *                          reads more strongly against the dark theme's
+   *                          low-luminance base than the light theme's
+   *   --paper-dot-color      .bullet-journal-surface's bullet-journal-style
+   *                          dot-grid layer - carries its own alpha per
+   *                          theme (rather than a shared color + opacity
+   *                          split) since the dot grid needs to stay a
+   *                          fixed, crisp size regardless of theme
    *
    * ──────────────────────────────────────────────────────────────────────
    * DARK VALUES (default - see :root below)     LIGHT VALUES (:root[data-theme="light"])
@@ -238,6 +259,9 @@
    * --starmap-vignette-start: #141a35              --starmap-vignette-start: #fbf8f0
    * --starmap-vignette-end:  #05070f               --starmap-vignette-end: #e8e0cc
    * --scrollbar-thumb-color: rgba(255,255,255,.25)  --scrollbar-thumb-color: rgba(17,24,39,.25)
+   * --panel-bg-color-translucent: rgba(11,16,35,.68)  --panel-bg-color-translucent: rgba(245,241,232,.68)
+   * --paper-grain-opacity:   0.05                  --paper-grain-opacity:   0.035
+   * --paper-dot-color:       rgba(255,255,255,.14)  --paper-dot-color:    rgba(17,24,39,.12)
    * ──────────────────────────────────────────────────────────────────────
    */
   --bg-color: #0b1023;
@@ -276,6 +300,12 @@
   --starmap-vignette-start: #141a35;
   --starmap-vignette-end: #05070f;
   --scrollbar-thumb-color: rgba(255, 255, 255, 0.25);
+  /* Same navy tone as --panel-bg-color-solid, just less opaque - see that
+     token's own comment for why a solid base color (not a white tint) is
+     used here rather than the --panel-bg-color formula. */
+  --panel-bg-color-translucent: rgba(11, 16, 35, 0.68);
+  --paper-grain-opacity: 0.05;
+  --paper-dot-color: rgba(255, 255, 255, 0.14);
 
   /* Native form controls (checkboxes, date pickers, etc.) pick a light or
      dark rendering from this - keeps them consistent with the rest of the
@@ -325,6 +355,11 @@
   --starmap-vignette-start: #fbf8f0;
   --starmap-vignette-end: #e8e0cc;
   --scrollbar-thumb-color: rgba(17, 24, 39, 0.25);
+  /* Same cream tone as --panel-bg-color-solid, just less opaque - mirrors
+     the dark theme's own --panel-bg-color-translucent reasoning above. */
+  --panel-bg-color-translucent: rgba(245, 241, 232, 0.68);
+  --paper-grain-opacity: 0.035;
+  --paper-dot-color: rgba(17, 24, 39, 0.12);
 
   color-scheme: light;
 }
@@ -428,4 +463,82 @@ h2 {
     var(--starmap-vignette-end) 75%
   );
   background-attachment: fixed;
+}
+
+/*
+ * BULLET-JOURNAL SURFACE - unified title/FilterBar/sidebar-panel-stack
+ * container background
+ * ────────────────────────────────────────────────────────────────────
+ * Applied to the one persistent container Constellation.tsx/Timeline.tsx/
+ * Spiral.tsx now each wrap their title, subtitle, FilterBar, and sidebar
+ * panel stack in (see any of those files' own layout comment) - a
+ * translucent, paper-like surface instead of the fully-transparent
+ * text-only header these pages used to render directly over the canvas.
+ * Three stacked layers, back to front:
+ *
+ *   1. --panel-bg-color-translucent (this class's own background-color) -
+ *      the container's base surface, ~65-70% opaque so the canvas behind
+ *      it (stars, timeline points) stays faintly visible through the whole
+ *      container rather than fully hidden - see that token's own comment
+ *      in the THEME TOKENS block above.
+ *   2. `::before` - a tileable SVG fractal-noise grain, blended via
+ *      `mix-blend-mode: overlay` so the SAME noise image reads correctly
+ *      against either theme's base color without needing two separate
+ *      images: overlay lightens on dark pixels and darkens on light ones,
+ *      rather than just uniformly tinting everything one direction the
+ *      way `multiply`/`screen` would. `--paper-grain-opacity` is still a
+ *      separate per-theme token on top of that (see its own comment above)
+ *      since the blended result still needs a lighter touch against the
+ *      light theme's brighter base to avoid reading as visible speckling
+ *      rather than paper texture.
+ *   3. `::after` - an evenly-spaced dot grid (the classic bullet-journal
+ *      page pattern) via a repeating `radial-gradient`. `--paper-dot-color`
+ *      carries its own alpha per theme directly (rather than a shared color
+ *      + separate opacity token like the grain layer) since a dot grid
+ *      needs to stay a small, crisp, fixed-contrast mark - blending it via
+ *      `mix-blend-mode` the way the grain layer is would let it wash out
+ *      unpredictably against whatever entry-panel colors happen to be
+ *      stacked on top of it.
+ *
+ * Both pseudo-elements are `position: absolute; inset: 0`, `pointer-events:
+ * none` (purely decorative texture - must never intercept clicks meant for
+ * the filter chips/sort toggle/panels sitting on top), and `z-index: -1` so
+ * they paint BEHIND this element's actual children (title, FilterBar,
+ * panels - all plain non-positioned content) without needing a matching
+ * z-index on every one of those children individually. This class's own
+ * `position: relative` is what makes it the containing block those `-1`
+ * indexes resolve against, keeping the texture layers confined to this
+ * container rather than escaping behind unrelated page content elsewhere.
+ * `overflow: hidden` keeps both layers clipped to whatever border-radius
+ * the container's own Tailwind classes apply, instead of squaring off the
+ * corners.
+ */
+.bullet-journal-surface {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--panel-bg-color-translucent);
+}
+
+.bullet-journal-surface::before,
+.bullet-journal-surface::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.bullet-journal-surface::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+  opacity: var(--paper-grain-opacity);
+  mix-blend-mode: overlay;
+}
+
+.bullet-journal-surface::after {
+  background-image: radial-gradient(
+    var(--paper-dot-color) 1px,
+    transparent 1.5px
+  );
+  background-size: 18px 18px;
 }
