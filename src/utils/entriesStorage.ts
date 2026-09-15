@@ -18,9 +18,41 @@ import { Entry } from '../types/Entry';
 export const ENTRIES_STORAGE_KEY = 'dabble-entries';
 
 /**
+ * MOOD MIGRATION: fixes entries already persisted with the
+ * defaultEntries.ts double-wrap bug, where `mood: [raw.mood]` wrapped an
+ * already-array mood value in another array (e.g.
+ * `[["Excited", "Curious", "Frustrated"]]` instead of
+ * `["Excited", "Curious", "Frustrated"]`). EntryPanel.tsx's
+ * `entry.mood.map(...)` would then iterate once over the outer array and
+ * render the inner array as a single chip, which React renders as its
+ * elements concatenated with no separator (e.g. "ExcitedCuriousFrustrated").
+ *
+ * `.flat(Infinity)` is a safe no-op on an already-flat mood array (same
+ * elements, same length), so this only changes entries actually affected
+ * by the bug - `changed` reports whether it did, so loadEntries can decide
+ * whether a re-save is needed.
+ */
+function normalizeEntryMood(entry: Entry): { entry: Entry; changed: boolean } {
+  if (!Array.isArray(entry.mood)) return { entry, changed: false };
+
+  const flattened = (entry.mood as unknown[]).flat(Infinity) as string[];
+  if (JSON.stringify(flattened) === JSON.stringify(entry.mood)) {
+    return { entry, changed: false };
+  }
+
+  return { entry: { ...entry, mood: flattened }, changed: true };
+}
+
+/**
  * Loads the entries array from localStorage. Falls back to an empty array
  * when nothing has been saved yet (first run) or the stored value can't be
  * parsed, so callers always get a usable array back.
+ *
+ * Also runs normalizeEntryMood over every entry (see its comment) and, if
+ * any entry's mood was actually fixed up, persists the corrected array back
+ * via saveEntries so the one-time migration doesn't have to re-run - and so
+ * anything else reading dabble-entries directly (e.g. Export Data) sees the
+ * fix too - on every subsequent load.
  */
 export function loadEntries(): Entry[] {
   const raw = localStorage.getItem(ENTRIES_STORAGE_KEY);
@@ -29,7 +61,12 @@ export function loadEntries(): Entry[] {
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      return parsed as Entry[];
+      const normalized = (parsed as Entry[]).map(normalizeEntryMood);
+      const entries = normalized.map(result => result.entry);
+      if (normalized.some(result => result.changed)) {
+        saveEntries(entries);
+      }
+      return entries;
     }
   } catch {
     // Corrupt or unexpected data - fall through to the empty array below.

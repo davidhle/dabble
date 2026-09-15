@@ -33,7 +33,7 @@ interface RawSeedEntry {
   mediaLinks: { type: string; url: string; title?: string }[];
   location?: string | EntryLocation | null;
   duration?: number | null;
-  mood?: string | null;
+  mood?: string[] | null;
   timestamp: string;
   dateDisplay?: string | null;
   /** Optional multi-day end date - see the endTimestamp field comment in types/Entry.ts. */
@@ -120,7 +120,7 @@ function toEntry(raw: RawSeedEntry): Entry {
     notes: raw.notes,
     ...(raw.location ? { location: raw.location } : {}),
     ...(raw.duration != null ? { duration: raw.duration } : {}),
-    ...(raw.mood ? { mood: [raw.mood] } : {}),
+    ...(raw.mood ? { mood: raw.mood } : {}),
     ...(raw.dateDisplay ? { dateDisplay: raw.dateDisplay } : {}),
     ...(raw.endTimestamp ? { endTimestamp: raw.endTimestamp } : {}),
   };
