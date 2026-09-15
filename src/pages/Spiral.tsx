@@ -107,10 +107,6 @@ interface SpiralProps {
 }
 
 export default function Spiral({ entries, onEditEntry }: SpiralProps) {
-  // The dynamic category list - see Constellation.tsx's identical
-  // `categories` useMemo for why this is recomputed off `entries`.
-  const categories = useMemo(() => loadCategories(), [entries]);
-
   // `selectedRange` is the shared, cross-page time filter (same context
   // Constellation.tsx/Timeline.tsx read); `timeFilteredEntries` is
   // `entries` hard-cut down to only what's `isEntryWithinRange` of it -
@@ -145,6 +141,7 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
     hasSelection,
     resetPending,
     resetAll,
+    categoriesVersion,
   } = useEntrySelection({
     // `categories` is no longer passed here - see Constellation.tsx's
     // identical comment: the shared EntrySelectionProvider (App.tsx) now
@@ -161,6 +158,15 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
       resetToFullRange();
     },
   });
+
+  // The dynamic category list - see Constellation.tsx's identical
+  // `categories` useMemo (including the `categoriesVersion` dependency's
+  // own comment there) for why this is recomputed off both `entries` and
+  // `categoriesVersion`.
+  const categories = useMemo(
+    () => loadCategories(),
+    [entries, categoriesVersion]
+  );
 
   const { isEditMode } = useEditMode();
 
@@ -340,6 +346,7 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
 
       <SpiralTimeline
         entries={timeFilteredEntries}
+        categories={categories}
         hasAnyEntries={entries.length > 0}
         filterCategories={filterCategories}
         onEntryClick={handleCanvasEntryClick}

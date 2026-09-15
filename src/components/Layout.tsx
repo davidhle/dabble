@@ -36,6 +36,7 @@
 import { useState } from 'react';
 import { Link, Outlet } from 'react-router-dom';
 import AddEntryForm from './AddEntryForm';
+import ManageCategoriesModal from './ManageCategoriesModal';
 import ThemeToggle from './ThemeToggle';
 import { Entry } from '../types/Entry';
 import { useEntrySelectionContext } from '../context/EntrySelectionContext';
@@ -72,7 +73,12 @@ export default function Layout({
   // see EntrySelectionContext.tsx's "onFullReset STAYS PAGE-SPECIFIC"
   // comment. `handleClosePanel` itself doesn't touch that registration,
   // so reading it straight from the context is safe here.
-  const { handleClosePanel } = useEntrySelectionContext();
+  const {
+    handleClosePanel,
+    isManageCategoriesModalOpen,
+    closeManageCategoriesModal,
+    refreshCategories,
+  } = useEntrySelectionContext();
   /**
    * LOCAL STATE: Modal visibility
    *
@@ -397,6 +403,27 @@ export default function Layout({
         onDelete={handleDeleteEntry}
         editingEntry={editingEntry}
         entries={entries}
+      />
+
+      {/**
+       * MANAGE CATEGORIES MODAL
+       *
+       * Opened by FilterBar's pencil button (on whichever page is
+       * currently mounted) via EntrySelectionContext's
+       * `isManageCategoriesModalOpen`/`openManageCategoriesModal` - see
+       * that context's own comment for why this modal is mounted HERE
+       * rather than inside FilterBar itself (the same
+       * `backdrop-filter`-containing-block reason AddEntryForm's modal
+       * above already needs to live at this level, not nested inside a
+       * page's own blurred container). `entries` is this same Layout's
+       * own prop, already the exact full/unfiltered array
+       * ManageCategoriesModal needs to count each category's entries.
+       */}
+      <ManageCategoriesModal
+        isOpen={isManageCategoriesModalOpen}
+        onClose={closeManageCategoriesModal}
+        entries={entries}
+        onCategoriesChanged={refreshCategories}
       />
 
       {/*

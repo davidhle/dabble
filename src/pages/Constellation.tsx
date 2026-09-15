@@ -164,13 +164,6 @@ export default function Constellation({
   entries,
   onEditEntry,
 }: ConstellationProps) {
-  // The dynamic category list - recomputed whenever entries change, since
-  // that's exactly when a new category could have appeared (a fresh "+
-  // Add new category" in AddEntryForm always creates its new entry in the
-  // same action). Passed down to useEntrySelection, FilterBar, and StarMap
-  // rather than having each of them independently reload it.
-  const categories = useMemo(() => loadCategories(), [entries]);
-
   // See the SHARED TIME-RANGE FILTER comment above: `selectedRange` is the
   // shared, cross-page time filter (same context Timeline.tsx reads);
   // `timeFilteredEntries` is `entries` hard-cut down to only what's
@@ -211,11 +204,12 @@ export default function Constellation({
     hasSelection,
     resetPending,
     resetAll,
+    categoriesVersion,
   } = useEntrySelection({
     // `categories` is no longer passed here - the shared
     // EntrySelectionProvider (see App.tsx) now derives its own categories
     // directly from `entries`, the same computation this page's own
-    // `categories` above still runs locally for FilterBar/StarMap's props
+    // `categories` below still runs locally for FilterBar/StarMap's props
     // - see useEntrySelection.ts's top-of-file comment.
     //
     // RESET INCLUDES THE BRUSH: bumping `resetViewSignal` (StarMap's own
@@ -233,6 +227,21 @@ export default function Constellation({
       resetToFullRange();
     },
   });
+
+  // The dynamic category list - recomputed whenever entries change, since
+  // that's exactly when a new category could have appeared (a fresh "+
+  // Add new category" in AddEntryForm always creates its new entry in the
+  // same action). Passed down to FilterBar and StarMap rather than having
+  // each of them independently reload it. Also recomputed off
+  // `categoriesVersion` (from useEntrySelection above) - see
+  // EntrySelectionContext.tsx's `categoriesVersion`/`refreshCategories`
+  // comment for why an in-place rename/recolor/delete of an EXISTING
+  // category (ManageCategoriesModal, opened from FilterBar) needs its own
+  // trigger separate from `entries` changing.
+  const categories = useMemo(
+    () => loadCategories(),
+    [entries, categoriesVersion]
+  );
 
   const { isEditMode } = useEditMode();
 

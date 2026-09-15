@@ -162,6 +162,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
+import { Category } from '../types/Category';
 import { DateRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
 // Shared with StarMap.tsx's own hover tooltip - see EntryTooltip.tsx's
@@ -173,6 +174,18 @@ import { assignLanes } from '../utils/laneAssignment';
 
 interface LinearTimelineProps {
   entries: Entry[];
+  /**
+   * The current category list - Timeline.tsx's own `categories` (already
+   * recomputed off `categoriesVersion`, see EntrySelectionContext.tsx's own
+   * comment on that field). NOT read directly by any rendering here -
+   * `points`/`ranges` still get each entry's color via getActivityColor,
+   * exactly as before. It exists purely as a `points`/`ranges` useMemo
+   * DEPENDENCY, so a ManageCategoriesModal recolor (which never touches
+   * `entries`) still triggers a recompute of those memoized colors instead
+   * of leaving stale ones on screen until something else (a filter toggle,
+   * a resize) happens to force a re-render.
+   */
+  categories: Category[];
   /**
    * Whether the RAW, unfiltered dataset (Timeline.tsx's own
    * `entries.length > 0`, not the time-filtered `entries` prop above) has
@@ -376,6 +389,7 @@ function capsuleOutlineRect(
 
 export default function LinearTimeline({
   entries,
+  categories,
   hasAnyEntries,
   filterCategories,
   onEntryClick,
@@ -716,7 +730,10 @@ export default function LinearTimeline({
           cx: xScale(new Date(entry.timestamp)),
           color: getActivityColor(entry.activityType),
         })),
-    [entries, xScale]
+    // `categories` is otherwise unused here - see this component's own
+    // `categories` prop comment for why it's still a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [entries, xScale, categories]
   );
 
   /**
@@ -782,7 +799,9 @@ export default function LinearTimeline({
       item => item.cxEnd,
       LANE_GAP_PX
     );
-  }, [entries, xScale]);
+    // See the `points` useMemo's identical comment on the `categories` dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, xScale, categories]);
 
   // How many lanes are actually in use - drives the y-position of the
   // lowest capsule (and therefore the axis line below it). Zero when

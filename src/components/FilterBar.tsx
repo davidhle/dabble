@@ -1,9 +1,10 @@
 /**
  * FilterBar.tsx - Sort Mode + Category Filter Controls
  *
- * Renders, top to bottom: a "Filters" collapse/expand toggle row (plus the
- * always-visible "Show All" reset), the collapsible per-activityType filter
- * chip grid, then the sort-mode toggle ("By Date" / "By Category") -
+ * Renders, top to bottom: a "Categories" collapse/expand toggle row (plus
+ * the always-visible "Manage Categories"/"Show All" controls), the
+ * collapsible per-activityType filter chip grid, then the sort-mode toggle
+ * ("By Date" / "By Category") -
  * category filters first since they always render, sort toggle last
  * since it only shows once there's a sidebar stack to sort (see
  * `hasSelection` below), sitting immediately above that stack.
@@ -69,6 +70,7 @@
 
 import { useEffect, useState } from 'react';
 import { Category } from '../types/Category';
+import { useEntrySelectionContext } from '../context/EntrySelectionContext';
 
 export type SortMode = 'date' | 'category';
 
@@ -110,15 +112,25 @@ export default function FilterBar({
     localStorage.setItem(FILTER_COLLAPSE_STORAGE_KEY, String(collapsed));
   }, [collapsed]);
 
+  // ManageCategoriesModal itself is NOT rendered here - it's mounted in
+  // Layout.tsx instead, and this button just flips the shared open flag
+  // via context. See EntrySelectionContext.tsx's
+  // `isManageCategoriesModalOpen` comment for why: this component sits
+  // inside each page's own `backdrop-blur-sm` container, and a `fixed`
+  // modal nested inside a `backdrop-filter` ancestor gets contained by
+  // THAT ancestor instead of the viewport, breaking the "full-screen
+  // overlay" look a modal needs.
+  const { openManageCategoriesModal } = useEntrySelectionContext();
+
   const activeCount = filterCategories.length;
   const totalCount = categories.length;
 
   return (
     <div className="flex w-full flex-col gap-3">
       {/*
-       * "Filters" collapse/expand toggle + "Show All" - the one row that's
-       * ALWAYS visible regardless of `collapsed`, per the header comment's
-       * COLLAPSE/EXPAND section above.
+       * "Categories" collapse/expand toggle + Manage Categories/"Show All"
+       * - the one row that's ALWAYS visible regardless of `collapsed`, per
+       * the header comment's COLLAPSE/EXPAND section above.
        */}
       <div className="flex flex-shrink-0 items-center justify-between gap-2">
         <button
@@ -143,18 +155,51 @@ export default function FilterBar({
             />
           </svg>
           <span>
-            Filters
+            Categories
             {collapsed && ` (${activeCount} of ${totalCount} active)`}
           </span>
         </button>
 
-        <button
-          type="button"
-          onClick={onResetFilters}
-          className="rounded-full border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-2.5 py-1 text-xs font-medium text-[var(--text-color)] hover:underline"
-        >
-          Show All
-        </button>
+        <div className="flex items-center gap-2">
+          {/*
+           * Manage Categories - opens ManageCategoriesModal, mounted in
+           * Layout.tsx (see this file's own comment above and
+           * EntrySelectionContext.tsx's `isManageCategoriesModalOpen`
+           * comment for why). Positioned to the LEFT of "Show All" per the
+           * design brief, in its own small pill matching that button's own
+           * border/tint treatment rather than a bare icon, so it reads as
+           * a control at the same visual weight.
+           */}
+          <button
+            type="button"
+            onClick={openManageCategoriesModal}
+            title="Manage Categories"
+            aria-label="Manage Categories"
+            className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] text-[var(--text-muted-color)] transition-colors hover:text-[var(--text-color)]"
+          >
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+              />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            onClick={onResetFilters}
+            className="rounded-full border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-2.5 py-1 text-xs font-medium text-[var(--text-color)] hover:underline"
+          >
+            Show All
+          </button>
+        </div>
       </div>
 
       {/*

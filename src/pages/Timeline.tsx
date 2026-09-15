@@ -123,13 +123,6 @@ interface TimelineProps {
 }
 
 export default function Timeline({ entries, onEditEntry }: TimelineProps) {
-  // The dynamic category list - see Constellation.tsx's identical
-  // `categories` useMemo for why this is recomputed off `entries`. Reads
-  // the full `entries`, not `timeFilteredEntries` below - see the
-  // STAGE 3 comment above for why the category list shouldn't shrink
-  // just because the visible time window did.
-  const categories = useMemo(() => loadCategories(), [entries]);
-
   // See the STAGE 3 comment above: `selectedRange` is the shared,
   // cross-page time filter; `timeFilteredEntries` is `entries` hard-cut
   // down to only what's `isEntryWithinRange` of it - this (not `entries`)
@@ -158,6 +151,7 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
     hasSelection,
     resetPending,
     resetAll,
+    categoriesVersion,
   } = useEntrySelection({
     // `categories` is no longer passed here - see Constellation.tsx's
     // identical comment: the shared EntrySelectionProvider (App.tsx) now
@@ -179,6 +173,17 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
     // needs to be wired up for "the brush visually resets too."
     onFullReset: resetToFullRange,
   });
+
+  // The dynamic category list - see Constellation.tsx's identical
+  // `categories` useMemo (including the `categoriesVersion` dependency's
+  // own comment there) for why this is recomputed off both `entries` and
+  // `categoriesVersion`. Reads the full `entries`, not `timeFilteredEntries`
+  // below - see the STAGE 3 comment above for why the category list
+  // shouldn't shrink just because the visible time window did.
+  const categories = useMemo(
+    () => loadCategories(),
+    [entries, categoriesVersion]
+  );
 
   const { isEditMode } = useEditMode();
 
@@ -306,6 +311,7 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
 
       <LinearTimeline
         entries={timeFilteredEntries}
+        categories={categories}
         hasAnyEntries={entries.length > 0}
         filterCategories={filterCategories}
         onEntryClick={handleCanvasEntryClick}

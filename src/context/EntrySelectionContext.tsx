@@ -147,6 +147,52 @@ export interface EntrySelectionContextValue {
   resetPending: boolean;
   resetAll: () => void;
   /**
+   * Bumped by `refreshCategories` below. Exposed so each page's own local
+   * `categories` useMemo (`loadCategories()`, fed to FilterBar/StarMap/
+   * LinearTimeline/SpiralTimeline - see Constellation.tsx's `categories`
+   * comment) can list it as a dependency too, the same as this context's
+   * own `categories` does - otherwise a rename/recolor/delete would refresh
+   * this context's `categoryGroups` but leave each page's own separately-
+   * computed `categories` (and everything colored/labeled from it) stale.
+   */
+  categoriesVersion: number;
+  /**
+   * Forces `categories` (and everything derived from it - `categoryGroups`,
+   * and each page's own local `categories` useMemo, which also takes this
+   * as a dependency) to re-read localStorage via loadCategories(). Needed
+   * because a rename/recolor/delete in ManageCategoriesModal persists
+   * straight to localStorage without going through `entries` at all (see
+   * utils/categories.ts's updateCategory) - the normal "a new category
+   * appears alongside a new entry, so `entries` changing is enough to
+   * refresh `categories`" trigger doesn't fire for an edit to an EXISTING
+   * category. Called by FilterBar (via useEntrySelectionContext directly,
+   * the same way Layout.tsx already reads this context) after any such
+   * change, so star colors, capsule/arc colors, filter chips, and panel
+   * accents all pick up the edit immediately instead of waiting for the
+   * next entries change.
+   */
+  refreshCategories: () => void;
+  /**
+   * Whether ManageCategoriesModal is open, plus the open/close it - lives
+   * here (not as local state inside FilterBar, where the "Manage
+   * Categories" pencil button that triggers it actually sits) because the
+   * MODAL ITSELF has to be rendered outside FilterBar/each page's own
+   * `.bullet-journal-surface` container: that container carries
+   * `backdrop-blur-sm`, and `backdrop-filter` (like `filter`) establishes a
+   * new containing block for `position: fixed` descendants - a `fixed
+   * inset-0` modal nested inside it would be sized/positioned relative to
+   * THAT container instead of the viewport, instead of covering the whole
+   * screen as a proper modal overlay. So ManageCategoriesModal is mounted
+   * in Layout.tsx instead (the same level AddEntryForm's modal already
+   * uses, for the same reason - see Layout.tsx's own comment), and this
+   * context is what lets FilterBar's button (which opens it) and Layout's
+   * mount point (which renders it) share one boolean without prop-drilling
+   * it through all three pages.
+   */
+  isManageCategoriesModalOpen: boolean;
+  openManageCategoriesModal: () => void;
+  closeManageCategoriesModal: () => void;
+  /**
    * Registers (or, called with `null`, unregisters) the currently mounted
    * page's own canvas-specific full-reset callback - see the top-of-file
    * "onFullReset STAYS PAGE-SPECIFIC" comment. Internal plumbing for
@@ -196,8 +242,30 @@ export function EntrySelectionProvider({
   // category could have appeared (a fresh "+ Add new category" in
   // AddEntryForm always creates its new entry in the same action) - same
   // reasoning each page's own `categories` useMemo used before this moved
-  // here.
-  const categories = useMemo(() => loadCategories(), [entries]);
+  // here. ALSO recomputed when `categoriesVersion` is bumped - see
+  // `refreshCategories`'s own comment above: an in-place rename/recolor/
+  // delete of an EXISTING category (ManageCategoriesModal) never touches
+  // `entries`, so that alone isn't a sufficient trigger anymore.
+  const [categoriesVersion, setCategoriesVersion] = useState(0);
+  const categories = useMemo(
+    () => loadCategories(),
+    [entries, categoriesVersion]
+  );
+  const refreshCategories = useCallback(() => {
+    setCategoriesVersion(version => version + 1);
+  }, []);
+
+  // See `isManageCategoriesModalOpen`'s own comment above for why this
+  // modal's open state lives up here rather than as local state in
+  // FilterBar.
+  const [isManageCategoriesModalOpen, setIsManageCategoriesModalOpen] =
+    useState(false);
+  const openManageCategoriesModal = useCallback(() => {
+    setIsManageCategoriesModalOpen(true);
+  }, []);
+  const closeManageCategoriesModal = useCallback(() => {
+    setIsManageCategoriesModalOpen(false);
+  }, []);
 
   const [selectedEntries, setSelectedEntries] = useState<SelectedEntry[]>([]);
 
@@ -486,6 +554,11 @@ export function EntrySelectionProvider({
       hasSelection,
       resetPending,
       resetAll,
+      categoriesVersion,
+      refreshCategories,
+      isManageCategoriesModalOpen,
+      openManageCategoriesModal,
+      closeManageCategoriesModal,
       setPageFullResetHandler,
     }),
     [
@@ -505,6 +578,11 @@ export function EntrySelectionProvider({
       hasSelection,
       resetPending,
       resetAll,
+      categoriesVersion,
+      refreshCategories,
+      isManageCategoriesModalOpen,
+      openManageCategoriesModal,
+      closeManageCategoriesModal,
       setPageFullResetHandler,
     ]
   );

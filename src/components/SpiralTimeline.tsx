@@ -395,9 +395,11 @@
  * would visually collide with the point row regardless of lane logic. The
  * spiral has no such separate row: `spiralPoint`'s own curve IS the
  * "home" position for both a point entry and a lane-0 arc, so lane 0 here
- * gets radiusOffset `0 * RADIAL_LANE_OFFSET_PX` - literally zero, sitting
+ * gets radiusOffset `0 * LANE_BAND_THICKNESS_PX` - literally zero, sitting
  * exactly on the spiral's own drawn path - and only lane 1, 2, 3, ...
- * nudge outward by `lane * RADIAL_LANE_OFFSET_PX`. This is what makes the
+ * nudge outward by `lane * LANE_BAND_THICKNESS_PX`, packed as a
+ * contiguous, touching stack rather than leaving a gap between lanes -
+ * see that constant's own comment. This is what makes the
  * longest-duration arc in a cluster of overlaps (see laneAssignment.ts's
  * duration-descending comment - it wins lane 0) visibly trace the same
  * gridline path a viewer would see if that arc were the only entry on the
@@ -430,7 +432,7 @@
  * leaves an entry's x position (and therefore which axis tick it reads
  * against) unchanged. A range entry's sampled-curve band (see the RANGE
  * ENTRIES comment above) applies this exact same `lane *
- * RADIAL_LANE_OFFSET_PX` term the same way a point does - as `spiralPoint`'s
+ * LANE_BAND_THICKNESS_PX` term the same way a point does - as `spiralPoint`'s
  * own `radiusOffset`, at every one of the ~40-60 samples the band walks
  * along its span, so the whole band shifts outward together rather than
  * just one representative point of it.
@@ -446,6 +448,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
+import { Category } from '../types/Category';
 import { DateRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
 // Same date/time formatting the "now" marker's tooltip uses for its live
@@ -461,6 +464,17 @@ import { assignLanes, assignLaneAroundRanges } from '../utils/laneAssignment';
 
 interface SpiralTimelineProps {
   entries: Entry[];
+  /**
+   * The current category list - Spiral.tsx's own `categories` (recomputed
+   * off `categoriesVersion`, see EntrySelectionContext.tsx's own comment
+   * on that field). NOT read directly by any rendering here - `ranges`/
+   * `points` still get each entry's color via getActivityColor exactly as
+   * before. It exists purely as a dependency of the `{ ranges, points }`
+   * useMemo below, so a ManageCategoriesModal recolor (which never
+   * touches `entries`) still triggers a recompute of those memoized
+   * colors instead of leaving stale ones on screen.
+   */
+  categories: Category[];
   /**
    * Whether the RAW, unfiltered dataset (Spiral.tsx's own
    * `entries.length > 0`, not the time-filtered `entries` prop above) has
@@ -625,23 +639,92 @@ const ARC_GLOW_BLUR_STD_DEVIATION = 3;
 const ARC_RING_WIDTH = 1.5;
 
 /**
- * Radial spacing (px) between stacked arc lanes - the spiral's equivalent
- * of LinearTimeline.tsx's `LANE_HEIGHT`. Lane 0's arc renders at
- * `radius + RADIAL_LANE_OFFSET_PX`, lane 1 at `radius + 2 *
- * RADIAL_LANE_OFFSET_PX`, and so on - see the top-of-file "OVERLAPPING
+ * Radial step (px) between stacked lanes - the spiral's equivalent of
+ * LinearTimeline.tsx's `LANE_HEIGHT`. Lane 0 renders at zero offset, lane
+ * 1 at `radius + LANE_BAND_THICKNESS_PX`, lane 2 at `radius + 2 *
+ * LANE_BAND_THICKNESS_PX`, and so on - see the top-of-file "OVERLAPPING
  * ARCS" comment for why this is a radius nudge rather than a vertical one.
  *
- * Originally 10px (an 8-12px range, matched down from LANE_HEIGHT's 26px
- * on the assumption that the spiral's loops were already spaced far
- * enough apart radially that a small per-lane nudge would read clearly).
- * In practice that was too tight once several overlapping arcs stacked up:
- * outer lanes sat close enough to each other - and to the next loop of the
- * main spiral curve/year gridlines - that telling two nearby lanes apart,
- * or a lane apart from the underlying spiral, took real effort. Bumped to
- * roughly 1.8x that (18px) for comfortable, unambiguous separation between
- * stacked lanes and between the outermost lane and the next year's loop.
+ * DELIBERATELY NO GAP FOLDED IN: this used to be a fixed 18px
+ * (`RADIAL_LANE_OFFSET_PX`) - comfortably wider than either shape that
+ * ever occupies a lane (a range entry's rendered band thickness,
+ * `ARC_BAND_HALF_THICKNESS * 2` = 8px, or a point entry's rendered
+ * diameter, `POINT_RADIUS * 2` = 10px), so stacked lanes always had
+ * visible NEGATIVE SPACE between them. That read as loose/disconnected
+ * for a tight cluster of overlapping entries - see this file's own git
+ * history for the screenshot that prompted this change. Sizing the step
+ * to exactly the LARGER of those two rendered sizes instead means
+ * consecutive lanes sit edge-to-edge as one contiguous, touching stack -
+ * no gap, and (since it's the larger of the two) no overlap either,
+ * whichever shape occupies the lane. `effectiveLaneBandThickness` below
+ * still compresses this per-render as a safety net for pathological
+ * lane counts - see its own comment.
  */
-const RADIAL_LANE_OFFSET_PX = 18;
+const LANE_BAND_THICKNESS_PX = Math.max(
+  ARC_BAND_HALF_THICKNESS * 2,
+  POINT_RADIUS * 2
+);
+
+/**
+ * Highest fraction of the radial gap between one year's spiral loop and
+ * the next (`maxRadius / totalRotations` - constant across the whole
+ * spiral, since `radius = t * maxRadius` grows linearly with `t` while
+ * `totalRotations` full turns happen over that same `t` range - see the
+ * top-of-file SPIRAL FORMULA comment) that a full stack of lanes
+ * (`(maxLaneIndex + 1) * LANE_BAND_THICKNESS_PX`) is ever allowed to
+ * consume before `effectiveLaneBandThickness` below compresses the
+ * per-lane step to fit. A safety net, not the normal path: with lane
+ * bands now packed contiguously (see `LANE_BAND_THICKNESS_PX` above)
+ * instead of the old fixed 18px gap, an ordinary handful of stacked
+ * lanes stays well inside this fraction on its own. This only kicks in
+ * for an unusually large cluster - many overlapping entries stacking
+ * many lanes on a short-duration domain (a tight year-to-year gap) -
+ * where it's better to render a visibly thinner stack than let the
+ * outermost lane visually reach into the next year's ring.
+ */
+const MAX_LANE_STACK_FRACTION_OF_YEAR_GAP = 0.6;
+
+/**
+ * The contiguous-packing band thickness actually used this render to
+ * turn a lane number into a radial offset (`lane * thickness`) - see the
+ * "RANGE ENTRIES"/"SINGLE-POINT ENTRIES" lane-offset computations below.
+ * Ordinarily just `LANE_BAND_THICKNESS_PX`; only compressed below that
+ * when stacking every lane in use (`maxLaneIndex + 1` of them) at full
+ * thickness would eat more than `MAX_LANE_STACK_FRACTION_OF_YEAR_GAP` of
+ * the local year-to-year radial gap - see that constant's own comment
+ * for why this is a safety net, not the normal path.
+ */
+function effectiveLaneBandThickness(
+  maxLaneIndex: number,
+  spiralParams: SpiralParams
+): number {
+  const laneCount = maxLaneIndex + 1;
+  if (laneCount <= 1) return LANE_BAND_THICKNESS_PX;
+
+  const yearRadialGapPx = spiralParams.maxRadius / spiralParams.totalRotations;
+  const maxStackPx = yearRadialGapPx * MAX_LANE_STACK_FRACTION_OF_YEAR_GAP;
+  const uncappedStackPx = laneCount * LANE_BAND_THICKNESS_PX;
+
+  return uncappedStackPx <= maxStackPx
+    ? LANE_BAND_THICKNESS_PX
+    : maxStackPx / laneCount;
+}
+
+/**
+ * Stroke used to trace a very thin, subtle edge around each lane's own
+ * band (a range entry's `pathD` outline, a point entry's outline circle)
+ * now that contiguous lanes (see `LANE_BAND_THICKNESS_PX` above) can sit
+ * directly against a same-colored neighbor with no gap to tell them
+ * apart by. `currentColor` at low opacity is this file's existing
+ * neutral/dark separator treatment - the same pairing the main spiral
+ * path and year gridlines already use (see their own `stroke`/
+ * `strokeOpacity` below) - reused here rather than introducing a new
+ * color, just thinner and a touch more transparent since this is meant
+ * to read as a quiet edge, not a visible line in its own right.
+ */
+const LANE_EDGE_STROKE_COLOR = 'currentColor';
+const LANE_EDGE_STROKE_OPACITY = 0.3;
+const LANE_EDGE_STROKE_WIDTH = 1;
 
 /**
  * Extra arc-length clearance (px, along the spiral's own path) required
@@ -1005,6 +1088,7 @@ function buildRangeBandPath(
 
 export default function SpiralTimeline({
   entries,
+  categories,
   hasAnyEntries,
   filterCategories,
   onEntryClick,
@@ -1285,24 +1369,34 @@ export default function SpiralTimeline({
 
   /**
    * ──────────────────────────────────────────────────────────────────────
-   * RANGE ENTRIES (with endTimestamp): LANE-ASSIGNED, TRUE-CURVE-SAMPLED
-   * BANDS, LANE 0 = 0 RADIAL OFFSET
+   * RANGE + POINT ENTRIES: LANE NUMBERS FIRST, THEN ONE SHARED
+   * (POSSIBLY-COMPRESSED) OFFSET STEP FOR BOTH
    * ──────────────────────────────────────────────────────────────────────
    * See the top-of-file "OVERLAPPING ARCS (AND POINTS)" comment for the
-   * lane-NUMBER-assignment reasoning (unchanged) and the "RANGE ENTRIES"
-   * comment for why each band is now built by SAMPLING the true spiral
-   * curve (`buildRangeBandPath`) instead of a `d3.arc()` fixed-radius
-   * sector. In short: `assignLanes` (utils/laneAssignment.ts, shared
-   * verbatim with LinearTimeline.tsx) decides lane NUMBERS from each
-   * entry's arc-length span along the spiral path (`tToArcLength`, the
-   * spiral's stand-in for LinearTimeline's xScale pixel position, and
-   * processed duration-descending, so a solitary or longest-overlapping
-   * arc lands in lane 0); `radiusOffset` then turns a lane number into
-   * `spiralPoint`'s own `radiusOffset` argument - `lane *
-   * RADIAL_LANE_OFFSET_PX`, so lane 0 is exactly 0 - fed into EVERY sample
-   * `buildRangeBandPath` takes along the band's span, not just applied
-   * once to a single representative radius the way the old `d3.arc()`
-   * version did.
+   * lane-NUMBER-assignment reasoning and the "RANGE ENTRIES" comment for
+   * why each band is built by SAMPLING the true spiral curve
+   * (`buildRangeBandPath`) instead of a `d3.arc()` fixed-radius sector.
+   * In short: `assignLanes` (utils/laneAssignment.ts, shared verbatim
+   * with LinearTimeline.tsx) decides RANGE lane numbers from each entry's
+   * arc-length span along the spiral path (`tToArcLength`, the spiral's
+   * stand-in for LinearTimeline's xScale pixel position, processed
+   * duration-descending so a solitary or longest-overlapping arc lands in
+   * lane 0); `assignLaneAroundRanges` then does the same for POINT
+   * entries - see the "SINGLE-POINT ENTRIES" comment below - bumping a
+   * point whose date falls inside an already-laned arc's span to the
+   * first lane that isn't covered by any arc there. Both of these only
+   * ever need each item's own arc-length span, never a radial offset, so
+   * they're computed FIRST, independent of how thick a lane actually is.
+   *
+   * `radiusOffset` (`lane * bandThickness`) is computed SECOND, once
+   * `bandThickness` is known: `effectiveLaneBandThickness` (see its own
+   * comment) looks at the tallest stack across BOTH lists combined
+   * (`maxLaneIndex`) and only compresses `LANE_BAND_THICKNESS_PX` below
+   * its normal contiguous-packing value in the pathological case where
+   * that full stack would otherwise eat too much of the local
+   * year-to-year radial gap - so both ranges and points always use the
+   * SAME step this render, keeping a point that got bumped into an arc's
+   * lane at the exact same radius that arc's own band sits at.
    *
    * `start`/`end`/`midpoint` below are each `spiralPoint(t, spiralParams,
    * radiusOffset)` - the exact same true-curve, lane-offset position a
@@ -1310,15 +1404,9 @@ export default function SpiralTimeline({
    * the band that's actually drawn; the hover/click/highlight JSX further
    * down, and the YEAR GLYPHS collision check, both read these same
    * fields, so they automatically target where the band visually IS.
-   *
-   * `lanedRangeItems` (the pre-radiusOffset `assignLanes` output, still
-   * carrying `arcStart`/`arcEnd`) is kept alongside the final `ranges` list
-   * so the POINT ENTRIES computation just below can look up which lane
-   * each arc landed in and what span it covers, without recomputing any of
-   * this from scratch.
    */
-  const { ranges, lanedRangeItems } = useMemo(() => {
-    const items = sortedEntries
+  const { ranges, points } = useMemo(() => {
+    const rangeItems = sortedEntries
       .filter(entry => entry.endTimestamp)
       .map(entry => {
         const tStart = normalize(new Date(entry.timestamp));
@@ -1333,15 +1421,40 @@ export default function SpiralTimeline({
         };
       });
 
-    const laned = assignLanes(
-      items,
+    const lanedRanges = assignLanes(
+      rangeItems,
       item => item.arcStart,
       item => item.arcEnd,
       LANE_GAP_PX
     );
 
-    const ranges = laned.map(({ entry, tStart, tEnd, color, lane }) => {
-      const radiusOffset = lane * RADIAL_LANE_OFFSET_PX;
+    const lanedPoints = sortedEntries
+      .filter(entry => !entry.endTimestamp)
+      .map(entry => {
+        const t = normalize(new Date(entry.timestamp));
+        const position = tToArcLength(t);
+        const lane = assignLaneAroundRanges(
+          position,
+          lanedRanges,
+          item => item.arcStart,
+          item => item.arcEnd,
+          LANE_GAP_PX
+        );
+        return { entry, t, lane, color: getActivityColor(entry.activityType) };
+      });
+
+    const maxLaneIndex = Math.max(
+      0,
+      ...lanedRanges.map(item => item.lane),
+      ...lanedPoints.map(item => item.lane)
+    );
+    const bandThickness = effectiveLaneBandThickness(
+      maxLaneIndex,
+      spiralParams
+    );
+
+    const ranges = lanedRanges.map(({ entry, tStart, tEnd, color, lane }) => {
+      const radiusOffset = lane * bandThickness;
       const t0 = Math.min(tStart, tEnd);
       const t1 = Math.max(tStart, tEnd);
       const tMid = (t0 + t1) / 2;
@@ -1373,51 +1486,25 @@ export default function SpiralTimeline({
       };
     });
 
-    return { ranges, lanedRangeItems: laned };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortedEntries, spiralParams, minDate, maxDate, cumulativeLengths]);
+    const points = lanedPoints.map(({ entry, t, lane, color }) => {
+      const radiusOffset = lane * bandThickness;
+      return {
+        entry,
+        ...spiralPoint(t, spiralParams, radiusOffset),
+        color,
+      };
+    });
 
-  /**
-   * ──────────────────────────────────────────────────────────────────────
-   * SINGLE-POINT ENTRIES (no endTimestamp): LANE-BUMPED AROUND ARCS THAT
-   * COVER THEIR DATE
-   * ──────────────────────────────────────────────────────────────────────
-   * See the top-of-file "POINT ENTRIES NOW PARTICIPATE IN OVERLAP
-   * DETECTION TOO" comment for the full reasoning. In short: a point whose
-   * date falls within an already-laned arc's span (`lanedRangeItems`,
-   * computed just above) would render right on top of that arc's curve if
-   * left at lane 0 - `assignLaneAroundRanges` (utils/laneAssignment.ts)
-   * finds the first lane (0, 1, 2, ...) where no arc assigned to that lane
-   * covers this point's own arc-length position, checking only against
-   * ARCS (never other points - see that function's own comment for why).
-   * A point with no conflicting arc anywhere stays at lane 0, i.e.
-   * `radiusOffset` 0, unchanged from its original always-on-the-curve
-   * behavior.
-   */
-  const points = useMemo(
-    () =>
-      sortedEntries
-        .filter(entry => !entry.endTimestamp)
-        .map(entry => {
-          const t = normalize(new Date(entry.timestamp));
-          const position = tToArcLength(t);
-          const lane = assignLaneAroundRanges(
-            position,
-            lanedRangeItems,
-            item => item.arcStart,
-            item => item.arcEnd,
-            LANE_GAP_PX
-          );
-          const radiusOffset = lane * RADIAL_LANE_OFFSET_PX;
-          return {
-            entry,
-            ...spiralPoint(t, spiralParams, radiusOffset),
-            color: getActivityColor(entry.activityType),
-          };
-        }),
+    return { ranges, points };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sortedEntries, spiralParams, minDate, maxDate, lanedRangeItems]
-  );
+  }, [
+    sortedEntries,
+    spiralParams,
+    minDate,
+    maxDate,
+    cumulativeLengths,
+    categories,
+  ]);
 
   // ─── Entry marker positions (for year-glyph collision avoidance) ───
   // See the top-of-file "YEAR GLYPHS" comment's "COLLISION AVOIDANCE"
@@ -2031,7 +2118,24 @@ export default function SpiralTimeline({
                         />
                       </>
                     )}
-                    <path d={pathD} fill={color} />
+                    {/*
+                     * LANE EDGE STROKE - see `LANE_EDGE_STROKE_COLOR`'s own
+                     * comment: now that contiguous lanes can sit directly
+                     * against a same-colored neighbor with no gap, this
+                     * very thin, low-opacity outline (traced along `pathD`,
+                     * the exact same closed boundary the fill uses - both
+                     * long curved edges AND the two cut ends) keeps this
+                     * band's own edges legible even against an identically
+                     * colored band in the next lane over or the base
+                     * gridline underneath.
+                     */}
+                    <path
+                      d={pathD}
+                      fill={color}
+                      stroke={LANE_EDGE_STROKE_COLOR}
+                      strokeOpacity={LANE_EDGE_STROKE_OPACITY}
+                      strokeWidth={LANE_EDGE_STROKE_WIDTH}
+                    />
                   </g>
                 );
               })}
@@ -2096,6 +2200,27 @@ export default function SpiralTimeline({
                       }
                       onMouseLeave={() => setHovered(null)}
                       onClick={() => onEntryClick(entry)}
+                    />
+                    {/*
+                     * LANE EDGE STROKE - see `LANE_EDGE_STROKE_COLOR`'s own
+                     * comment: the arc-band equivalent just above traces
+                     * `pathD` directly on the same element; a point has no
+                     * such path to add a stroke to (its own `stroke` above
+                     * is already the self-color glow), so this is a
+                     * separate, thin, low-opacity ring at the point's true
+                     * radius instead - `pointer-events-none` so it stays
+                     * purely decorative, the circle above it still owns
+                     * every hover/click.
+                     */}
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r={POINT_RADIUS}
+                      fill="none"
+                      stroke={LANE_EDGE_STROKE_COLOR}
+                      strokeOpacity={LANE_EDGE_STROKE_OPACITY}
+                      strokeWidth={LANE_EDGE_STROKE_WIDTH}
+                      className="pointer-events-none"
                     />
                     {isOpened && (
                       <circle
