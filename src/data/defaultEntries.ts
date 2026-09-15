@@ -19,6 +19,7 @@
  */
 
 import { Entry, EntryLocation, MediaLink, MediaType } from '../types/Entry';
+import { DEFAULT_CATEGORIES } from '../types/Category';
 import seedEntries from './seedEntries.json';
 
 /** The shape of one record in seedEntries.json. */
@@ -40,9 +41,13 @@ interface RawSeedEntry {
 }
 
 /**
- * Maps seedEntries.json's lowercase-hyphenated activityType values onto
- * DEFAULT_CATEGORIES' actual fixed ids. Hardcoded as an explicit table
- * (rather than a generic string transform) since there's no single
+ * Legacy translation table: maps seedEntries.json's OLD lowercase-hyphenated
+ * activityType values (e.g. 'c-walk') onto DEFAULT_CATEGORIES' actual fixed
+ * ids. The live app's Export Data feature now writes activityType as the
+ * category id directly, so current seed data no longer needs this table -
+ * it's kept only as a fallback for any old-format seed data still floating
+ * around (see toEntry's resolution order below). Hardcoded as an explicit
+ * table (rather than a generic string transform) since there's no single
  * mechanical rule that turns 'c-walk' into 'CWalk' and 'house-dance' into
  * 'HouseDance' consistently.
  */
@@ -73,17 +78,36 @@ function toMediaLink(raw: {
   };
 }
 
+/**
+ * Resolves a raw seed record's activityType to an actual category id.
+ *
+ * Checks in order:
+ * 1. A direct match against DEFAULT_CATEGORIES' own ids - the current
+ *    format, since Export Data now writes activityType as the category id
+ *    itself (e.g. 'CWalk', 'ShuffleDance', or a user-created category's
+ *    crypto.randomUUID() id) rather than a translated slug.
+ * 2. The legacy CATEGORY_ID_BY_ACTIVITY_TYPE table, for any old-format
+ *    hyphenated-slug seed data (e.g. 'c-walk') that might still exist.
+ * 3. Neither resolves - fail loudly rather than silently mis-categorizing.
+ */
+function resolveActivityType(rawActivityType: string): string {
+  if (DEFAULT_CATEGORIES.some(category => category.id === rawActivityType)) {
+    return rawActivityType;
+  }
+
+  const legacyActivityType = CATEGORY_ID_BY_ACTIVITY_TYPE[rawActivityType];
+  if (legacyActivityType) {
+    return legacyActivityType;
+  }
+
+  throw new Error(
+    `defaultEntries: no category mapped for activityType "${rawActivityType}" - add it to CATEGORY_ID_BY_ACTIVITY_TYPE`
+  );
+}
+
 /** Converts one raw seed record into a fully-formed Entry. */
 function toEntry(raw: RawSeedEntry): Entry {
-  const activityType = CATEGORY_ID_BY_ACTIVITY_TYPE[raw.activityType];
-  if (!activityType) {
-    // Would mean seedEntries.json references an activityType this file
-    // doesn't know how to map to a category - fail loudly at module load
-    // rather than silently mis-categorizing the entry.
-    throw new Error(
-      `defaultEntries: no category mapped for activityType "${raw.activityType}" - add it to CATEGORY_ID_BY_ACTIVITY_TYPE`
-    );
-  }
+  const activityType = resolveActivityType(raw.activityType);
 
   return {
     id: raw.id,

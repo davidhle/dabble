@@ -73,29 +73,47 @@ export const DEFAULT_CATEGORIES: Category[] = [
   {
     id: 'ShuffleDance',
     name: 'Shuffle Dance',
-    color: '#34d399',
+    color: '#1176ce',
     domain: 'Movement',
-  }, // emerald
+  }, 
   {
     id: 'HouseDance',
     name: 'House Dance',
     color: '#fb923c',
     domain: 'Movement',
-  }, // orange
+  }, 
   { id: 'CWalk', 
     name: 'C-Walk', 
     color: '#60a5fa', 
     domain: 'Movement' 
-  }, // blue
+  }, 
   { id: 'PoleDance', 
     name: 'Pole Dance', 
     color: '#f87171', 
     domain: 'Movement' 
-  }, // salmon
+  }, 
   {
     id: 'ContemporaryDance',
     name: 'Contemporary Dance',
     color: '#c084fc',
     domain: 'Movement'
-  } // purple
+  },
+  {
+    id: 'Ballet',
+    name: 'Ballet',
+    color: '#f0eb4c',
+    domain: 'Movement'
+  },
+  {
+    id: 'DanceResearch',
+    name: 'Dance Research',
+    color: '#a9f46c',
+    domain: 'Movement'
+  },
+  {
+    id: 'Yoga',
+    name: 'Yoga',
+    color: '#4cf0a5',
+    domain: 'Movement'
+  }
 ];
