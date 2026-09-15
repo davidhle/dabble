@@ -84,7 +84,7 @@ export const DEFAULT_CATEGORIES: Category[] = [
   }, 
   { id: 'CWalk', 
     name: 'C-Walk', 
-    color: '#60a5fa', 
+    color: '#607cfa', 
     domain: 'Movement' 
   }, 
   { id: 'PoleDance', 
@@ -108,7 +108,7 @@ export const DEFAULT_CATEGORIES: Category[] = [
     id: 'DanceResearch',
     name: 'Dance Research',
     color: '#a9f46c',
-    domain: 'Movement'
+    domain: 'Orbit'
   },
   {
     id: 'Yoga',
