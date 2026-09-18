@@ -27,7 +27,7 @@
  * eventually doing the same for Spiral.tsx.
  *
  * ──────────────────────────────────────────────────────────────────────
- * FULL-BLEED CANVAS + FLOATING OVERLAY SIDEBAR
+ * FULL-BLEED CANVAS + UNIFIED SIDEBAR CONTAINER
  * ──────────────────────────────────────────────────────────────────────
  * This used to be a two-region flex layout: a sidebar and a StarMap
  * container as flex siblings, where opening the sidebar physically
@@ -39,71 +39,68 @@
  *     height, regardless of `selectedEntries`. It is no longer a sized
  *     flex child of anything here; nothing in this file constrains its
  *     box.
- *   - The sidebar panel stack (SidebarPanelStack.tsx - shared with
- *     Timeline.tsx, see its own header comment) is a *separate*,
- *     absolutely-positioned overlay drawn on top of StarMap's canvas with
- *     a higher z-index. It only renders at all when `selectedEntries` is
- *     non-empty (`hasSelection`, from the hook) - there's still no
- *     separate "is the sidebar open" flag - but unlike before,
- *     mounting/unmounting it can't affect StarMap's size, because
- *     StarMap's size no longer depends on anything in this file's layout.
+ *   - The title/subtitle (VizPageHeader.tsx), <FilterBar>, and the
+ *     sidebar panel stack (SidebarPanelStack.tsx - shared with
+ *     Timeline.tsx/Spiral.tsx, see its own header comment) are now ONE
+ *     `.bullet-journal-surface` container (see index.css's own comment
+ *     for that class's three-layer background) - not three separately
+ *     positioned pieces. This container is ALWAYS rendered at the same
+ *     left position, whether or not `selectedEntries` is empty - only
+ *     the sidebar panel stack section WITHIN it is conditional on
+ *     `hasSelection`, growing/shrinking the container's own height
+ *     (capped by `maxHeight`, scrolling internally past that - see the
+ *     JSX below) rather than the container itself mounting/unmounting.
+ *     Mounting/unmounting that inner section still can't affect StarMap's
+ *     size, because StarMap's size no longer depends on anything in this
+ *     file's layout.
  *
- * The sidebar's width and header-relative position both still matter to
- * *other* things, even though they don't affect StarMap's own size:
+ * The container's width and position both still matter to *other*
+ * things, even though they don't affect StarMap's own size:
  *   - Width, for *visually* centering a clicked star - see `sidebarWidth`
- *     below (the overlay's own *actual rendered* width, currently a
- *     product of SidebarPanelStack's fixed `w-[33vw]` class) and the
- *     CLICK-TO-CENTER comment in StarMap.tsx.
- *   - Header layout, so the overlay's content starts below the header
- *     stack (navbar + title/subtitle + FilterBar) and shares its left
- *     edge, instead of overlapping or misaligning with it - see
- *     `headerLayout` below.
- * FilterBar's own two rows (category filters, sort toggle) and
- * SidebarPanelStack render the SAME effective width on screen - one third
- * of the viewport, minus this header's own horizontal offset from the
- * viewport's left edge (`headerLayout.left`, passed to FilterBar as its
- * `leftInset` prop). A flat `33vw` on both used to be enough BY ITSELF
- * (previously this was measured off the instructional subtitle `<p>`'s own
- * rendered width, then intentionally replaced with a flat viewport-relative
- * proportion instead) - but SidebarPanelStack.tsx is `fixed left-0` (so its
- * `33vw` box is anchored to the VIEWPORT's left edge), while FilterBar
- * renders in this normal-flow header instead, offset from the viewport by
- * `headerLayout.left`. A flat `33vw` on FilterBar therefore overshot
- * SidebarPanelStack's own right edge by exactly `headerLayout.left` pixels
- * - see FilterBar.tsx's `leftInset` prop comment for the full math. So
- * `headerLayout` measuring `left` (not just `top`) now matters for TWO
- * things: keeping the sidebar's own left edge aligned with the header (as
- * before), and letting FilterBar subtract that same offset from its width
- * so its right edge lands exactly where the sidebar's does.
+ *     below (the container's own *actual rendered* width, measured off
+ *     `containerRef`) and the CLICK-TO-CENTER comment in StarMap.tsx.
+ *     Deliberately still gated on `hasSelection` (0 unless there's an
+ *     actual panel open) even though the container itself is always
+ *     mounted now - see `sidebarWidth`'s own comment below for why: the
+ *     container's background being always-present is a purely visual
+ *     change, not a "the canvas should always make room for it" one.
+ *   - `topOffset` (StarMap's own prop, further down), so VizEmptyState
+ *     positions itself below the header TEXT specifically - see
+ *     `topOffset`'s own comment below for why that's measured separately
+ *     from the container's own top/left.
  *
  * ──────────────────────────────────────────────────────────────────────
  * HEADER STACKING: FLOW LAYOUT, NOT MANUAL OFFSETS
  * ──────────────────────────────────────────────────────────────────────
- * The title/subtitle text (VizPageHeader.tsx) and <FilterBar> both need
- * to render on top of StarMap's `fixed inset-0` canvas (see StarMap.tsx)
- * without overlapping each other. An earlier version made FilterBar its
- * own `fixed`, hand-placed box (`top-20`) floating independently of the
- * title/subtitle block below it - which meant its position was a guess
- * that didn't account for the title block's actual (variable) rendered
- * height, and the two would visually overlap.
+ * The unified container needs to render on top of StarMap's `fixed
+ * inset-0` canvas (see StarMap.tsx) without any of ITS own content
+ * (title, subtitle, FilterBar, panels) overlapping. An earlier version
+ * made FilterBar its own `fixed`, hand-placed box (`top-20`) floating
+ * independently of the title/subtitle block below it - which meant its
+ * position was a guess that didn't account for the title block's actual
+ * (variable) rendered height, and the two would visually overlap.
  *
- * The fix is to stop positioning them independently: both now live in
- * one normal-flow wrapper (`relative z-10`, below), stacked with
- * ordinary `space-y-4` margins the same way any other flow content
- * would be. `relative z-10` on the wrapper is what lifts the *whole*
- * subtree above the canvas in one place - see the comment on that div
- * for why - rather than each element separately fighting over z-index.
- * Ordinary block flow then guarantees no overlap, automatically
- * adjusting if the title block's height ever changes, instead of a
- * hand-tuned pixel offset needing to be re-guessed by hand.
+ * The fix is to stop positioning pieces independently: title, subtitle,
+ * and FilterBar all live in one normal-flow inner wrapper (`headerContentRef`
+ * below), stacked with ordinary `space-y-4` margins the same way any other
+ * flow content would be, and the sidebar panel stack (when present) simply
+ * follows it as a second flex child of the same outer container. The outer
+ * container's own `relative z-10` is what lifts the *whole* subtree above
+ * the canvas in one place, rather than each element separately fighting
+ * over z-index. Ordinary block flow then guarantees no overlap within the
+ * header, automatically adjusting if the title block's height ever
+ * changes, instead of a hand-tuned pixel offset needing to be re-guessed
+ * by hand.
  *
- * TRANSPARENT CONTAINER, CONTRASTED CONTENT:
- * Neither the title/subtitle block nor <FilterBar> has an opaque
- * background of its own - both sit directly over the starfield so it
- * stays visible through them, per the design brief. Legibility instead
- * comes from styling each piece of *content* for contrast individually -
- * see VizPageHeader.tsx and FilterBar.tsx. Multiple small contrasted
- * elements instead of one big backing box.
+ * SEMI-OPAQUE CONTAINER, BULLET-JOURNAL TEXTURE:
+ * Unlike the transparent, text-only header this page used to render
+ * directly over the starfield, the unified container now has its own
+ * `.bullet-journal-surface` background (see index.css) - a translucent
+ * paper-like surface (~65-70% opaque, so the canvas still shows faintly
+ * through it) with a faint grain texture and bullet-journal dot grid
+ * layered underneath its actual content. Individual controls (FilterBar's
+ * chips, the sort toggle) still keep their own per-control contrast on
+ * top of that surface, same as before.
  *
  * ──────────────────────────────────────────────────────────────────────
  * SHARED TIME-RANGE FILTER: SAME CONTEXT, SAME COMPONENT AS Timeline.tsx
@@ -167,13 +164,6 @@ export default function Constellation({
   entries,
   onEditEntry,
 }: ConstellationProps) {
-  // The dynamic category list - recomputed whenever entries change, since
-  // that's exactly when a new category could have appeared (a fresh "+
-  // Add new category" in AddEntryForm always creates its new entry in the
-  // same action). Passed down to useEntrySelection, FilterBar, and StarMap
-  // rather than having each of them independently reload it.
-  const categories = useMemo(() => loadCategories(), [entries]);
-
   // See the SHARED TIME-RANGE FILTER comment above: `selectedRange` is the
   // shared, cross-page time filter (same context Timeline.tsx reads);
   // `timeFilteredEntries` is `entries` hard-cut down to only what's
@@ -214,11 +204,12 @@ export default function Constellation({
     hasSelection,
     resetPending,
     resetAll,
+    categoriesVersion,
   } = useEntrySelection({
     // `categories` is no longer passed here - the shared
     // EntrySelectionProvider (see App.tsx) now derives its own categories
     // directly from `entries`, the same computation this page's own
-    // `categories` above still runs locally for FilterBar/StarMap's props
+    // `categories` below still runs locally for FilterBar/StarMap's props
     // - see useEntrySelection.ts's top-of-file comment.
     //
     // RESET INCLUDES THE BRUSH: bumping `resetViewSignal` (StarMap's own
@@ -236,6 +227,21 @@ export default function Constellation({
       resetToFullRange();
     },
   });
+
+  // The dynamic category list - recomputed whenever entries change, since
+  // that's exactly when a new category could have appeared (a fresh "+
+  // Add new category" in AddEntryForm always creates its new entry in the
+  // same action). Passed down to FilterBar and StarMap rather than having
+  // each of them independently reload it. Also recomputed off
+  // `categoriesVersion` (from useEntrySelection above) - see
+  // EntrySelectionContext.tsx's `categoriesVersion`/`refreshCategories`
+  // comment for why an in-place rename/recolor/delete of an EXISTING
+  // category (ManageCategoriesModal, opened from FilterBar) needs its own
+  // trigger separate from `entries` changing.
+  const categories = useMemo(
+    () => loadCategories(),
+    [entries, categoriesVersion]
+  );
 
   const { isEditMode } = useEditMode();
 
@@ -261,22 +267,84 @@ export default function Constellation({
     [isEditMode, onEditEntry, handleEntryClick]
   );
 
-  // The sidebar overlay's live rendered width, passed to StarMap so it
-  // can keep its click-to-center math accurate - see the layout comment
-  // above and StarMap.tsx's CLICK-TO-CENTER comment. Measured off the DOM
-  // node directly (rather than assumed from SidebarPanelStack's fixed
-  // `w-[33vw]` class) because the overlay's actual rendered pixel width
-  // still needs an actual measurement to convert that viewport-relative
-  // unit into the pixel coordinates StarMap's zoom math works in. Resets
-  // to 0 whenever the overlay unmounts (`hasSelection` false), since
-  // there's no node to measure - matching StarMap's `sidebarWidth: 0`
-  // "canvas is fully visible" case.
-  const sidebarRef = useRef<HTMLDivElement>(null);
+  // `containerRef` is the unified `.bullet-journal-surface` box below
+  // (title/subtitle/FilterBar/sidebar panel stack, all ONE container now -
+  // see the "UNIFIED SIDEBAR CONTAINER" comment at the top of this file).
+  // `headerContentRef` is just its inner title/subtitle/FilterBar block,
+  // nested inside that container's own padding.
+  //
+  // `containerLayout` (top/left) positions/sizes the container itself -
+  // measured off `containerRef` rather than hardcoded, for the exact same
+  // two reasons as before this file's restructure:
+  //   - top: the navbar's height lives in Layout.tsx (not this file), and
+  //     the container's own height changes with its content (the sort
+  //     toggle showing/hiding with `hasSelection`, the category chip grid
+  //     collapsing/expanding, panels opening/closing - see FilterBar.tsx).
+  //   - left: `main` in Layout.tsx is `mx-auto max-w-7xl px-4 sm:px-6
+  //     lg:px-8` - on any viewport *wider* than max-w-7xl (1280px), the
+  //     `mx-auto` centering margin adds on top of that padding, shifting
+  //     `left` right as the window keeps growing. A static Tailwind class
+  //     can't reproduce that - only measuring the container's actual
+  //     rendered position gives the exact number in every case.
+  //
+  // `topOffset` is a SEPARATE value - where the header TEXT block
+  // (title/subtitle/FilterBar) itself ends, NOT the outer container's own
+  // edge (which now also encloses the sidebar panel stack below it) -
+  // measured off `headerContentRef` instead. This is what StarMap still
+  // gets as its own `topOffset` prop (see below), unchanged in meaning
+  // from before this restructure.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const headerContentRef = useRef<HTMLDivElement>(null);
+  const [containerLayout, setContainerLayout] = useState({ top: 0, left: 0 });
+  const [topOffset, setTopOffset] = useState(0);
+
+  useEffect(() => {
+    const containerEl = containerRef.current;
+    const headerEl = headerContentRef.current;
+    if (!containerEl || !headerEl) return;
+
+    const updateLayout = () => {
+      const containerRect = containerEl.getBoundingClientRect();
+      const headerRect = headerEl.getBoundingClientRect();
+      setContainerLayout({ top: containerRect.top, left: containerRect.left });
+      setTopOffset(headerRect.bottom);
+    };
+    updateLayout();
+
+    // ResizeObserver catches either element's own size changing (content
+    // wrapping differently, the sort toggle/chip grid showing/hiding,
+    // panels opening/closing). It does NOT fire when the container's
+    // *position* shifts without a size change though - which is exactly
+    // what happens to `left` once the viewport is wider than main's
+    // max-w-7xl cap (see above). A window resize listener catches that
+    // case too; both call the same `updateLayout`.
+    const observer = new ResizeObserver(updateLayout);
+    observer.observe(containerEl);
+    observer.observe(headerEl);
+    window.addEventListener('resize', updateLayout);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateLayout);
+    };
+  }, []);
+
+  // StarMap's own `sidebarWidth` prop, for its click-to-center math - see
+  // the layout comment above and StarMap.tsx's CLICK-TO-CENTER comment.
+  // Measured off `containerRef` (the SAME container `topOffset`/
+  // `containerLayout` above already measure) rather than a second DOM
+  // node, since the unified container's own width IS the sidebar's width
+  // now. Deliberately gated on `hasSelection` (not just "does the node
+  // exist" - the container itself is always mounted now, unlike the old
+  // conditionally-rendered SidebarPanelStack overlay): the whole point of
+  // this restructure is that the container's background/texture is always
+  // visually present (see the top-of-file comment), but StarMap should
+  // still only shift/recenter its canvas around it when there's an actual
+  // panel open, exactly like before.
   const [sidebarWidth, setSidebarWidth] = useState(0);
 
   useEffect(() => {
-    const el = sidebarRef.current;
-    if (!el) {
+    const el = containerRef.current;
+    if (!el || !hasSelection) {
       setSidebarWidth(0);
       return;
     }
@@ -288,132 +356,89 @@ export default function Constellation({
     return () => observer.disconnect();
   }, [hasSelection]);
 
-  // Where the header stack (title/subtitle + FilterBar) actually sits in
-  // the viewport, so SidebarPanelStack below can start just past its
-  // bottom edge and share its left edge, instead of overlapping or
-  // misaligning with it. `left` ALSO now feeds FilterBar's own `leftInset`
-  // prop, so its width can subtract this same offset - see the
-  // "FULL-BLEED CANVAS + FLOATING OVERLAY SIDEBAR" comment at the top of
-  // this file for the full width-matching reasoning.
-  //
-  // Neither top nor left can be a hardcoded guess:
-  //   - top: the navbar's height lives in Layout.tsx (not this file), and
-  //     the header block's own height changes with its content - e.g.
-  //     the sort toggle inside FilterBar showing/hiding with
-  //     `hasSelection` (see FilterBar.tsx).
-  //   - left: `main` in Layout.tsx is `mx-auto max-w-7xl px-4 sm:px-6
-  //     lg:px-8` - on any viewport *wider* than max-w-7xl (1280px), the
-  //     `mx-auto` centering margin adds on top of that padding, shifting
-  //     `left` right as the window keeps growing. A static Tailwind class
-  //     (even one that replicates the px-4/sm:px-6/lg:px-8 breakpoints
-  //     exactly) can't reproduce that - only measuring the header's
-  //     actual rendered position gives the exact number in every case.
-  //
-  // `headerRef.current.getBoundingClientRect()` gives both directly -
-  // `.bottom`/`.left` already include the navbar's height and any
-  // mx-auto centering margin for free (this wrapper sits below the
-  // navbar, inside main, in normal document flow). Nothing to add or
-  // guess for either.
-  const headerRef = useRef<HTMLDivElement>(null);
-  const [headerLayout, setHeaderLayout] = useState({ top: 0, left: 0 });
-
-  useEffect(() => {
-    const el = headerRef.current;
-    if (!el) return;
-
-    const updateLayout = () => {
-      const rect = el.getBoundingClientRect();
-      setHeaderLayout({ top: rect.bottom, left: rect.left });
-    };
-    updateLayout();
-
-    // ResizeObserver catches the header's own size changing (content
-    // wrapping differently, FilterBar's sort toggle showing/hiding).
-    // It does NOT fire when the header's *position* shifts without a
-    // size change though - which is exactly what happens to `left` once
-    // the viewport is wider than main's max-w-7xl cap (see above): the
-    // header's width stops growing, but its mx-auto margin keeps
-    // shifting as the window resizes. A window resize listener catches
-    // that case too; both call the same `updateLayout`.
-    const observer = new ResizeObserver(updateLayout);
-    observer.observe(el);
-    window.addEventListener('resize', updateLayout);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', updateLayout);
-    };
-  }, []);
-
   return (
     // A Fragment, not a single `space-y-4` div, wraps the whole return:
     // `space-y-*` applies margin-top to every sibling, including the
-    // out-of-flow `fixed` ones below (StarMap, the sidebar overlay) -
-    // which would misalign StarMap's `inset-0` edges by that margin.
-    // `space-y-4` is scoped to just the flow-content header wrapper
-    // (title/subtitle + FilterBar) below instead.
+    // out-of-flow `fixed` StarMap canvas below - which would misalign its
+    // `inset-0` edges by that margin. The unified container below owns its
+    // own internal spacing instead.
     <>
       {/*
-       * relative z-10: StarMap's canvas below is `fixed inset-0` at z-0
+       * UNIFIED SIDEBAR CONTAINER - see the top-of-file comment. ONE
+       * `.bullet-journal-surface` box (title/subtitle/FilterBar, then -
+       * once there's a selection - the sidebar panel stack), always
+       * rendered at this same position regardless of `hasSelection`,
+       * rather than a transparent header plus a separately-mounted
+       * overlay below it.
+       *
+       * `relative z-10`: StarMap's canvas below is `fixed inset-0` at z-0
        * (see StarMap.tsx) and would otherwise paint over this
        * non-positioned content, since positioned elements always paint
-       * above non-positioned ones regardless of DOM order. Putting z-10
-       * here once lifts this whole subtree - title, subtitle, AND
-       * FilterBar - above the canvas together, rather than each needing
-       * its own position/z-index. See the "HEADER STACKING" and
-       * "TRANSPARENT CONTAINER, CONTRASTED CONTENT" comments at the top
-       * of this file for why FilterBar lives in here (ordinary flow, no
-       * background) instead of as an independently `fixed` element.
+       * above non-positioned ones regardless of DOM order.
        *
-       * A fixed width, NOT a plain block div (which stretches to its
-       * parent's full width - `main`'s max-w-7xl content box - by
-       * default, even though its actual content - the title, subtitle,
-       * and FilterBar's own row - is narrower than that): since this div
-       * sits above StarMap's starfield (z-10, transparent, no background
-       * of its own - see "TRANSPARENT CONTAINER, CONTRASTED CONTENT"
-       * above), that extra empty box-model width to the right of the
-       * visible text/buttons would still catch pointer events, silently
-       * blocking clicks on any star that happens to render underneath it.
+       * `calc(33vw - containerLayout.left)`, not `w-fit`: keeps this
+       * container's own rendered width identical to what FilterBar/the
+       * old SidebarPanelStack overlay always used - one third of the
+       * viewport, minus this container's own offset from the viewport's
+       * left edge. Consistent with Spiral.tsx/Timeline.tsx's identical
+       * width calc.
        *
-       * `calc(33vw - headerLayout.left)`, not `w-fit`: this used to be
-       * `w-fit` (shrinks to the widest child's own intrinsic width, which
-       * in practice meant FilterBar's own row, the widest child for this
-       * page's short one-sentence subtitle) - but that made the
-       * SUBTITLE's own rendered width follow whatever FilterBar happened
-       * to need, rather than deliberately matching FilterBar/
-       * SidebarPanelStack.tsx's shared width the way Spiral.tsx's header
-       * does (see that file's own comment on this exact width value, and
-       * FilterBar.tsx's `leftInset` prop comment for why a flat `33vw`
-       * would overshoot SidebarPanelStack's actual right edge). Matching
-       * that value directly here - instead of leaving it to fall out of a
-       * `w-fit` computation - keeps this wrapper (and therefore the
-       * subtitle's own wrap width) exactly as wide as the sidebar/
-       * FilterBar are, consistent with Spiral.tsx, rather than an
-       * incidental side effect of whichever child happens to be widest.
-       * The children below still stack and left-align exactly as before
-       * via `space-y-4`; this has no effect on the sidebar panel stack or
-       * sort toggle, which size themselves independently (see the
-       * top-of-file layout comment).
+       * `maxHeight`, not a `fixed bottom-0` box: caps this container at
+       * however much vertical space remains below it in the viewport, so
+       * a long panel stack scrolls WITHIN the container (see the
+       * `overflow-y-auto` region below) instead of pushing the container
+       * itself past the bottom of the screen. Computed off the same
+       * `containerLayout.top` used for width - see that state's own
+       * comment above.
        */}
       <div
-        ref={headerRef}
-        className="relative z-10 space-y-4"
-        style={{ width: `calc(33vw - ${headerLayout.left}px)` }}
+        ref={containerRef}
+        className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
+        style={{
+          width: `calc(33vw - ${containerLayout.left}px)`,
+          maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
+        }}
       >
-        <VizPageHeader
-          title="Constellation"
-          subtitle="Drag to pan, scroll to zoom, and click a star to see the entry behind it."
-        />
+        <div ref={headerContentRef} className="flex-shrink-0 space-y-4 p-4">
+          <VizPageHeader
+            title="Constellation"
+            subtitle="Drag to pan, scroll to zoom, and click a star to see the entry behind it."
+          />
 
-        <FilterBar
-          sortMode={sortMode}
-          onSortModeChange={handleSortModeChange}
-          categories={categories}
-          filterCategories={filterCategories}
-          onToggleFilterCategory={handleToggleFilterCategory}
-          onResetFilters={handleResetFilters}
-          hasSelection={hasSelection}
-          leftInset={headerLayout.left}
-        />
+          <FilterBar
+            sortMode={sortMode}
+            onSortModeChange={handleSortModeChange}
+            categories={categories}
+            filterCategories={filterCategories}
+            onToggleFilterCategory={handleToggleFilterCategory}
+            onResetFilters={handleResetFilters}
+            hasSelection={hasSelection}
+          />
+        </div>
+
+        {/*
+         * Sidebar panel stack - only takes up space once there's a
+         * selection, same as before this restructure (see
+         * `containerLayout`'s own comment above for why `sidebarWidth`
+         * still only reacts to `hasSelection`, not to this container's
+         * own always-present background). `flex-1 overflow-y-auto` is
+         * what lets this region scroll independently within the
+         * container's own `maxHeight` cap above, rather than growing the
+         * container past the bottom of the screen.
+         */}
+        {hasSelection && (
+          <div className="dark-scrollbar flex-1 overflow-y-auto px-4 pb-4">
+            <SidebarPanelStack
+              selectedEntries={selectedEntries}
+              sortMode={sortMode}
+              categoryGroups={categoryGroups}
+              onExpand={handleExpandPanel}
+              onMinimize={handleMinimizePanel}
+              onClose={handleClosePanel}
+              onEdit={onEditEntry}
+            />
+          </div>
+        )}
       </div>
 
       {/*
@@ -444,7 +469,7 @@ export default function Constellation({
         filterCategories={filterCategories}
         sidebarWidth={sidebarWidth}
         resetViewSignal={resetViewSignal}
-        topOffset={headerLayout.top}
+        topOffset={topOffset}
         isEditMode={isEditMode}
       />
 
@@ -465,7 +490,7 @@ export default function Constellation({
       <ResetToast visible={resetPending} />
 
       {/*
-       * Always rendered - unlike the sidebar overlay below, this isn't
+       * Always rendered - unlike the sidebar panel stack above, this isn't
        * gated on `hasSelection`/`expandedEntryId`: it's a distinct,
        * unambiguous action (reset EVERYTHING) from a panel's own ×
        * close button (which only removes that one panel), so it stays
@@ -474,28 +499,6 @@ export default function Constellation({
        */}
       <ResetButton onClick={resetAll} />
       <EditModeToggle />
-
-      {/*
-       * Sidebar overlay - only rendered (and therefore only taking up
-       * screen space) when `hasSelection`. Being `fixed` rather than a
-       * flex sibling, mounting/unmounting it can't resize StarMap's
-       * canvas underneath - see the layout comment at the top of this
-       * file for why that's the whole point of this restructure.
-       */}
-      {hasSelection && (
-        <SidebarPanelStack
-          ref={sidebarRef}
-          selectedEntries={selectedEntries}
-          sortMode={sortMode}
-          categoryGroups={categoryGroups}
-          onExpand={handleExpandPanel}
-          onMinimize={handleMinimizePanel}
-          onClose={handleClosePanel}
-          onEdit={onEditEntry}
-          top={headerLayout.top}
-          left={headerLayout.left}
-        />
-      )}
     </>
   );
 }

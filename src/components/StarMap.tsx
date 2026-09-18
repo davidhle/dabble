@@ -686,7 +686,13 @@ export default function StarMap({
         color: getActivityColor(entry.activityType),
       };
     });
-  }, [entries, categoryCenters, size, clusterRadius]);
+    // `categories` is otherwise unused here (star position/radius doesn't
+    // depend on it) - it's still a dependency so a ManageCategoriesModal
+    // recolor (which never touches `entries`) recomputes each star's
+    // `color` via getActivityColor immediately, instead of leaving stale
+    // colors on screen until something else forces `stars` to recompute.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, categoryCenters, size, clusterRadius, categories]);
 
   const isReady = size.width > 0 && size.height > 0;
 

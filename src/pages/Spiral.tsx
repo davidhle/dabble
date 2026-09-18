@@ -38,13 +38,14 @@
  *     three-way open-new/expand-minimized/deselect-expanded click
  *     behavior (see useEntrySelection.ts's CLICK OUTCOMES comment) the
  *     other two views already share.
- *   - The page layout (full-bleed canvas behind a floating z-10 header
- *     and a z-30 sidebar overlay, measured `headerLayout` for the
- *     sidebar's position, the same fixed-width/`space-y-4` header
- *     wrapper, `sidebarWidth` measured off the sidebar's own DOM node)
- *     matches Constellation.tsx/Timeline.tsx's CSS approach exactly - see
- *     Constellation.tsx's own top-of-file layout comment for the full
- *     reasoning behind each piece, not re-explained here to avoid the
+ *   - The page layout (full-bleed canvas behind a floating z-10 unified
+ *     `.bullet-journal-surface` container - title/subtitle/FilterBar/
+ *     sidebar panel stack all ONE container, measured `containerLayout`/
+ *     `topOffset` for its position, `sidebarWidth` measured off the same
+ *     container's own DOM node) matches Constellation.tsx/Timeline.tsx's
+ *     CSS approach exactly - see Constellation.tsx's own top-of-file
+ *     layout comment for the full reasoning behind each piece, not
+ *     re-explained here to avoid the
  *     three files' comments drifting out of sync with each other.
  *   - TimeRangeContext's `selectedRange` is consumed exactly like
  *     Constellation.tsx/Timeline.tsx: `timeFilteredEntries` is `entries`
@@ -106,10 +107,6 @@ interface SpiralProps {
 }
 
 export default function Spiral({ entries, onEditEntry }: SpiralProps) {
-  // The dynamic category list - see Constellation.tsx's identical
-  // `categories` useMemo for why this is recomputed off `entries`.
-  const categories = useMemo(() => loadCategories(), [entries]);
-
   // `selectedRange` is the shared, cross-page time filter (same context
   // Constellation.tsx/Timeline.tsx read); `timeFilteredEntries` is
   // `entries` hard-cut down to only what's `isEntryWithinRange` of it -
@@ -144,6 +141,7 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
     hasSelection,
     resetPending,
     resetAll,
+    categoriesVersion,
   } = useEntrySelection({
     // `categories` is no longer passed here - see Constellation.tsx's
     // identical comment: the shared EntrySelectionProvider (App.tsx) now
@@ -160,6 +158,15 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
       resetToFullRange();
     },
   });
+
+  // The dynamic category list - see Constellation.tsx's identical
+  // `categories` useMemo (including the `categoriesVersion` dependency's
+  // own comment there) for why this is recomputed off both `entries` and
+  // `categoriesVersion`.
+  const categories = useMemo(
+    () => loadCategories(),
+    [entries, categoriesVersion]
+  );
 
   const { isEditMode } = useEditMode();
 
@@ -182,25 +189,31 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
     [isEditMode, onEditEntry, handleEntryClick]
   );
 
-  // Where the header stack (title/subtitle + FilterBar) actually sits in
-  // the viewport - identical to Constellation.tsx's/Timeline.tsx's own
-  // `headerLayout` measurement; see either file's comment for why neither
-  // `top` nor `left` can be a hardcoded guess.
-  const headerRef = useRef<HTMLDivElement>(null);
-  const [headerLayout, setHeaderLayout] = useState({ top: 0, left: 0 });
+  // `containerRef`/`headerContentRef`/`containerLayout`/`topOffset` -
+  // identical to Constellation.tsx's/Timeline.tsx's own measurement setup
+  // for their unified `.bullet-journal-surface` container; see
+  // Constellation.tsx's layout comment for the full reasoning behind each.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const headerContentRef = useRef<HTMLDivElement>(null);
+  const [containerLayout, setContainerLayout] = useState({ top: 0, left: 0 });
+  const [topOffset, setTopOffset] = useState(0);
 
   useEffect(() => {
-    const el = headerRef.current;
-    if (!el) return;
+    const containerEl = containerRef.current;
+    const headerEl = headerContentRef.current;
+    if (!containerEl || !headerEl) return;
 
     const updateLayout = () => {
-      const rect = el.getBoundingClientRect();
-      setHeaderLayout({ top: rect.bottom, left: rect.left });
+      const containerRect = containerEl.getBoundingClientRect();
+      const headerRect = headerEl.getBoundingClientRect();
+      setContainerLayout({ top: containerRect.top, left: containerRect.left });
+      setTopOffset(headerRect.bottom);
     };
     updateLayout();
 
     const observer = new ResizeObserver(updateLayout);
-    observer.observe(el);
+    observer.observe(containerEl);
+    observer.observe(headerEl);
     window.addEventListener('resize', updateLayout);
     return () => {
       observer.disconnect();
@@ -208,16 +221,17 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
     };
   }, []);
 
-  // The sidebar overlay's live rendered width, passed to SpiralTimeline so
-  // its CLICK-TO-CENTER effect can keep its centering math accurate -
+  // The unified container's live rendered width, passed to SpiralTimeline
+  // so its CLICK-TO-CENTER effect can keep its centering math accurate -
   // identical to Constellation.tsx's/Timeline.tsx's own `sidebarWidth`
-  // measurement.
-  const sidebarRef = useRef<HTMLDivElement>(null);
+  // measurement, including the `hasSelection` gate (0 unless there's an
+  // actual panel open, even though the container itself is always mounted
+  // now - see Constellation.tsx's comment on this same gate).
   const [sidebarWidth, setSidebarWidth] = useState(0);
 
   useEffect(() => {
-    const el = sidebarRef.current;
-    if (!el) {
+    const el = containerRef.current;
+    if (!el || !hasSelection) {
       setSidebarWidth(0);
       return;
     }
@@ -280,64 +294,59 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
     // edges by adding margin-top to it as a sibling.
     <>
       {/*
-       * A fixed width, NOT `w-fit`: an earlier version used `w-fit` here
-       * (shrinks this wrapper down to the widest child's own intrinsic
-       * max-content width) since FilterBar's own root already has a fixed
-       * width matching the sidebar's (see FilterBar.tsx's `leftInset` prop
-       * comment), so as long as no OTHER child wanted to be wider than
-       * that, the wrapper ended up that same width for free. Spiral's
-       * subtitle is two full sentences (longer than either other page's
-       * single sentence) - long enough that its unwrapped one-line
-       * intrinsic width exceeds FilterBar's own width, which made THAT
-       * `w-fit` computation pick the subtitle's own (wider) intrinsic
-       * width instead, stretching the whole header out over the canvas
-       * and blocking clicks on points/arcs underneath it. Constellation.tsx/
-       * Timeline.tsx now use this same fixed-width approach too (see
-       * Constellation.tsx's own comment), so the subtitle's wrap width is
-       * a deliberate match to FilterBar/the sidebar everywhere, not an
-       * incidental side effect of `w-fit` that happened to work for their
-       * shorter one-sentence subtitles.
-       *
-       * `calc(33vw - headerLayout.left)`, not a flat `33vw`: matches
-       * FilterBar's own width exactly (see its `leftInset` prop comment
-       * for why a flat 33vw would overshoot SidebarPanelStack.tsx's actual
-       * right edge by `headerLayout.left` pixels) - using the same flat
-       * 33vw here instead would leave this wrapper wider than the
-       * FilterBar it contains, and since this wrapper is itself
-       * `relative z-10` (positioned above the canvas), that extra sliver
-       * would silently block clicks on whatever's underneath it, the
-       * exact bug this fixed width was introduced to avoid in the first
-       * place. This forces the subtitle <p> to wrap within the SAME real
-       * width FilterBar/SidebarPanelStack.tsx already share, so the
-       * header, FilterBar, and (once a panel is open) the sidebar panel
-       * stack all stay a consistent, canvas-sparing width regardless of
-       * subtitle length or how much horizontal page padding
-       * `headerLayout.left` happens to be.
+       * UNIFIED SIDEBAR CONTAINER - identical structure/reasoning to
+       * Constellation.tsx's own container; see its layout comment. Since
+       * this container's width is now driven by the outer
+       * `.bullet-journal-surface` box (not FilterBar's own root, which no
+       * longer computes its own width - see FilterBar.tsx's own WIDTH
+       * comment), Spiral's two-sentence subtitle wraps within this SAME
+       * `calc(33vw - containerLayout.left)` width every other page's
+       * container uses, rather than able to stretch the container wider
+       * than intended the way an unconstrained `w-fit` wrapper once could.
        */}
       <div
-        ref={headerRef}
-        className="relative z-10 space-y-4"
-        style={{ width: `calc(33vw - ${headerLayout.left}px)` }}
+        ref={containerRef}
+        className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
+        style={{
+          width: `calc(33vw - ${containerLayout.left}px)`,
+          maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
+        }}
       >
-        <VizPageHeader
-          title="Spiral Timeline"
-          subtitle="Drag to pan, scroll to zoom, and click a point (or arc) to see the entry behind it. Time coils outward from the center - oldest at the middle, most recent at the rim."
-        />
+        <div ref={headerContentRef} className="flex-shrink-0 space-y-4 p-4">
+          <VizPageHeader
+            title="Spiral Timeline"
+            subtitle="Drag to pan, scroll to zoom, and click a point (or arc) to see the entry behind it. Time coils outward from the center - oldest at the middle, most recent at the rim."
+          />
 
-        <FilterBar
-          sortMode={sortMode}
-          onSortModeChange={handleSortModeChange}
-          categories={categories}
-          filterCategories={filterCategories}
-          onToggleFilterCategory={handleToggleFilterCategory}
-          onResetFilters={handleResetFilters}
-          hasSelection={hasSelection}
-          leftInset={headerLayout.left}
-        />
+          <FilterBar
+            sortMode={sortMode}
+            onSortModeChange={handleSortModeChange}
+            categories={categories}
+            filterCategories={filterCategories}
+            onToggleFilterCategory={handleToggleFilterCategory}
+            onResetFilters={handleResetFilters}
+            hasSelection={hasSelection}
+          />
+        </div>
+
+        {hasSelection && (
+          <div className="dark-scrollbar flex-1 overflow-y-auto px-4 pb-4">
+            <SidebarPanelStack
+              selectedEntries={selectedEntries}
+              sortMode={sortMode}
+              categoryGroups={categoryGroups}
+              onExpand={handleExpandPanel}
+              onMinimize={handleMinimizePanel}
+              onClose={handleClosePanel}
+              onEdit={onEditEntry}
+            />
+          </div>
+        )}
       </div>
 
       <SpiralTimeline
         entries={timeFilteredEntries}
+        categories={categories}
         hasAnyEntries={entries.length > 0}
         filterCategories={filterCategories}
         onEntryClick={handleCanvasEntryClick}
@@ -346,7 +355,7 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
         sidebarWidth={sidebarWidth}
         resetViewSignal={resetViewSignal}
         domainRange={selectedRange}
-        topOffset={headerLayout.top}
+        topOffset={topOffset}
         isEditMode={isEditMode}
       />
 
@@ -410,21 +419,6 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
       <ResetToast visible={resetPending} />
       <ResetButton onClick={resetAll} />
       <EditModeToggle />
-
-      {hasSelection && (
-        <SidebarPanelStack
-          ref={sidebarRef}
-          selectedEntries={selectedEntries}
-          sortMode={sortMode}
-          categoryGroups={categoryGroups}
-          onExpand={handleExpandPanel}
-          onMinimize={handleMinimizePanel}
-          onClose={handleClosePanel}
-          onEdit={onEditEntry}
-          top={headerLayout.top}
-          left={headerLayout.left}
-        />
-      )}
     </>
   );
 }

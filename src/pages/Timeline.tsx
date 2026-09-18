@@ -37,35 +37,36 @@
  *     LinearTimeline's `onEntryClick` prop, mirroring exactly how
  *     Constellation.tsx wires the same handler to StarMap's
  *     `onStarClick`.
- *   - The page layout (full-bleed canvas behind a floating z-10 header
- *     and a z-30 sidebar overlay, measured `headerLayout` for the
- *     sidebar's position, the same fixed-width/`space-y-4` header
- *     wrapper) matches Constellation.tsx's CSS approach exactly - see
- *     Constellation.tsx's own top-of-file layout comment for the full
- *     reasoning behind each piece, which isn't re-explained here to
- *     avoid the two files' comments drifting out of sync with each
- *     other.
+ *   - The page layout (full-bleed canvas behind a floating z-10 unified
+ *     `.bullet-journal-surface` container - title/subtitle/FilterBar/
+ *     sidebar panel stack all ONE container now, measured `containerLayout`/
+ *     `topOffset` for its position) matches Constellation.tsx's CSS
+ *     approach exactly - see Constellation.tsx's own top-of-file layout
+ *     comment for the full reasoning behind each piece, which isn't
+ *     re-explained here to avoid the two files' comments drifting out of
+ *     sync with each other.
  *
  * STAGE 2: sidebarWidth, openedEntryIds/expandedEntryId, and topOffset
  * ──────────────────────────────────────────────────────────────────────
  * This page now also replicates two more pieces of Constellation.tsx's
  * wiring that a first pass skipped:
  *
- *   - `sidebarWidth` is measured off SidebarPanelStack's own rendered DOM
- *     node the exact same way Constellation.tsx measures it for StarMap -
- *     LinearTimeline's own AUTO-RECENTER effect (see its header comment)
- *     needs it for the same "exclude the sidebar's band when centering"
- *     math StarMap's CLICK-TO-CENTER effect uses.
+ *   - `sidebarWidth` is measured off the unified container's own rendered
+ *     DOM node the exact same way Constellation.tsx measures it for
+ *     StarMap - LinearTimeline's own AUTO-RECENTER effect (see its header
+ *     comment) needs it for the same "exclude the sidebar's band when
+ *     centering" math StarMap's CLICK-TO-CENTER effect uses.
  *   - `openedEntryIds`/`expandedEntryId` (both already returned by
  *     useEntrySelection.ts, just not consumed here yet) are passed to
  *     LinearTimeline so it can render the SAME opened-entry highlight
  *     ring/glow StarMap renders for its stars, and drive that same
  *     AUTO-RECENTER effect.
- *   - `topOffset` (this page's own `headerLayout.top`) is new -
- *     LinearTimeline needs it to vertically center its content BELOW the
- *     header, unlike StarMap's starfield which has no equivalent
- *     vertical exclusion. See LinearTimeline.tsx's VERTICAL CENTERING
- *     comment for why this page-specific need doesn't apply to StarMap.
+ *   - `topOffset` (this page's own measured header-content bottom edge) is
+ *     new - LinearTimeline needs it to vertically center its content
+ *     BELOW the header, unlike StarMap's starfield which has no
+ *     equivalent vertical exclusion. See LinearTimeline.tsx's VERTICAL
+ *     CENTERING comment for why this page-specific need doesn't apply to
+ *     StarMap.
  *
  * STAGE 3: TimeRangeContext - a HARD time filter, unlike filterCategories
  * ──────────────────────────────────────────────────────────────────────
@@ -122,13 +123,6 @@ interface TimelineProps {
 }
 
 export default function Timeline({ entries, onEditEntry }: TimelineProps) {
-  // The dynamic category list - see Constellation.tsx's identical
-  // `categories` useMemo for why this is recomputed off `entries`. Reads
-  // the full `entries`, not `timeFilteredEntries` below - see the
-  // STAGE 3 comment above for why the category list shouldn't shrink
-  // just because the visible time window did.
-  const categories = useMemo(() => loadCategories(), [entries]);
-
   // See the STAGE 3 comment above: `selectedRange` is the shared,
   // cross-page time filter; `timeFilteredEntries` is `entries` hard-cut
   // down to only what's `isEntryWithinRange` of it - this (not `entries`)
@@ -157,6 +151,7 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
     hasSelection,
     resetPending,
     resetAll,
+    categoriesVersion,
   } = useEntrySelection({
     // `categories` is no longer passed here - see Constellation.tsx's
     // identical comment: the shared EntrySelectionProvider (App.tsx) now
@@ -179,6 +174,17 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
     onFullReset: resetToFullRange,
   });
 
+  // The dynamic category list - see Constellation.tsx's identical
+  // `categories` useMemo (including the `categoriesVersion` dependency's
+  // own comment there) for why this is recomputed off both `entries` and
+  // `categoriesVersion`. Reads the full `entries`, not `timeFilteredEntries`
+  // below - see the STAGE 3 comment above for why the category list
+  // shouldn't shrink just because the visible time window did.
+  const categories = useMemo(
+    () => loadCategories(),
+    [entries, categoriesVersion]
+  );
+
   const { isEditMode } = useEditMode();
 
   /**
@@ -200,27 +206,31 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
     [isEditMode, onEditEntry, handleEntryClick]
   );
 
-  // Where the header stack (title/subtitle + FilterBar) actually sits in
-  // the viewport, so SidebarPanelStack below can start just past its
-  // bottom edge and share its left edge - identical to Constellation.tsx's
-  // `headerLayout` measurement; see its comment for why neither `top` nor
-  // `left` can be a hardcoded guess. `top` is also handed to
-  // LinearTimeline as `topOffset` now - see the STAGE 2 comment above.
-  const headerRef = useRef<HTMLDivElement>(null);
-  const [headerLayout, setHeaderLayout] = useState({ top: 0, left: 0 });
+  // `containerRef`/`headerContentRef`/`containerLayout`/`topOffset` -
+  // identical to Constellation.tsx's own measurement setup; see its
+  // layout comment for the full reasoning behind each. `topOffset` is
+  // still handed to LinearTimeline below - see the STAGE 2 comment above.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const headerContentRef = useRef<HTMLDivElement>(null);
+  const [containerLayout, setContainerLayout] = useState({ top: 0, left: 0 });
+  const [topOffset, setTopOffset] = useState(0);
 
   useEffect(() => {
-    const el = headerRef.current;
-    if (!el) return;
+    const containerEl = containerRef.current;
+    const headerEl = headerContentRef.current;
+    if (!containerEl || !headerEl) return;
 
     const updateLayout = () => {
-      const rect = el.getBoundingClientRect();
-      setHeaderLayout({ top: rect.bottom, left: rect.left });
+      const containerRect = containerEl.getBoundingClientRect();
+      const headerRect = headerEl.getBoundingClientRect();
+      setContainerLayout({ top: containerRect.top, left: containerRect.left });
+      setTopOffset(headerRect.bottom);
     };
     updateLayout();
 
     const observer = new ResizeObserver(updateLayout);
-    observer.observe(el);
+    observer.observe(containerEl);
+    observer.observe(headerEl);
     window.addEventListener('resize', updateLayout);
     return () => {
       observer.disconnect();
@@ -228,18 +238,17 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
     };
   }, []);
 
-  // The sidebar overlay's live rendered width, passed to LinearTimeline so
-  // its AUTO-RECENTER effect can keep its horizontal-centering math
+  // The unified container's live rendered width, passed to LinearTimeline
+  // so its AUTO-RECENTER effect can keep its horizontal-centering math
   // accurate - identical to Constellation.tsx's own `sidebarWidth`
-  // measurement for StarMap; see its comment for why this has to be
-  // measured off the DOM node rather than assumed from SidebarPanelStack's
-  // fixed `w-[33vw]` class.
-  const sidebarRef = useRef<HTMLDivElement>(null);
+  // measurement for StarMap, including the `hasSelection` gate; see its
+  // comment for why this stays 0 unless there's an actual panel open, even
+  // though the container itself is always mounted now.
   const [sidebarWidth, setSidebarWidth] = useState(0);
 
   useEffect(() => {
-    const el = sidebarRef.current;
-    if (!el) {
+    const el = containerRef.current;
+    if (!el || !hasSelection) {
       setSidebarWidth(0);
       return;
     }
@@ -256,37 +265,60 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
     // comment: `space-y-*` would misalign LinearTimeline's `fixed inset-0`
     // edges by adding margin-top to it as a sibling.
     <>
+      {/*
+       * UNIFIED SIDEBAR CONTAINER - identical structure/reasoning to
+       * Constellation.tsx's own container; see its layout comment.
+       */}
       <div
-        ref={headerRef}
-        className="relative z-10 space-y-4"
-        style={{ width: `calc(33vw - ${headerLayout.left}px)` }}
+        ref={containerRef}
+        className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
+        style={{
+          width: `calc(33vw - ${containerLayout.left}px)`,
+          maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
+        }}
       >
-        <VizPageHeader
-          title="Linear Timeline"
-          subtitle="Drag to pan, scroll to zoom, and click a point to see the entry behind it."
-        />
+        <div ref={headerContentRef} className="flex-shrink-0 space-y-4 p-4">
+          <VizPageHeader
+            title="Linear Timeline"
+            subtitle="Drag to pan, scroll to zoom, and click a point to see the entry behind it."
+          />
 
-        <FilterBar
-          sortMode={sortMode}
-          onSortModeChange={handleSortModeChange}
-          categories={categories}
-          filterCategories={filterCategories}
-          onToggleFilterCategory={handleToggleFilterCategory}
-          onResetFilters={handleResetFilters}
-          hasSelection={hasSelection}
-          leftInset={headerLayout.left}
-        />
+          <FilterBar
+            sortMode={sortMode}
+            onSortModeChange={handleSortModeChange}
+            categories={categories}
+            filterCategories={filterCategories}
+            onToggleFilterCategory={handleToggleFilterCategory}
+            onResetFilters={handleResetFilters}
+            hasSelection={hasSelection}
+          />
+        </div>
+
+        {hasSelection && (
+          <div className="dark-scrollbar flex-1 overflow-y-auto px-4 pb-4">
+            <SidebarPanelStack
+              selectedEntries={selectedEntries}
+              sortMode={sortMode}
+              categoryGroups={categoryGroups}
+              onExpand={handleExpandPanel}
+              onMinimize={handleMinimizePanel}
+              onClose={handleClosePanel}
+              onEdit={onEditEntry}
+            />
+          </div>
+        )}
       </div>
 
       <LinearTimeline
         entries={timeFilteredEntries}
+        categories={categories}
         hasAnyEntries={entries.length > 0}
         filterCategories={filterCategories}
         onEntryClick={handleCanvasEntryClick}
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}
         sidebarWidth={sidebarWidth}
-        topOffset={headerLayout.top}
+        topOffset={topOffset}
         domainRange={selectedRange}
         isEditMode={isEditMode}
       />
@@ -310,21 +342,6 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
       <ResetToast visible={resetPending} />
       <ResetButton onClick={resetAll} />
       <EditModeToggle />
-
-      {hasSelection && (
-        <SidebarPanelStack
-          ref={sidebarRef}
-          selectedEntries={selectedEntries}
-          sortMode={sortMode}
-          categoryGroups={categoryGroups}
-          onExpand={handleExpandPanel}
-          onMinimize={handleMinimizePanel}
-          onClose={handleClosePanel}
-          onEdit={onEditEntry}
-          top={headerLayout.top}
-          left={headerLayout.left}
-        />
-      )}
     </>
   );
 }

@@ -181,7 +181,8 @@
  * blob.
  *
  * ──────────────────────────────────────────────────────────────────────
- * RANGE ENTRIES: ONE d3.arc() BAND, NOT TWO CIRCLES + A LINE
+ * RANGE ENTRIES: A BAND SAMPLED ALONG THE TRUE SPIRAL CURVE, NOT A
+ * d3.arc() FIXED-RADIUS SECTOR
  * ──────────────────────────────────────────────────────────────────────
  * An entry with `endTimestamp` (see the field comment in types/Entry.ts)
  * spans two `t` values instead of one. This used to render as three
@@ -201,44 +202,59 @@
  * matching the line's glow strength to the point glow's took several
  * rounds of tuning three numbers instead of one.
  *
- * This is now ONE shape: a single `d3.arc()` path, configured as a short
- * curved BAND (an annulus segment - `innerRadius`/`outerRadius` a small
- * fixed thickness apart, `cornerRadius` rounding its two ends into caps)
- * rather than three. `startAngle`/`endAngle` come from the exact same
- * per-`t` angle `spiralPoint` already uses for point positioning (see
- * `spiralAngleForD3Arc` below - it just re-expresses `spiralPolarAngle`'s
- * own angle in d3.arc()'s different zero-reference/direction convention,
- * rather than computing a second, independently-drifting angle), so a
- * range entry's start/end always land exactly where a POINT entry at
- * those same two dates would. The one deliberate trade-off: this band
- * sits at a single FIXED radius (the entry's radius at its own
- * MIDPOINT `t`, `spiralPointAtRadius` below) rather than tracking the
- * spiral's own increasing radius across the full span the way the old
- * sampled-polyline arc did - for a short span this is visually
- * indistinguishable from hugging the true curve, but a range spanning a
- * large fraction of a rotation will now read as a flat curved band
- * slightly off the spiral's own gridline rather than tracing it exactly.
+ * A LATER FIX replaced those three shapes with ONE `d3.arc()` path - an
+ * annulus segment (`innerRadius`/`outerRadius` a small fixed thickness
+ * apart) at a single FIXED radius: the entry's radius at its own midpoint
+ * `t`. That fixed the three-shapes highlighting problem, but introduced a
+ * geometry bug of its own: `d3.arc()` draws its ENTIRE angular sweep at
+ * that one radius. This spiral's radius is `t * maxRadius` - it grows
+ * continuously with `t` (see the top-of-file SPIRAL FORMULA comment) - so
+ * for any entry spanning enough time, the TRUE spiral curve between its
+ * start and end visibly curves outward, while a `d3.arc()` sector stays
+ * perfectly flat across that same sweep. The band's two endpoints still
+ * landed correctly (both computed at the true per-`t` angle), but
+ * everything BETWEEN them drifted off the actual gridline - short entries
+ * were fine (not enough `t` for the radius to grow visibly), but a
+ * several-month-or-longer entry read as a flat chord cutting across the
+ * spiral's own coil rather than tracing it.
+ *
+ * THE FIX: sample the real curve, the same way the main spiral path
+ * itself is drawn (see "DRAWING THE SPIRAL LINE" above) and the same
+ * per-`t` math a POINT entry already uses (`spiralPoint`) - not a
+ * fixed-radius sector. `buildRangeBandPath` below walks ~40-60 evenly
+ * spaced `t` steps between the entry's `t0`/`t1`, and at EACH step
+ * computes the curve's own center point (`spiralPoint(t, params,
+ * radiusOffset)` - the SAME lane-offset hook point entries use, so an
+ * overlapping arc's outward nudge is baked into every sample, not just
+ * applied once to a single fixed radius) plus a perpendicular offset
+ * (`spiralOutwardNormal`, perpendicular to the curve's local tangent at
+ * that exact `t`) half the band's thickness to either side. The band's
+ * outer edge is the list of "outward" offset samples in order; its inner
+ * edge is the same list of "inward" offset samples; the closed path walks
+ * outer-forward-then-inner-backward (see `buildRangeBandPath`'s own
+ * comment). Because every sample point sits exactly on the true curve
+ * (nudged only perpendicular to it, by a small fixed thickness), the
+ * resulting band hugs the actual spiral gridline along its ENTIRE length,
+ * not just at its two endpoints - and because it's built from the exact
+ * same `spiralPoint` function point entries use, a range entry's start/
+ * end still always land exactly where a POINT entry at those same two
+ * dates would, for the same reason the old d3.arc() version did.
  *
  * WHY THIS MAKES HIGHLIGHTING A SINGLE, CLEAN OPERATION:
  * Every "opened entry" treatment below - the blurred glow behind it, and
  * the crisp ring around it - is a STROKE on this exact same closed path
  * (`fill="none"`, a thicker or thinner `strokeWidth`), not a second,
- * differently-sized `d3.arc()` shape. A closed path's stroke always
- * traces its FULL boundary as one continuous line - both long curved
- * edges AND both rounded end caps - for free, with no separate geometry
- * to build or keep in sync. (An earlier version generated separate wider/
- * narrower `d3.arc()` calls for the glow/ring instead; resizing an
- * annulus segment's radii doesn't uniformly "grow" it the way offsetting
- * a rounded rectangle does, so those extra shapes' rounded corners landed
- * in the wrong place and never wrapped around the band's own ends - see
- * the "ARC BAND HIGHLIGHT" comment further below for the full story.)
- * There's exactly one shape's boundary to trace a ring around, and
- * exactly one shape's silhouette to blur into a glow - no coordinating
- * three separate elements' geometry, tuning three opacity/width numbers
- * to read as one strength, or discovering that an outline drawn "outside"
- * one piece (a circle) looks completely different from the same outline
- * drawn "outside" a different piece (a thin centerline stroke) of what's
- * supposed to be a single visual highlight.
+ * differently-built shape. A closed path's stroke always traces its FULL
+ * boundary as one continuous line - both long curved edges AND both cut
+ * ends - for free, with no separate geometry to build or keep in sync
+ * (see the "ARC BAND HIGHLIGHT" comment further below for why an earlier
+ * two-shape attempt at this didn't work). There's exactly one shape's
+ * boundary to trace a ring around, and exactly one shape's silhouette to
+ * blur into a glow - no coordinating three separate elements' geometry,
+ * tuning three opacity/width numbers to read as one strength, or
+ * discovering that an outline drawn "outside" one piece looks completely
+ * different from the same outline drawn "outside" a different piece of
+ * what's supposed to be a single visual highlight.
  *
  * ──────────────────────────────────────────────────────────────────────
  * DOMAIN COMES FROM domainRange, NOT `entries`
@@ -379,9 +395,11 @@
  * would visually collide with the point row regardless of lane logic. The
  * spiral has no such separate row: `spiralPoint`'s own curve IS the
  * "home" position for both a point entry and a lane-0 arc, so lane 0 here
- * gets radiusOffset `0 * RADIAL_LANE_OFFSET_PX` - literally zero, sitting
+ * gets radiusOffset `0 * LANE_BAND_THICKNESS_PX` - literally zero, sitting
  * exactly on the spiral's own drawn path - and only lane 1, 2, 3, ...
- * nudge outward by `lane * RADIAL_LANE_OFFSET_PX`. This is what makes the
+ * nudge outward by `lane * LANE_BAND_THICKNESS_PX`, packed as a
+ * contiguous, touching stack rather than leaving a gap between lanes -
+ * see that constant's own comment. This is what makes the
  * longest-duration arc in a cluster of overlaps (see laneAssignment.ts's
  * duration-descending comment - it wins lane 0) visibly trace the same
  * gridline path a viewer would see if that arc were the only entry on the
@@ -412,11 +430,12 @@
  * a point's angular position (and therefore which year-ring it reads
  * against) completely unchanged, just as LinearTimeline's vertical nudge
  * leaves an entry's x position (and therefore which axis tick it reads
- * against) unchanged. A range entry's `d3.arc()` band (see the RANGE
+ * against) unchanged. A range entry's sampled-curve band (see the RANGE
  * ENTRIES comment above) applies this exact same `lane *
- * RADIAL_LANE_OFFSET_PX` term directly to its own fixed band radius
- * instead - one number added once, rather than baked into every sampled
- * point along a curve the way the old polyline arc needed.
+ * LANE_BAND_THICKNESS_PX` term the same way a point does - as `spiralPoint`'s
+ * own `radiusOffset`, at every one of the ~40-60 samples the band walks
+ * along its span, so the whole band shifts outward together rather than
+ * just one representative point of it.
  *
  * Because `start`/`end`/`midpoint`/`pathD` (for ranges) and `x`/`y` (for
  * points) below are all computed WITH each entry's own lane offset
@@ -429,6 +448,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
+import { Category } from '../types/Category';
 import { DateRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
 // Same date/time formatting the "now" marker's tooltip uses for its live
@@ -444,6 +464,17 @@ import { assignLanes, assignLaneAroundRanges } from '../utils/laneAssignment';
 
 interface SpiralTimelineProps {
   entries: Entry[];
+  /**
+   * The current category list - Spiral.tsx's own `categories` (recomputed
+   * off `categoriesVersion`, see EntrySelectionContext.tsx's own comment
+   * on that field). NOT read directly by any rendering here - `ranges`/
+   * `points` still get each entry's color via getActivityColor exactly as
+   * before. It exists purely as a dependency of the `{ ranges, points }`
+   * useMemo below, so a ManageCategoriesModal recolor (which never
+   * touches `entries`) still triggers a recompute of those memoized
+   * colors instead of leaving stale ones on screen.
+   */
+  categories: Category[];
   /**
    * Whether the RAW, unfiltered dataset (Spiral.tsx's own
    * `entries.length > 0`, not the time-filtered `entries` prop above) has
@@ -544,38 +575,48 @@ const GLOW_OPACITY = 0.6;
 const GLOW_BLUR_STD_DEVIATION = 2;
 
 /**
- * Half-thickness (px) of a range entry's `d3.arc()` band - the band's
- * `innerRadius`/`outerRadius` sit this far to either side of the entry's
- * own fixed band radius (see the top-of-file "RANGE ENTRIES" comment),
- * for a total rendered thickness of `ARC_BAND_HALF_THICKNESS * 2` (8px) -
- * a clearly visible filled band, not a thin line.
+ * Half-thickness (px) of a range entry's sampled-curve band - each edge
+ * (outer/inner) sits this far, PERPENDICULAR TO THE CURVE'S OWN LOCAL
+ * TANGENT, to either side of the true spiral curve at that sample (see
+ * the top-of-file "RANGE ENTRIES" comment and `buildRangeBandPath`
+ * below), for a total rendered thickness of `ARC_BAND_HALF_THICKNESS * 2`
+ * (8px) - a clearly visible filled band, not a thin line.
  */
 const ARC_BAND_HALF_THICKNESS = 4;
 
-/** Corner radius (px) rounding a range entry's band into capsule-like rounded ends, rather than sharp square edges. */
-const ARC_CORNER_RADIUS = 3;
+/**
+ * Number of evenly-spaced `t` samples `buildRangeBandPath` walks between a
+ * range entry's `t0`/`t1` to build its band - see the top-of-file "RANGE
+ * ENTRIES" comment. Within the ~40-60 range that's dense enough to hug the
+ * true spiral curve invisibly (no visible faceting even on a
+ * several-month-long entry whose radius grows noticeably across its
+ * span), mirroring `SAMPLES_PER_ROTATION`, the main spiral curve's own
+ * per-rotation sample density.
+ */
+const RANGE_BAND_SAMPLE_COUNT = 48;
 
 /**
  * ──────────────────────────────────────────────────────────────────────
  * ARC BAND HIGHLIGHT: STROKE THE ONE CLOSED PATH, DON'T BUILD A SECOND
  * SHAPE
  * ──────────────────────────────────────────────────────────────────────
- * Now that a range entry is a single `d3.arc()` band (see the top-of-file
- * "RANGE ENTRIES" comment), its "opened entry" glow and ring are a
- * STROKE on that EXACT SAME path (`fill="none"`, `stroke=...`) - see the
- * render below - not a second, differently-sized `d3.arc()` shape. An
- * earlier version tried the latter (a wider/narrower band for the glow, a
- * band entirely outside `outerRadius` for the ring), and it looked
- * broken: resizing an annulus segment's `innerRadius`/`outerRadius` does
- * NOT uniformly "grow" it the way offsetting a rounded rectangle's own
- * edges does (LinearTimeline.tsx's `capsuleOutlineRect`) - a differently-
- * sized arc's rounded corners land at a different position than the
- * original's, so the highlight only showed up as extra arcs parallel to
- * the two long curved edges, never wrapping around the rounded end caps.
- * `pathD` is already a single CLOSED path (outer arc, corner, inner arc,
- * corner, back to start); stroking it directly makes SVG trace that
- * entire boundary as one continuous line, corners included, with no
- * separate geometry to keep in sync.
+ * Now that a range entry is a single sampled-curve band (see the
+ * top-of-file "RANGE ENTRIES" comment), its "opened entry" glow and ring
+ * are a STROKE on that EXACT SAME path (`fill="none"`, `stroke=...`) -
+ * see the render below - not a second, differently-built shape. An
+ * earlier version (back when the band was a `d3.arc()` sector) tried
+ * building a second, wider/narrower `d3.arc()` shape for the glow/ring
+ * instead, and it looked broken: resizing an annulus segment's
+ * `innerRadius`/`outerRadius` does NOT uniformly "grow" it the way
+ * offsetting a rounded rectangle's own edges does (LinearTimeline.tsx's
+ * `capsuleOutlineRect`) - a differently-sized arc's rounded corners land
+ * at a different position than the original's, so the highlight only
+ * showed up as extra arcs parallel to the two long curved edges, never
+ * wrapping around the rounded end caps. `pathD` is already a single
+ * CLOSED path (outer edge samples, then inner edge samples in reverse,
+ * back to start); stroking it directly makes SVG trace that entire
+ * boundary as one continuous line, cut ends included, with no separate
+ * geometry to keep in sync.
  *
  * `OPENED_ARC_GLOW_EXTRA_RADIUS`/`ARC_RING_WIDTH` are each still the same
  * numeric values earlier versions of this glow/ring already used (4 and
@@ -598,23 +639,92 @@ const ARC_GLOW_BLUR_STD_DEVIATION = 3;
 const ARC_RING_WIDTH = 1.5;
 
 /**
- * Radial spacing (px) between stacked arc lanes - the spiral's equivalent
- * of LinearTimeline.tsx's `LANE_HEIGHT`. Lane 0's arc renders at
- * `radius + RADIAL_LANE_OFFSET_PX`, lane 1 at `radius + 2 *
- * RADIAL_LANE_OFFSET_PX`, and so on - see the top-of-file "OVERLAPPING
+ * Radial step (px) between stacked lanes - the spiral's equivalent of
+ * LinearTimeline.tsx's `LANE_HEIGHT`. Lane 0 renders at zero offset, lane
+ * 1 at `radius + LANE_BAND_THICKNESS_PX`, lane 2 at `radius + 2 *
+ * LANE_BAND_THICKNESS_PX`, and so on - see the top-of-file "OVERLAPPING
  * ARCS" comment for why this is a radius nudge rather than a vertical one.
  *
- * Originally 10px (an 8-12px range, matched down from LANE_HEIGHT's 26px
- * on the assumption that the spiral's loops were already spaced far
- * enough apart radially that a small per-lane nudge would read clearly).
- * In practice that was too tight once several overlapping arcs stacked up:
- * outer lanes sat close enough to each other - and to the next loop of the
- * main spiral curve/year gridlines - that telling two nearby lanes apart,
- * or a lane apart from the underlying spiral, took real effort. Bumped to
- * roughly 1.8x that (18px) for comfortable, unambiguous separation between
- * stacked lanes and between the outermost lane and the next year's loop.
+ * DELIBERATELY NO GAP FOLDED IN: this used to be a fixed 18px
+ * (`RADIAL_LANE_OFFSET_PX`) - comfortably wider than either shape that
+ * ever occupies a lane (a range entry's rendered band thickness,
+ * `ARC_BAND_HALF_THICKNESS * 2` = 8px, or a point entry's rendered
+ * diameter, `POINT_RADIUS * 2` = 10px), so stacked lanes always had
+ * visible NEGATIVE SPACE between them. That read as loose/disconnected
+ * for a tight cluster of overlapping entries - see this file's own git
+ * history for the screenshot that prompted this change. Sizing the step
+ * to exactly the LARGER of those two rendered sizes instead means
+ * consecutive lanes sit edge-to-edge as one contiguous, touching stack -
+ * no gap, and (since it's the larger of the two) no overlap either,
+ * whichever shape occupies the lane. `effectiveLaneBandThickness` below
+ * still compresses this per-render as a safety net for pathological
+ * lane counts - see its own comment.
  */
-const RADIAL_LANE_OFFSET_PX = 18;
+const LANE_BAND_THICKNESS_PX = Math.max(
+  ARC_BAND_HALF_THICKNESS * 2,
+  POINT_RADIUS * 2
+);
+
+/**
+ * Highest fraction of the radial gap between one year's spiral loop and
+ * the next (`maxRadius / totalRotations` - constant across the whole
+ * spiral, since `radius = t * maxRadius` grows linearly with `t` while
+ * `totalRotations` full turns happen over that same `t` range - see the
+ * top-of-file SPIRAL FORMULA comment) that a full stack of lanes
+ * (`(maxLaneIndex + 1) * LANE_BAND_THICKNESS_PX`) is ever allowed to
+ * consume before `effectiveLaneBandThickness` below compresses the
+ * per-lane step to fit. A safety net, not the normal path: with lane
+ * bands now packed contiguously (see `LANE_BAND_THICKNESS_PX` above)
+ * instead of the old fixed 18px gap, an ordinary handful of stacked
+ * lanes stays well inside this fraction on its own. This only kicks in
+ * for an unusually large cluster - many overlapping entries stacking
+ * many lanes on a short-duration domain (a tight year-to-year gap) -
+ * where it's better to render a visibly thinner stack than let the
+ * outermost lane visually reach into the next year's ring.
+ */
+const MAX_LANE_STACK_FRACTION_OF_YEAR_GAP = 0.6;
+
+/**
+ * The contiguous-packing band thickness actually used this render to
+ * turn a lane number into a radial offset (`lane * thickness`) - see the
+ * "RANGE ENTRIES"/"SINGLE-POINT ENTRIES" lane-offset computations below.
+ * Ordinarily just `LANE_BAND_THICKNESS_PX`; only compressed below that
+ * when stacking every lane in use (`maxLaneIndex + 1` of them) at full
+ * thickness would eat more than `MAX_LANE_STACK_FRACTION_OF_YEAR_GAP` of
+ * the local year-to-year radial gap - see that constant's own comment
+ * for why this is a safety net, not the normal path.
+ */
+function effectiveLaneBandThickness(
+  maxLaneIndex: number,
+  spiralParams: SpiralParams
+): number {
+  const laneCount = maxLaneIndex + 1;
+  if (laneCount <= 1) return LANE_BAND_THICKNESS_PX;
+
+  const yearRadialGapPx = spiralParams.maxRadius / spiralParams.totalRotations;
+  const maxStackPx = yearRadialGapPx * MAX_LANE_STACK_FRACTION_OF_YEAR_GAP;
+  const uncappedStackPx = laneCount * LANE_BAND_THICKNESS_PX;
+
+  return uncappedStackPx <= maxStackPx
+    ? LANE_BAND_THICKNESS_PX
+    : maxStackPx / laneCount;
+}
+
+/**
+ * Stroke used to trace a very thin, subtle edge around each lane's own
+ * band (a range entry's `pathD` outline, a point entry's outline circle)
+ * now that contiguous lanes (see `LANE_BAND_THICKNESS_PX` above) can sit
+ * directly against a same-colored neighbor with no gap to tell them
+ * apart by. `currentColor` at low opacity is this file's existing
+ * neutral/dark separator treatment - the same pairing the main spiral
+ * path and year gridlines already use (see their own `stroke`/
+ * `strokeOpacity` below) - reused here rather than introducing a new
+ * color, just thinner and a touch more transparent since this is meant
+ * to read as a quiet edge, not a visible line in its own right.
+ */
+const LANE_EDGE_STROKE_COLOR = 'currentColor';
+const LANE_EDGE_STROKE_OPACITY = 0.3;
+const LANE_EDGE_STROKE_WIDTH = 1;
 
 /**
  * Extra arc-length clearance (px, along the spiral's own path) required
@@ -712,6 +822,62 @@ const YEAR_GLYPH_COLLISION_RADIUS_PX = 10;
  */
 const YEAR_GLYPH_NUDGE_ARC_PX = 14;
 
+/**
+ * ──────────────────────────────────────────────────────────────────────
+ * YEAR HOVER HIGHLIGHT: THE SAME CURVE-SAMPLING BAND AS RANGE ENTRIES,
+ * DELIBERATELY DIFFERENT PAINT
+ * ──────────────────────────────────────────────────────────────────────
+ * Hovering a year glyph highlights that whole calendar year's stretch of
+ * the gridline. That stretch is a curved band of the spiral just like a
+ * range entry's arc is (see the top-of-file "RANGE ENTRIES" comment) -
+ * its outer radius keeps growing across the span exactly the same way -
+ * so a `d3.arc()`-style fixed-radius sector would drift off the true
+ * curve here for the exact same reason it did for range entries. Rather
+ * than re-deriving that fix, this reuses `buildRangeBandPath` verbatim:
+ * sample `spiralPoint`/`spiralOutwardNormal` at many `t` steps across the
+ * year's span and offset perpendicular to the curve for a thin closed
+ * band - the identical technique, just fed a year's `[t0, t1]` instead of
+ * an entry's `[tStart, tEnd]`, and no lane `radiusOffset` (this highlights
+ * the base gridline itself, which always sits at lane 0).
+ *
+ * The PAINT is intentionally NOT copied from the opened-entry highlight:
+ * that one uses `OPENED_HIGHLIGHT_COLOR` (navy/white) specifically
+ * because it means "a specific entry is selected." This is a different
+ * kind of thing - "a stretch of the timeline structure is being pointed
+ * at" - so it stays in the gridline's own `currentColor` grey, just
+ * brightened (higher fill opacity) and thickened (still thinner than an
+ * entry band - see `YEAR_HIGHLIGHT_HALF_THICKNESS` below) relative to the
+ * plain gridline stroke. Reusing the entry highlight's navy/white here
+ * would read as "an entry is selected" when nothing has been clicked,
+ * which is exactly the confusion this is avoiding - see
+ * `YEAR_HIGHLIGHT_HALF_THICKNESS`'s own comment for the thickness side of
+ * the same reasoning.
+ */
+/**
+ * Half-thickness (px) of the year hover-highlight band -
+ * `ARC_BAND_HALF_THICKNESS / 2`, i.e. HALF as thick as a range entry's own
+ * band. This should read as "the gridline itself, lit up," not as a shape
+ * with its own presence competing with actual entries - a full
+ * entry-width band here would make an empty year look like it had its own
+ * arc/entry sitting on it.
+ */
+const YEAR_HIGHLIGHT_HALF_THICKNESS = ARC_BAND_HALF_THICKNESS / 2;
+
+/** Fill opacity of the year hover-highlight band itself - well above the plain gridline's own 0.35, so the highlighted stretch reads as visibly "brighter," not just thicker. */
+const YEAR_HIGHLIGHT_FILL_OPACITY = 0.85;
+
+/** Blur radius (px) for the year hover-highlight's own soft glow-behind - reuses the same soft-blur-behind TECHNIQUE as `opened-arc-glow`/`opened-spiral-glow` (a dedicated filter, decoupled so tuning this doesn't also change either entry glow). */
+const YEAR_HIGHLIGHT_GLOW_BLUR_STD_DEVIATION = ARC_GLOW_BLUR_STD_DEVIATION;
+
+/** Extra half-width (px) the glow-behind stroke extends past the band's own edge - same role as `OPENED_ARC_GLOW_EXTRA_RADIUS`, sized a bit smaller to match this band's own thinner profile. */
+const YEAR_HIGHLIGHT_GLOW_EXTRA_RADIUS = 3;
+
+/** Opacity of the year hover-highlight's glow-behind stroke. */
+const YEAR_HIGHLIGHT_GLOW_OPACITY = 0.5;
+
+/** How many `t` samples the year hover-highlight band walks per full rotation of the spiral - same density as the main spiral curve/range bands (`SAMPLES_PER_ROTATION`), so it hugs the true curve just as tightly. */
+const YEAR_HIGHLIGHT_MIN_SAMPLE_COUNT = 16;
+
 /** How far the user can zoom in/out - same range StarMap.tsx uses for its own 2D pannable canvas. */
 const ZOOM_SCALE_EXTENT: [number, number] = [0.5, 8];
 
@@ -792,47 +958,137 @@ function buildPolylinePath(points: { x: number; y: number }[]): string {
 }
 
 /**
- * Converts a normalized time fraction `t` to the angle convention
- * `d3.arc()` expects, for a range entry's `startAngle`/`endAngle` - see
- * the top-of-file "RANGE ENTRIES" comment. `d3.arc()` measures its angle
- * from 12 o'clock (not the positive x-axis `spiralPolarAngle` measures
- * from), increasing clockwise - the SAME direction `spiralPolarAngle`
- * already increases in on screen (`SPIRAL_START_ANGLE` happens to ALSO
- * start the spiral at 12 o'clock), so the two conventions differ by
- * exactly a constant quarter-turn: `spiralPolarAngle(0, params) ===
- * -PI/2` (12 o'clock in THIS file's own cos/sin convention) needs to map
- * to d3.arc()'s `0` (12 o'clock in ITS convention), so adding `PI/2`
- * converts one to the other. Built on `spiralPolarAngle` itself (not a
- * second, independently-derived formula) so a range entry's start/end
- * angle can never drift out of sync with where a POINT entry at that
- * same `t` actually renders.
+ * How far apart (in normalized `t`) the two samples used to ESTIMATE a
+ * range band's local tangent direction are - see `spiralOutwardNormal`
+ * below. Small enough that the finite-difference tangent is accurate to a
+ * small fraction of a pixel (the spiral's radius/angle are both smooth,
+ * well-behaved functions of `t` at this scale), but not so small that
+ * floating-point cancellation in the subtraction starts to matter.
  */
-function spiralAngleForD3Arc(t: number, params: SpiralParams): number {
-  return spiralPolarAngle(t, params) + Math.PI / 2;
+const TANGENT_ESTIMATION_EPSILON_T = 0.0005;
+
+/**
+ * The unit vector PERPENDICULAR to the spiral curve's own local tangent
+ * at `t`, pointing OUTWARD (away from the spiral's center) - the offset
+ * direction `buildRangeBandPath` below nudges each sampled curve point
+ * along to build a range entry's band edges. See the top-of-file "RANGE
+ * ENTRIES" comment for why this replaces `d3.arc()`'s fixed-radius
+ * sector: offsetting PERPENDICULAR TO THE CURVE at every sample (instead
+ * of radially at one fixed radius for the whole span) is what makes the
+ * band's edges parallel the true curve exactly, all the way along it.
+ *
+ * The tangent itself is estimated with a symmetric finite difference -
+ * `spiralPoint` just before and just after `t` (at the SAME
+ * `radiusOffset`, so a lane-offset arc's tangent reflects its own
+ * offset curve, not the un-offset one) - rather than hand-deriving the
+ * closed-form derivative of `radius(t)*cos(theta(t))`: this way any
+ * future change to `spiralPoint`'s own formula automatically flows
+ * through here too, with no second derivative to keep in sync.
+ *
+ * A tangent has two perpendiculars (rotate it +90° or -90°); which one is
+ * actually "outward" is resolved by comparing each against the sampled
+ * point's own radial direction (spiral center -> point) and keeping
+ * whichever has a positive dot product with it - i.e. whichever
+ * perpendicular actually points away from center, rather than assuming a
+ * fixed rotation direction that could flip depending on which half of a
+ * loop a sample falls on.
+ */
+function spiralOutwardNormal(
+  t: number,
+  params: SpiralParams,
+  radiusOffset: number,
+  center: { x: number; y: number }
+): { x: number; y: number } {
+  const before = spiralPoint(
+    Math.max(0, t - TANGENT_ESTIMATION_EPSILON_T),
+    params,
+    radiusOffset
+  );
+  const after = spiralPoint(
+    Math.min(1, t + TANGENT_ESTIMATION_EPSILON_T),
+    params,
+    radiusOffset
+  );
+
+  const tangentX = after.x - before.x;
+  const tangentY = after.y - before.y;
+  const tangentLength = Math.hypot(tangentX, tangentY) || 1;
+
+  let normalX = -tangentY / tangentLength;
+  let normalY = tangentX / tangentLength;
+
+  const radialX = center.x - params.centerX;
+  const radialY = center.y - params.centerY;
+  if (normalX * radialX + normalY * radialY < 0) {
+    normalX = -normalX;
+    normalY = -normalY;
+  }
+
+  return { x: normalX, y: normalY };
 }
 
 /**
- * Cartesian position at a normalized time fraction `t`'s own angle, but
- * at an EXPLICIT radius rather than that `t`'s natural `t * maxRadius`
- * position. Used for a range entry's start/end/midpoint marker positions
- * (year-glyph collision avoidance, CLICK-TO-CENTER) now that its `d3.arc()`
- * band sits at one fixed radius rather than tracing the spiral's own
- * increasing radius across its span - see the top-of-file "RANGE ENTRIES"
- * comment. Implemented via `spiralPoint`'s own `radiusOffset` parameter:
- * offsetting by exactly `radius - t*maxRadius` cancels out `t`'s natural
- * radius and replaces it with the desired fixed one, at the same angle
- * `spiralPoint` would otherwise use.
+ * Builds a closed SVG path `d` string for a range entry's band by
+ * SAMPLING the true spiral curve between `t0`/`t1`, rather than drawing a
+ * `d3.arc()` fixed-radius sector - see the top-of-file "RANGE ENTRIES"
+ * comment for the full root-cause/fix explanation. At each of
+ * `sampleCount` evenly-spaced `t` steps: `spiralPoint(t, params,
+ * radiusOffset)` gives the curve's own center point at that instant
+ * (`radiusOffset` is the entry's lane offset - see the "OVERLAPPING ARCS"
+ * comment - so an overlapping arc's outward nudge is baked into every
+ * sample, not applied once to a single representative radius), and
+ * `spiralOutwardNormal` gives the perpendicular-to-tangent direction to
+ * offset it in; the outer edge point is that center nudged `halfThickness`
+ * outward, the inner edge point the same center nudged `halfThickness`
+ * inward.
+ *
+ * The closed path is built by walking the outer edge points in order
+ * (start -> end), then the inner edge points in REVERSE order (end ->
+ * start), back to the first outer point - the standard way to turn two
+ * parallel "rails" into one filled band. Because both rails are offset
+ * PERPENDICULAR to the curve's tangent at each sample (not offset
+ * radially, and not held to one fixed radius), the resulting band hugs
+ * the true curve along its entire length; the two short segments at each
+ * end (connecting the first/last outer point to the first/last inner
+ * point) are automatically perpendicular to the curve's own tangent
+ * there too, giving a clean straight cut rather than a rounded cap -
+ * rounding those into an actual arc cap would need extra geometry this
+ * component doesn't currently build, so a perpendicular cut is used as
+ * the acceptable baseline instead.
  */
-function spiralPointAtRadius(
-  t: number,
-  radius: number,
-  params: SpiralParams
-): { x: number; y: number } {
-  return spiralPoint(t, params, radius - t * params.maxRadius);
+function buildRangeBandPath(
+  t0: number,
+  t1: number,
+  radiusOffset: number,
+  halfThickness: number,
+  params: SpiralParams,
+  sampleCount: number
+): string {
+  const outerEdge: { x: number; y: number }[] = [];
+  const innerEdge: { x: number; y: number }[] = [];
+
+  for (let i = 0; i <= sampleCount; i++) {
+    const t = t0 + ((t1 - t0) * i) / sampleCount;
+    const center = spiralPoint(t, params, radiusOffset);
+    const normal = spiralOutwardNormal(t, params, radiusOffset, center);
+
+    outerEdge.push({
+      x: center.x + normal.x * halfThickness,
+      y: center.y + normal.y * halfThickness,
+    });
+    innerEdge.push({
+      x: center.x - normal.x * halfThickness,
+      y: center.y - normal.y * halfThickness,
+    });
+  }
+
+  const boundary = [...outerEdge, ...innerEdge.reverse()];
+  return `${buildPolylinePath(boundary)} Z`;
 }
 
 export default function SpiralTimeline({
   entries,
+  categories,
   hasAnyEntries,
   filterCategories,
   onEntryClick,
@@ -1048,6 +1304,33 @@ export default function SpiralTimeline({
     return labels;
   }, [minDate, maxDate]);
 
+  /**
+   * Each year glyph's FULL SPAN as a `[t0, t1]` range - see the "YEAR
+   * HOVER HIGHLIGHT" comment above `YEAR_HIGHLIGHT_HALF_THICKNESS`. `t0`
+   * is the glyph's own boundary `t` (the start of that calendar year);
+   * `t1` is the NEXT year glyph's boundary `t`, so the highlighted band
+   * reads as "everything between this Jan 1 and the next." The most
+   * recent year has no next glyph, so its span runs out to `1` (the
+   * spiral's own outer rim/domain edge) instead - this is the one case
+   * that actually needs a fallback, since `yearBoundaries`' last entry is
+   * clamped to `maxDate`, which usually sits INSIDE that final partial
+   * year, short of the true rim. The earliest year needs no equivalent
+   * fallback on the `t0` side: `yearBoundaries`' construction already
+   * clamps a year's boundary to `minDate` when its own Jan 1 falls before
+   * the domain starts, so the first glyph's `t0` already naturally lands
+   * at `0` (dead center) whenever the domain's own start isn't itself a
+   * Jan 1.
+   */
+  const yearSpans = useMemo(
+    () =>
+      yearBoundaries.map((boundary, i) => ({
+        year: boundary.year,
+        t0: boundary.t,
+        t1: i + 1 < yearBoundaries.length ? yearBoundaries[i + 1].t : 1,
+      })),
+    [yearBoundaries]
+  );
+
   // ─── Sorted entries ───
   // Chronological draw order, same as LinearTimeline's implicit ordering
   // (entries already sorted by position along its axis) - so later
@@ -1086,42 +1369,44 @@ export default function SpiralTimeline({
 
   /**
    * ──────────────────────────────────────────────────────────────────────
-   * RANGE ENTRIES (with endTimestamp): LANE-ASSIGNED d3.arc() BANDS, LANE
-   * 0 = 0 RADIAL OFFSET
+   * RANGE + POINT ENTRIES: LANE NUMBERS FIRST, THEN ONE SHARED
+   * (POSSIBLY-COMPRESSED) OFFSET STEP FOR BOTH
    * ──────────────────────────────────────────────────────────────────────
    * See the top-of-file "OVERLAPPING ARCS (AND POINTS)" comment for the
-   * lane-NUMBER-assignment reasoning (unchanged) and the "RANGE ENTRIES"
-   * comment for why this is now one `d3.arc()` band instead of a sampled
-   * polyline. In short: `assignLanes` (utils/laneAssignment.ts, shared
-   * verbatim with LinearTimeline.tsx) decides lane NUMBERS from each
-   * entry's arc-length span along the spiral path (`tToArcLength`, the
-   * spiral's stand-in for LinearTimeline's xScale pixel position, and
-   * processed duration-descending, so a solitary or longest-overlapping
-   * arc lands in lane 0); `radiusOffset` then turns a lane number into an
-   * outward radial nudge added directly onto the band's own fixed
-   * `bandRadius` - `lane * RADIAL_LANE_OFFSET_PX`, so lane 0 is exactly 0:
-   * its band sits centered on the spiral's own drawn curve at that
-   * midpoint radius, not nudged outward at all.
+   * lane-NUMBER-assignment reasoning and the "RANGE ENTRIES" comment for
+   * why each band is built by SAMPLING the true spiral curve
+   * (`buildRangeBandPath`) instead of a `d3.arc()` fixed-radius sector.
+   * In short: `assignLanes` (utils/laneAssignment.ts, shared verbatim
+   * with LinearTimeline.tsx) decides RANGE lane numbers from each entry's
+   * arc-length span along the spiral path (`tToArcLength`, the spiral's
+   * stand-in for LinearTimeline's xScale pixel position, processed
+   * duration-descending so a solitary or longest-overlapping arc lands in
+   * lane 0); `assignLaneAroundRanges` then does the same for POINT
+   * entries - see the "SINGLE-POINT ENTRIES" comment below - bumping a
+   * point whose date falls inside an already-laned arc's span to the
+   * first lane that isn't covered by any arc there. Both of these only
+   * ever need each item's own arc-length span, never a radial offset, so
+   * they're computed FIRST, independent of how thick a lane actually is.
    *
-   * `bandRadius` itself is the spiral's own `radius = t*maxRadius` at this
-   * entry's MIDPOINT `t` (`(t0+t1)/2`) - a single representative radius
-   * for the whole span, since a `d3.arc()` band (unlike the old sampled
-   * polyline) can only have one. `start`/`end`/`midpoint` below are then
-   * each recomputed at THIS SAME `bandRadius` (via `spiralPointAtRadius`)
-   * rather than each point's own natural t-based radius, so they sit
-   * exactly on the band that's actually drawn - the hover/click/highlight
-   * JSX further down, and the YEAR GLYPHS collision check, both read
-   * these same fields, so they automatically target where the band
-   * visually IS, not where the old un-banded curve would have put them.
+   * `radiusOffset` (`lane * bandThickness`) is computed SECOND, once
+   * `bandThickness` is known: `effectiveLaneBandThickness` (see its own
+   * comment) looks at the tallest stack across BOTH lists combined
+   * (`maxLaneIndex`) and only compresses `LANE_BAND_THICKNESS_PX` below
+   * its normal contiguous-packing value in the pathological case where
+   * that full stack would otherwise eat too much of the local
+   * year-to-year radial gap - so both ranges and points always use the
+   * SAME step this render, keeping a point that got bumped into an arc's
+   * lane at the exact same radius that arc's own band sits at.
    *
-   * `lanedRangeItems` (the pre-radiusOffset `assignLanes` output, still
-   * carrying `arcStart`/`arcEnd`) is kept alongside the final `ranges` list
-   * so the POINT ENTRIES computation just below can look up which lane
-   * each arc landed in and what span it covers, without recomputing any of
-   * this from scratch.
+   * `start`/`end`/`midpoint` below are each `spiralPoint(t, spiralParams,
+   * radiusOffset)` - the exact same true-curve, lane-offset position a
+   * POINT entry at that same `t` would render at - so they sit exactly on
+   * the band that's actually drawn; the hover/click/highlight JSX further
+   * down, and the YEAR GLYPHS collision check, both read these same
+   * fields, so they automatically target where the band visually IS.
    */
-  const { ranges, lanedRangeItems } = useMemo(() => {
-    const items = sortedEntries
+  const { ranges, points } = useMemo(() => {
+    const rangeItems = sortedEntries
       .filter(entry => entry.endTimestamp)
       .map(entry => {
         const tStart = normalize(new Date(entry.timestamp));
@@ -1136,106 +1421,90 @@ export default function SpiralTimeline({
         };
       });
 
-    const laned = assignLanes(
-      items,
+    const lanedRanges = assignLanes(
+      rangeItems,
       item => item.arcStart,
       item => item.arcEnd,
       LANE_GAP_PX
     );
 
-    // One generator, reused for every range entry's single path below -
-    // the "opened" glow/ring (rendered further down) STROKE this SAME
-    // path rather than needing their own separately-generated shapes -
-    // see the top-of-file "RANGE ENTRIES" comment's "WHY THIS MAKES
-    // HIGHLIGHTING A SINGLE, CLEAN OPERATION" section.
-    const arcGenerator = d3.arc();
+    const lanedPoints = sortedEntries
+      .filter(entry => !entry.endTimestamp)
+      .map(entry => {
+        const t = normalize(new Date(entry.timestamp));
+        const position = tToArcLength(t);
+        const lane = assignLaneAroundRanges(
+          position,
+          lanedRanges,
+          item => item.arcStart,
+          item => item.arcEnd,
+          LANE_GAP_PX
+        );
+        return { entry, t, lane, color: getActivityColor(entry.activityType) };
+      });
 
-    const ranges = laned.map(({ entry, tStart, tEnd, color, lane }) => {
-      const radiusOffset = lane * RADIAL_LANE_OFFSET_PX;
+    const maxLaneIndex = Math.max(
+      0,
+      ...lanedRanges.map(item => item.lane),
+      ...lanedPoints.map(item => item.lane)
+    );
+    const bandThickness = effectiveLaneBandThickness(
+      maxLaneIndex,
+      spiralParams
+    );
+
+    const ranges = lanedRanges.map(({ entry, tStart, tEnd, color, lane }) => {
+      const radiusOffset = lane * bandThickness;
       const t0 = Math.min(tStart, tEnd);
       const t1 = Math.max(tStart, tEnd);
       const tMid = (t0 + t1) / 2;
-      const bandRadius = tMid * spiralParams.maxRadius + radiusOffset;
-      const startAngle = spiralAngleForD3Arc(t0, spiralParams);
-      const endAngle = spiralAngleForD3Arc(t1, spiralParams);
 
-      // Math.max(0, ...) guards the innermost entries: `radius = t *
-      // maxRadius` starts at true 0 (see the SPIRAL FORMULA comment), so
-      // a range entry whose midpoint sits very close to the spiral's own
-      // center could otherwise compute a negative innerRadius, which
-      // `d3.arc()` doesn't accept.
-      //
       // This is the ONLY path generated per range entry - the "opened"
       // glow/ring below (in the render) both STROKE this exact same `d`
-      // string rather than generating their own differently-sized
+      // string rather than generating their own differently-built
       // shapes; see that render's own comment for why stroking the one
       // closed path directly, instead of building separate offset
-      // arcs, is what makes the highlight wrap continuously around the
-      // ENTIRE shape (both long edges AND both rounded end caps).
-      const pathD =
-        arcGenerator.cornerRadius(ARC_CORNER_RADIUS)({
-          innerRadius: Math.max(0, bandRadius - ARC_BAND_HALF_THICKNESS),
-          outerRadius: bandRadius + ARC_BAND_HALF_THICKNESS,
-          startAngle,
-          endAngle,
-        }) ?? '';
+      // shapes, is what makes the highlight wrap continuously around the
+      // ENTIRE shape (both long curved edges AND both cut ends).
+      const pathD = buildRangeBandPath(
+        t0,
+        t1,
+        radiusOffset,
+        ARC_BAND_HALF_THICKNESS,
+        spiralParams,
+        RANGE_BAND_SAMPLE_COUNT
+      );
 
       return {
         entry,
         pathD,
-        start: spiralPointAtRadius(t0, bandRadius, spiralParams),
-        end: spiralPointAtRadius(t1, bandRadius, spiralParams),
-        midpoint: spiralPointAtRadius(tMid, bandRadius, spiralParams),
+        start: spiralPoint(t0, spiralParams, radiusOffset),
+        end: spiralPoint(t1, spiralParams, radiusOffset),
+        midpoint: spiralPoint(tMid, spiralParams, radiusOffset),
         color,
         lane,
       };
     });
 
-    return { ranges, lanedRangeItems: laned };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortedEntries, spiralParams, minDate, maxDate, cumulativeLengths]);
+    const points = lanedPoints.map(({ entry, t, lane, color }) => {
+      const radiusOffset = lane * bandThickness;
+      return {
+        entry,
+        ...spiralPoint(t, spiralParams, radiusOffset),
+        color,
+      };
+    });
 
-  /**
-   * ──────────────────────────────────────────────────────────────────────
-   * SINGLE-POINT ENTRIES (no endTimestamp): LANE-BUMPED AROUND ARCS THAT
-   * COVER THEIR DATE
-   * ──────────────────────────────────────────────────────────────────────
-   * See the top-of-file "POINT ENTRIES NOW PARTICIPATE IN OVERLAP
-   * DETECTION TOO" comment for the full reasoning. In short: a point whose
-   * date falls within an already-laned arc's span (`lanedRangeItems`,
-   * computed just above) would render right on top of that arc's curve if
-   * left at lane 0 - `assignLaneAroundRanges` (utils/laneAssignment.ts)
-   * finds the first lane (0, 1, 2, ...) where no arc assigned to that lane
-   * covers this point's own arc-length position, checking only against
-   * ARCS (never other points - see that function's own comment for why).
-   * A point with no conflicting arc anywhere stays at lane 0, i.e.
-   * `radiusOffset` 0, unchanged from its original always-on-the-curve
-   * behavior.
-   */
-  const points = useMemo(
-    () =>
-      sortedEntries
-        .filter(entry => !entry.endTimestamp)
-        .map(entry => {
-          const t = normalize(new Date(entry.timestamp));
-          const position = tToArcLength(t);
-          const lane = assignLaneAroundRanges(
-            position,
-            lanedRangeItems,
-            item => item.arcStart,
-            item => item.arcEnd,
-            LANE_GAP_PX
-          );
-          const radiusOffset = lane * RADIAL_LANE_OFFSET_PX;
-          return {
-            entry,
-            ...spiralPoint(t, spiralParams, radiusOffset),
-            color: getActivityColor(entry.activityType),
-          };
-        }),
+    return { ranges, points };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sortedEntries, spiralParams, minDate, maxDate, lanedRangeItems]
-  );
+  }, [
+    sortedEntries,
+    spiralParams,
+    minDate,
+    maxDate,
+    cumulativeLengths,
+    categories,
+  ]);
 
   // ─── Entry marker positions (for year-glyph collision avoidance) ───
   // See the top-of-file "YEAR GLYPHS" comment's "COLLISION AVOIDANCE"
@@ -1495,6 +1764,52 @@ export default function SpiralTimeline({
     | null
   >(null);
 
+  /**
+   * The currently-hovered year's highlight band path - `null` whenever
+   * nothing year-shaped is hovered. Built with the EXACT SAME
+   * `buildRangeBandPath` a range entry's arc uses (see the "YEAR HOVER
+   * HIGHLIGHT" comment above `YEAR_HIGHLIGHT_HALF_THICKNESS`), just over
+   * this year's `[t0, t1]` span from `yearSpans`, a thinner half-thickness,
+   * and `radiusOffset` 0 (no lane - this always traces the base gridline).
+   * Sample count scales with the span's own share of `totalRotations` the
+   * same way the "now" marker's dotted continuation does, so a short
+   * partial year (e.g. the very first or very last) isn't over-sampled and
+   * a long one still hugs the curve tightly.
+   */
+  const hoveredYearBandPath = useMemo(() => {
+    if (hovered?.kind !== 'year') return null;
+    const span = yearSpans.find(candidate => candidate.year === hovered.year);
+    if (!span) return null;
+
+    const sampleCount = Math.max(
+      YEAR_HIGHLIGHT_MIN_SAMPLE_COUNT,
+      Math.round(
+        (span.t1 - span.t0) * spiralParams.totalRotations * SAMPLES_PER_ROTATION
+      )
+    );
+
+    return buildRangeBandPath(
+      span.t0,
+      span.t1,
+      0,
+      YEAR_HIGHLIGHT_HALF_THICKNESS,
+      spiralParams,
+      sampleCount
+    );
+  }, [hovered, yearSpans, spiralParams]);
+
+  // Keeps rendering the LAST computed band path while its opacity fades
+  // to 0 (instead of the path disappearing the instant the mouse leaves),
+  // so the CSS opacity transition below actually has something to fade
+  // OUT - see the render's own comment on this path for how `opacity`
+  // (not conditional mounting) drives the fade in/out.
+  const [displayedYearBandPath, setDisplayedYearBandPath] = useState<
+    string | null
+  >(null);
+  useEffect(() => {
+    if (hoveredYearBandPath) setDisplayedYearBandPath(hoveredYearBandPath);
+  }, [hoveredYearBandPath]);
+
   // While the "now" glyph is actively hovered, its tooltip should
   // visibly tick once a second rather than staying frozen at whatever
   // instant the hover started - see the top-of-file "NOW MARKER"
@@ -1577,6 +1892,25 @@ export default function SpiralTimeline({
           >
             <feGaussianBlur stdDeviation={ARC_GLOW_BLUR_STD_DEVIATION} />
           </filter>
+          {/*
+           * Soft blur for the YEAR HOVER HIGHLIGHT's own glow-behind -
+           * see the "YEAR HOVER HIGHLIGHT" comment above
+           * `YEAR_HIGHLIGHT_HALF_THICKNESS`. A separate filter (not
+           * `opened-arc-glow`) so this can be tuned independently and so
+           * it's never accidentally reused for the navy/white
+           * opened-entry glow, or vice versa.
+           */}
+          <filter
+            id="year-highlight-glow"
+            x="-100%"
+            y="-100%"
+            width="300%"
+            height="300%"
+          >
+            <feGaussianBlur
+              stdDeviation={YEAR_HIGHLIGHT_GLOW_BLUR_STD_DEVIATION}
+            />
+          </filter>
         </defs>
         <g ref={zoomLayerRef}>
           {isReady && (
@@ -1588,6 +1922,46 @@ export default function SpiralTimeline({
                 strokeOpacity={0.35}
                 strokeWidth={1.5}
               />
+
+              {/*
+               * YEAR HOVER HIGHLIGHT - rendered here, BEFORE `ranges`/
+               * `points` below, deliberately: SVG draws later siblings on
+               * top of earlier ones, so this needs to sit right after the
+               * plain gridline (which it's illuminating) and before any
+               * entry/arc so entries always stay visually on top and
+               * readable - see the "YEAR HOVER HIGHLIGHT" comment above
+               * `YEAR_HIGHLIGHT_HALF_THICKNESS` for the full reasoning on
+               * both the reused sampling technique and the deliberately
+               * distinct grey/glow paint (vs. the navy/white
+               * `OPENED_HIGHLIGHT_COLOR` entry highlight further below).
+               * `displayedYearBandPath` (not `hoveredYearBandPath`
+               * directly) keeps the last shape mounted so `opacity`'s CSS
+               * transition has something to fade FROM/TO on both hover
+               * start and hover end, instead of the path just
+               * appearing/disappearing; `pointer-events-none` keeps this
+               * purely decorative - it must never steal a hover/click
+               * meant for the glyph, an entry, or an arc underneath it.
+               */}
+              {displayedYearBandPath && (
+                <g
+                  opacity={hoveredYearBandPath ? 1 : 0}
+                  className="pointer-events-none transition-opacity duration-200"
+                >
+                  <path
+                    d={displayedYearBandPath}
+                    fill="currentColor"
+                    filter="url(#year-highlight-glow)"
+                    opacity={YEAR_HIGHLIGHT_GLOW_OPACITY}
+                    stroke="currentColor"
+                    strokeWidth={YEAR_HIGHLIGHT_GLOW_EXTRA_RADIUS * 2}
+                  />
+                  <path
+                    d={displayedYearBandPath}
+                    fill="currentColor"
+                    opacity={YEAR_HIGHLIGHT_FILL_OPACITY}
+                  />
+                </g>
+              )}
 
               {/*
                * "NOW" MARKER - see the top-of-file "NOW MARKER" comment.
@@ -1651,17 +2025,19 @@ export default function SpiralTimeline({
                   // applied once to the whole group (glow + band + ring)
                   // so a filtered-out arc's highlight dims along with it -
                   // same structure as StarMap.tsx's per-star <g>/
-                  // LinearTimeline.tsx's per-range <g>. `transform`
-                  // translates every path inside from `d3.arc()`'s own
-                  // (0,0)-centered coordinate space to the spiral's actual
-                  // center - see the top-of-file "RANGE ENTRIES" comment.
+                  // LinearTimeline.tsx's per-range <g>. No `transform`
+                  // here (unlike the earlier `d3.arc()`-based version):
+                  // `pathD` is now built from `spiralPoint`, which already
+                  // returns absolute canvas coordinates (`centerX`/
+                  // `centerY` baked in), the same coordinate space
+                  // `points` below render directly into - see the
+                  // top-of-file "RANGE ENTRIES" comment.
                   <g
                     key={entry.id}
                     style={{
                       opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
                     }}
                     className="cursor-pointer transition-opacity duration-200"
-                    transform={`translate(${spiralParams.centerX},${spiralParams.centerY})`}
                     onMouseEnter={event =>
                       setHovered({
                         kind: 'entry',
@@ -1687,7 +2063,8 @@ export default function SpiralTimeline({
                       // STROKING THE SAME CLOSED PATH, NOT TWO SEPARATE
                       // OFFSET SHAPES:
                       //
-                      // An earlier version generated a second, WIDER
+                      // An earlier version (back when `pathD` was a
+                      // `d3.arc()` sector) generated a second, WIDER
                       // `d3.arc()` shape for the glow (different
                       // innerRadius/outerRadius/cornerRadius from
                       // `pathD`) and a THIRD, entirely-outside-outerRadius
@@ -1701,12 +2078,14 @@ export default function SpiralTimeline({
                       // long curved edges that never wrap around the
                       // rounded end caps at all.
                       //
-                      // `pathD` is already a single CLOSED path (outer
-                      // arc, corner, inner arc, corner, back to start) -
-                      // stroking it directly, with `fill="none"`, makes
-                      // SVG trace that entire closed boundary as one
-                      // continuous line, corners included, for free - no
-                      // separate geometry needed. The stroke straddles
+                      // `pathD` is now already a single CLOSED path built
+                      // by `buildRangeBandPath` (outer edge samples, then
+                      // inner edge samples in reverse, back to the first
+                      // outer point) - stroking it directly, with
+                      // `fill="none"`, makes SVG trace that entire closed
+                      // boundary as one continuous line, both cut ends
+                      // included, for free - no separate geometry needed.
+                      // The stroke straddles
                       // the boundary (half in, half out); both are drawn
                       // BEHIND the opaque colored band below, which
                       // covers the inward half, leaving only a clean
@@ -1739,7 +2118,24 @@ export default function SpiralTimeline({
                         />
                       </>
                     )}
-                    <path d={pathD} fill={color} />
+                    {/*
+                     * LANE EDGE STROKE - see `LANE_EDGE_STROKE_COLOR`'s own
+                     * comment: now that contiguous lanes can sit directly
+                     * against a same-colored neighbor with no gap, this
+                     * very thin, low-opacity outline (traced along `pathD`,
+                     * the exact same closed boundary the fill uses - both
+                     * long curved edges AND the two cut ends) keeps this
+                     * band's own edges legible even against an identically
+                     * colored band in the next lane over or the base
+                     * gridline underneath.
+                     */}
+                    <path
+                      d={pathD}
+                      fill={color}
+                      stroke={LANE_EDGE_STROKE_COLOR}
+                      strokeOpacity={LANE_EDGE_STROKE_OPACITY}
+                      strokeWidth={LANE_EDGE_STROKE_WIDTH}
+                    />
                   </g>
                 );
               })}
@@ -1804,6 +2200,27 @@ export default function SpiralTimeline({
                       }
                       onMouseLeave={() => setHovered(null)}
                       onClick={() => onEntryClick(entry)}
+                    />
+                    {/*
+                     * LANE EDGE STROKE - see `LANE_EDGE_STROKE_COLOR`'s own
+                     * comment: the arc-band equivalent just above traces
+                     * `pathD` directly on the same element; a point has no
+                     * such path to add a stroke to (its own `stroke` above
+                     * is already the self-color glow), so this is a
+                     * separate, thin, low-opacity ring at the point's true
+                     * radius instead - `pointer-events-none` so it stays
+                     * purely decorative, the circle above it still owns
+                     * every hover/click.
+                     */}
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r={POINT_RADIUS}
+                      fill="none"
+                      stroke={LANE_EDGE_STROKE_COLOR}
+                      strokeOpacity={LANE_EDGE_STROKE_OPACITY}
+                      strokeWidth={LANE_EDGE_STROKE_WIDTH}
+                      className="pointer-events-none"
                     />
                     {isOpened && (
                       <circle

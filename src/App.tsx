@@ -51,7 +51,11 @@ import Spiral from './pages/Spiral';
 import Constellation from './pages/Constellation';
 import About from './pages/About';
 import { Entry } from './types/Entry';
-import { loadEntries, saveEntries } from './utils/entriesStorage';
+import {
+  loadEntries,
+  saveEntries,
+  recordDeletedEntryId,
+} from './utils/entriesStorage';
 import { initializeDefaultDataForFirstVisit } from './utils/initializeFirstVisit';
 import { TimeRangeProvider } from './context/TimeRangeContext';
 import { EntrySelectionProvider } from './context/EntrySelectionContext';
@@ -225,6 +229,29 @@ function App() {
   };
 
   /**
+   * DELETE ENTRY CALLBACK
+   *
+   * Removes the entry with the given id from the entries array. Wired to
+   * AddEntryForm's edit-mode "Delete Entry" flow (via Layout.tsx) - see
+   * that component's DELETE ENTRY comment for the two-step confirmation
+   * and orphaned-category cascade it runs before ever calling this.
+   *
+   * recordDeletedEntryId records a tombstone BEFORE removing it from
+   * state - see that function's own comment in entriesStorage.ts for why
+   * this is necessary for entries that happen to be one of the bundled
+   * DEFAULT_ENTRIES: without it, initializeFirstVisit.ts's own backfill
+   * logic would see the id missing from storage on the next load and
+   * silently resurrect it, since that logic was written before this
+   * delete feature existed.
+   */
+  const deleteEntry = (entryId: string) => {
+    recordDeletedEntryId(entryId);
+    setEntries(prevEntries =>
+      prevEntries.filter(entry => entry.id !== entryId)
+    );
+  };
+
+  /**
    * RENDER
    *
    * The component tree structure:
@@ -293,8 +320,10 @@ function App() {
                 path="/"
                 element={
                   <Layout
+                    entries={entries}
                     onAddEntry={addEntry}
                     onUpdateEntry={updateEntry}
+                    onDeleteEntry={deleteEntry}
                     editingEntry={editingEntry}
                     onEditEntry={setEditingEntry}
                   />
