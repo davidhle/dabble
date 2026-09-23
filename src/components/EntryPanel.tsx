@@ -1,557 +1,104 @@
 /**
- * EntryPanel.tsx - Inline (Non-Overlay) Entry Detail Panel
+ * EntryPanel.tsx - Minimized Entry Row In The Sidebar Panel Stack
  *
- * Renders one entry in the Constellation sidebar's panel stack, in one of
- * two modes controlled by the `expanded` prop (state owned by
- * Constellation.tsx - see the "expand/minimize" comment there):
+ * Renders one selected entry in a page's sidebar panel stack (see
+ * SidebarPanelStack.tsx) as a compact single-line row - category and title
+ * only - that's clickable (via `onExpand`) to focus that entry, plus a
+ * close button to remove it from the selection.
  *
- *   - expanded: full detail - title, activityType, date, tags, description,
- *     notes, close button. Mirrors EntryDetailModal.tsx's content, just
- *     laid out as a stacked block instead of a centered overlay.
- *   - minimized: a compact single-line row - activityType/category and
- *     title only - that's clickable (via `onExpand`) to become the
- *     expanded panel. Also has a close button, wired to the same `onClose`
- *     prop as the expanded view (see `CloseButton` below) - closing an
- *     entry should behave identically regardless of which state its panel
- *     was in, so there's one close handler, not one per mode.
+ * FOCUSED MODE: this component used to have a second, EXPANDED layout that
+ * grew inline within the stack to show the entry's full detail. Expanding
+ * an entry is now a full-sidebar takeover instead - see
+ * FocusedEntryView.tsx, which replaces the whole sidebar (header, filters,
+ * and this stack) while an entry is expanded - so a row here only ever
+ * renders minimized. The expanded layout's body sections moved to
+ * EntryContent.tsx, and its edit/close buttons to FocusedEntryView's
+ * header.
  *
- * THEMING: the sidebar itself sits on --bg-color (same token as StarMap's
- * canvas - see index.css :root), so both modes use an overlay of that same
- * base color to stay visually separable from the page and from other
- * stacked panels without breaking the cohesive theme. Both modes now use
- * the SAME --panel-bg-color-solid surface - the minimized row used to keep
- * the more translucent --panel-bg-color instead (its one line of text
- * "needs little help standing out over the starfield"), but that let
- * StarMap's stars show through a minimized row clearly enough to hurt
- * legibility, especially once a light theme's brighter canvas made the
- * translucency more noticeable. Matching the expanded panel's fully opaque
- * surface keeps every row - minimized or expanded - equally legible over
- * whatever's rendering underneath it, in either theme.
+ * THEMING: uses the opaque --panel-bg-color-solid surface (rather than the
+ * more translucent --panel-bg-color) so the canvas underneath - StarMap's
+ * stars especially - can't show through clearly enough to hurt legibility,
+ * in either theme.
  *
- * The left accent bar's color (present in both modes) comes from
- * utils/colors.ts - the same mapping StarMap.tsx uses to tint this
- * entry's star - rather than a second hardcoded color list here. See the
- * comment in colors.ts for why: in short, one shared mapping can't drift
- * out of sync with itself, while two copies of "activityType -> color"
- * inevitably would once either one is edited without remembering the other.
- *
- * MOOD / MEDIA LINKS: this is the ONE shared panel component
- * Constellation.tsx and Timeline.tsx both render an entry's full detail
- * through (see SidebarPanelStack.tsx) - so a display gap here is a display
- * gap on every page that uses it, not just one. It used to render Tags,
- * Description, and Notes only; entry.mood and entry.mediaLinks were both
- * being collected by AddEntryForm.tsx and saved onto the entry correctly,
- * but had no section here to actually show up in, so they silently never
- * appeared no matter how many moods were picked or media links added.
- * Both gaps are covered now - see the Mood and Media Links sections below,
- * which follow the exact same "label + content, render nothing at all
- * when empty" pattern Tags already used, rather than introducing a new
- * one. (Spiral.tsx doesn't render through this component yet - it still
- * uses EntryDetailModal.tsx, which got the same two sections added for
- * the same reason; see that file's own comments.)
- *
- * SECTION LABEL EMOJI: each body section label (Tags/Mood/Description/
- * Notes/Media Links) is prefixed with one small emoji (🏷️/💫/📝/💭/🔗) -
- * a purely cosmetic touch to break up what's otherwise an all-caps
- * text-only label, applied consistently here since this is the one
- * shared panel every visualization view renders through (see above).
- *
- * REFLECTIONS (Stage 1 - data model + basic functionality): an "Add
- * Reflection" button opens AddReflectionForm.tsx inline, and any saved
- * reflections are listed chronologically below the entry's own content.
- * This is a deliberately minimal placeholder display - Stage 2 reworks it
- * into a dedicated full-sidebar entry view with an Original/Reflections
- * toggle.
+ * The left accent bar's color comes from utils/colors.ts - the same
+ * mapping StarMap.tsx uses to tint this entry's star - rather than a
+ * second hardcoded color list here, so the two can't drift out of sync.
  */
 
-import { useState } from 'react';
-import { Entry, Reflection } from '../types/Entry';
+import { Entry } from '../types/Entry';
 import { getActivityColor } from '../utils/colors';
 import { getCategoryName } from '../utils/categories';
-import { linkify, LINK_CLASSNAME } from '../utils/linkify';
-import { getMediaLinkLabel } from '../utils/mediaLinks';
-import { formatEntryDate, formatSingleDate } from '../utils/formatEntryDate';
-import AddReflectionForm from './AddReflectionForm';
-import { formatLocationDisplay } from '../utils/formatLocation';
 
 interface EntryPanelProps {
   entry: Entry;
-  /** Whether this panel renders full detail (true) or a compact row (false). */
-  expanded: boolean;
-  /** Called when a minimized row is clicked, to expand it. */
+  /** Called when the row is clicked, to focus this entry - see FocusedEntryView.tsx. */
   onExpand: () => void;
-  /** Called when either mode's close button is clicked. */
+  /** Called when the row's close button is clicked. */
   onClose: () => void;
-  /**
-   * Called when the EXPANDED panel's edit button is clicked, to open this
-   * entry in the shared AddEntryForm's edit mode - see App.tsx's
-   * `editingEntry` state. Not used by (and not rendered on) a minimized
-   * row - see the header comment above for why edit/minimize only make
-   * sense once a panel is already expanded.
-   */
-  onEdit: () => void;
-  /**
-   * Called when the EXPANDED panel's minimize button is clicked, to
-   * collapse just this panel back to its minimized row - wired to
-   * useEntrySelection's `handleMinimizePanel`, the mirror of `onExpand`.
-   * Also not used by a minimized row, for the same reason as `onEdit`.
-   */
-  onMinimize: () => void;
-  /**
-   * Persists a modified copy of this entry (same id) - wired to App.tsx's
-   * `updateEntry`. Used to append a new reflection; see the REFLECTIONS
-   * comment at the top of this file.
-   */
-  onUpdate: (entry: Entry) => void;
-}
-
-/**
- * The (x) close icon/button, shared verbatim between the expanded and
- * minimized panel layouts below so the two modes can't drift apart in
- * appearance or behavior - both call the same `onClose` from
- * Constellation.tsx, which removes the entry from `selectedEntries` and
- * (since StarMap's highlight is derived from that same state) clears its
- * star's "opened" highlight.
- */
-function CloseButton({
-  onClick,
-  label,
-}: {
-  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="ml-2 flex-shrink-0 text-[var(--text-muted-color)] hover:text-[var(--text-secondary-color)]"
-      aria-label={label}
-    >
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M6 18L18 6M6 6l12 12"
-        />
-      </svg>
-    </button>
-  );
-}
-
-/**
- * One circular icon button in the EXPANDED panel header's edit/minimize/
- * close row below - a heavier, more clearly-clickable treatment (circular
- * hit target + hover background) than the minimized row's plain
- * `CloseButton` above, since this row has three actions competing for
- * attention instead of one.
- */
-function PanelIconButton({
-  onClick,
-  label,
-  children,
-}: {
-  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[var(--text-muted-color)] hover:bg-[var(--field-tint-2)] hover:text-[var(--text-secondary-color)]"
-    >
-      {children}
-    </button>
-  );
 }
 
 export default function EntryPanel({
   entry,
-  expanded,
   onExpand,
   onClose,
-  onEdit,
-  onMinimize,
-  onUpdate,
 }: EntryPanelProps) {
-  const [isAddingReflection, setIsAddingReflection] = useState(false);
-
   // Looked up from the dynamic category list rather than a fixed option
   // list, so a user-created category's name displays correctly here too -
   // see the DYNAMIC CATEGORIES comment in AddEntryForm.tsx for how those
   // get created.
   const displayActivityType = getCategoryName(entry.activityType);
 
-  // Same color this entry's star is tinted with in StarMap - see the
-  // theming comment above for why this is looked up rather than hardcoded.
-  const accentColor = getActivityColor(entry.activityType);
-
-  // Shared by both modes: the colored left accent bar over the panel
-  // surface tokens.
-  const panelStyle = {
-    borderColor: 'var(--panel-border-color)',
-    borderLeftColor: accentColor,
-    borderLeftWidth: 4,
-  };
-
-  if (!expanded) {
-    return (
-      // The whole row is clickable to expand (onClick here, plus onKeyDown
-      // for keyboard users since this is a <div> - it can't be a <button>
-      // itself because it contains the nested CloseButton below, and
-      // <button> can't nest another interactive element). CloseButton
-      // stops propagation so clicking it doesn't also bubble up and fire
-      // this row's onExpand.
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={onExpand}
-        onKeyDown={event => {
-          if (event.key === 'Enter' || event.key === ' ') onExpand();
-        }}
-        className="flex w-full flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border bg-[var(--panel-bg-color-solid)] px-4 py-2.5 text-sm shadow-sm"
-        style={panelStyle}
-      >
-        <span className="flex-shrink-0 text-[var(--text-muted-color)]">
-          {displayActivityType}
-        </span>
-        <span className="text-[var(--text-muted-color)]">&middot;</span>
-        <span className="min-w-0 flex-1 truncate text-[var(--text-color)]">
-          {entry.title}
-        </span>
-        <CloseButton
-          onClick={event => {
-            event.stopPropagation();
-            onClose();
-          }}
-          label={`Close ${entry.title}`}
-        />
-      </div>
-    );
-  }
-
-  // See formatEntryDate for the dateDisplay / date-range / single-date
-  // precedence - shows a range like "Jun 30 – Jul 2, 2023" when the entry
-  // has an endTimestamp (see types/Entry.ts).
-  const formattedDate = formatEntryDate(entry);
-
-  // Structured ("Djoon Club, Paris, France") or legacy plain-string
-  // location, formatted by the one shared helper - see
-  // utils/formatLocation.ts and the EntryLocation comment in
-  // types/Entry.ts for why an entry's location can be either shape.
-  //
-  // SUBTITLE AGGREGATION: this used to have its own "Location" section
-  // further down in the panel body. It's now folded into the header
-  // subtitle line instead, alongside category and date, so the subtitle
-  // reads as one scannable "what, when, where" line (e.g. "Shuffle Dance
-  // · Mar 9, 2022 · EXIL Club, Vienna, Austria") rather than making the
-  // reader look further down the panel to find where an entry happened.
-  // Appended only when present - see the render below for the "no empty
-  // separator" behavior when an entry has no location.
-  const formattedLocation = formatLocationDisplay(entry.location);
-
-  // Chronological (oldest first). ISO strings sort correctly as strings.
-  const sortedReflections = [...(entry.reflections ?? [])].sort((a, b) =>
-    a.writtenDate.localeCompare(b.writtenDate)
-  );
-
-  const handleSaveReflection = (reflection: Reflection) => {
-    onUpdate({
-      ...entry,
-      reflections: [...(entry.reflections ?? []), reflection],
-    });
-    setIsAddingReflection(false);
-  };
-
   return (
+    // The whole row is clickable to expand (onClick here, plus onKeyDown
+    // for keyboard users since this is a <div> - it can't be a <button>
+    // itself because it contains the nested close button below, and
+    // <button> can't nest another interactive element). The close button
+    // stops propagation so clicking it doesn't also bubble up and fire
+    // this row's onExpand.
     <div
-      // bg-[var(--panel-bg-color-solid)]: same opaque surface the
-      // minimized row above now also uses (see the THEMING comment at the
-      // top of this file) - this expanded panel is a full block of text
-      // sitting directly over StarMap's starfield, so legibility matters
-      // even more here. See --panel-bg-color-solid's own comment in
-      // index.css for the ~92% opacity value and why it's deliberately
-      // short of fully opaque.
-      className="w-full flex-shrink-0 rounded-lg border bg-[var(--panel-bg-color-solid)] shadow-sm"
-      style={panelStyle}
+      role="button"
+      tabIndex={0}
+      onClick={onExpand}
+      onKeyDown={event => {
+        if (event.key === 'Enter' || event.key === ' ') onExpand();
+      }}
+      className="flex w-full flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border bg-[var(--panel-bg-color-solid)] px-4 py-2.5 text-sm shadow-sm"
+      style={{
+        borderColor: 'var(--panel-border-color)',
+        borderLeftColor: getActivityColor(entry.activityType),
+        borderLeftWidth: 4,
+      }}
     >
-      {/* ─── Header ─── */}
-      <div
-        className="flex items-start justify-between border-b px-4 pt-4 pb-3"
-        style={{ borderColor: 'var(--panel-border-color)' }}
+      <span className="flex-shrink-0 text-[var(--text-muted-color)]">
+        {displayActivityType}
+      </span>
+      <span className="text-[var(--text-muted-color)]">&middot;</span>
+      <span className="min-w-0 flex-1 truncate text-[var(--text-color)]">
+        {entry.title}
+      </span>
+      <button
+        type="button"
+        onClick={event => {
+          event.stopPropagation();
+          onClose();
+        }}
+        className="ml-2 flex-shrink-0 text-[var(--text-muted-color)] hover:text-[var(--text-secondary-color)]"
+        aria-label={`Close ${entry.title}`}
       >
-        <div className="min-w-0">
-          {/*
-           * No `truncate` here (unlike the minimized row's title span
-           * above, which keeps it) - a long title wraps to a second line
-           * instead of being clipped with an ellipsis, the same way an
-           * email inbox lets a long subject line wrap under its fixed
-           * action icons rather than hiding the end of it. `break-words`
-           * guards against a single unbroken long "word" (unlikely for a
-           * real title, but user-entered text is never guaranteed to have
-           * spaces) still overflowing this flex item instead of wrapping.
-           * The header's own `items-start` (not `items-center`) is what
-           * keeps the icon buttons pinned to the top of this block once
-           * it grows to two lines, rather than re-centering against it.
-           */}
-          {/*
-           * `text-lg` (bumped up from `text-base`) rather than the size
-           * every other h2 in the app uses - this title is the largest
-           * piece of text in an already-crowded panel header, so it gets
-           * a size bump; verified this doesn't reintroduce the
-           * overflow/collision the icon buttons' `items-start` and
-           * `break-words` above already guard against. font-family picks
-           * up --font-heading ('Bree Serif') from the global `h1, h2`
-           * rule in index.css with no override needed.
-           */}
-          <h2 className="break-words text-lg font-semibold text-[var(--text-color)]">
-            {entry.title}
-          </h2>
-          <p className="mt-1 text-sm text-[var(--text-muted-color)]">
-            {displayActivityType} &middot; {formattedDate}
-            {formattedLocation && <> &middot; {formattedLocation}</>}
-          </p>
-        </div>
-        {/*
-         * Three circular icon buttons, same row, close staying rightmost
-         * since it's the most "permanent" of the three actions - see the
-         * header comment above. Only rendered here (the EXPANDED layout);
-         * the minimized row above keeps its original single CloseButton.
-         */}
-        <div className="ml-2 flex flex-shrink-0 items-center gap-0.5">
-          <PanelIconButton onClick={onEdit} label={`Edit ${entry.title}`}>
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z"
-              />
-            </svg>
-          </PanelIconButton>
-          <PanelIconButton
-            onClick={onMinimize}
-            label={`Minimize ${entry.title}`}
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path strokeLinecap="round" strokeWidth={2} d="M5 12h14" />
-            </svg>
-          </PanelIconButton>
-          <PanelIconButton onClick={onClose} label={`Close ${entry.title}`}>
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </PanelIconButton>
-        </div>
-      </div>
-
-      {/* ─── Body ─── */}
-      <div className="space-y-3 px-4 py-3">
-        {entry.tags.length > 0 && (
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-              🏷️ Tags
-            </p>
-            <div className="mt-1.5 flex flex-wrap gap-2">
-              {entry.tags.map(tag => (
-                <span
-                  key={tag}
-                  className="inline-flex items-center rounded-full bg-indigo-400/20 px-3 py-1 text-sm font-medium text-[var(--indigo-accent-text)]"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/*
-         * Mood - see the MOOD / MEDIA LINKS comment at the top of this
-         * file. `entry.mood` is optional (`string[] | undefined`) and, per
-         * AddEntryForm.tsx, is never set to an empty array either (moods
-         * only gets passed through when at least one was picked) - the
-         * length check is still here defensively rather than trusting
-         * that invariant, so this renders NOTHING (not an empty "Mood"
-         * label with no chips under it) for any falsy/empty value. Teal
-         * rather than Tags' indigo or any color from
-         * NEW_CATEGORY_COLOR_PALETTE (utils/categories.ts) - a color no
-         * category can ever be assigned, so a mood chip can never be
-         * mistaken for a category-colored one.
-         */}
-        {entry.mood && entry.mood.length > 0 && (
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-              💫 Mood
-            </p>
-            <div className="mt-1.5 flex flex-wrap gap-2">
-              {entry.mood.map(mood => (
-                <span
-                  key={mood}
-                  className="inline-flex items-center rounded-full bg-teal-400/20 px-3 py-1 text-sm font-medium text-[var(--teal-accent-text)]"
-                >
-                  {mood}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-            📝 Description
-          </p>
-          <p className="mt-1.5 whitespace-pre-wrap text-sm text-[var(--text-secondary-color)]">
-            {entry.description
-              ? linkify(entry.description)
-              : 'No description for this entry.'}
-          </p>
-        </div>
-
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-            💭 Notes
-          </p>
-          <p className="mt-1.5 whitespace-pre-wrap text-sm text-[var(--text-secondary-color)]">
-            {entry.notes ? linkify(entry.notes) : 'No notes for this entry.'}
-          </p>
-        </div>
-
-        {/*
-         * Media Links - see the MOOD / MEDIA LINKS comment at the top of
-         * this file. Each link renders as a labeled clickable link-out
-         * ("View on Instagram") rather than the raw URL - getMediaLinkLabel
-         * (utils/mediaLinks.ts) derives the platform from the URL's own
-         * hostname, since AddEntryForm.tsx has no per-platform input and
-         * always saves `media.type` as "Video" regardless of the actual
-         * platform (see its addMediaLink comment) - `media.type` isn't
-         * trustworthy enough to label off of. Same target="_blank" +
-         * rel="noopener noreferrer" + LINK_CLASSNAME styling linkify.ts
-         * uses for a URL found inside free-text notes/description, so a
-         * link reads the same way wherever it appears in this panel.
-         */}
-        {entry.mediaLinks.length > 0 && (
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-              🔗 Media Links
-            </p>
-            <div className="mt-1.5 flex flex-col gap-1">
-              {entry.mediaLinks.map((media, index) => (
-                <a
-                  key={index}
-                  href={media.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`text-sm ${LINK_CLASSNAME}`}
-                >
-                  {getMediaLinkLabel(media.url)}
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/*
-         * Reflections - Stage 1 placeholder display; see the REFLECTIONS
-         * comment at the top of this file. Same chip/link styling as the
-         * entry's own Mood and Media Links sections above.
-         */}
-        {sortedReflections.length > 0 && (
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-              🪞 Reflections
-            </p>
-            <div className="mt-1.5 space-y-3">
-              {sortedReflections.map(reflection => (
-                <div
-                  key={reflection.id}
-                  className="border-l-2 pl-3"
-                  style={{ borderColor: 'var(--panel-border-color)' }}
-                >
-                  <p className="text-xs text-[var(--text-muted-color)]">
-                    {/* Date-only, stored at midnight UTC - see Reflection.writtenDate. */}
-                    {formatSingleDate(new Date(reflection.writtenDate), false)}
-                  </p>
-                  {reflection.mood && reflection.mood.length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {reflection.mood.map(mood => (
-                        <span
-                          key={mood}
-                          className="inline-flex items-center rounded-full bg-teal-400/20 px-2.5 py-0.5 text-xs font-medium text-[var(--teal-accent-text)]"
-                        >
-                          {mood}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--text-secondary-color)]">
-                    {linkify(reflection.text)}
-                  </p>
-                  {reflection.mediaLinks &&
-                    reflection.mediaLinks.length > 0 && (
-                      <div className="mt-1 flex flex-col gap-1">
-                        {reflection.mediaLinks.map((media, index) => (
-                          <a
-                            key={index}
-                            href={media.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={`text-sm ${LINK_CLASSNAME}`}
-                          >
-                            {getMediaLinkLabel(media.url)}
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {isAddingReflection ? (
-          <AddReflectionForm
-            entry={entry}
-            onSave={handleSaveReflection}
-            onCancel={() => setIsAddingReflection(false)}
+        <svg
+          className="h-5 w-5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M6 18L18 6M6 6l12 12"
           />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setIsAddingReflection(true)}
-            className="rounded-md bg-[var(--field-tint-2)] px-3 py-1.5 text-sm font-medium text-[var(--text-secondary-color)] hover:bg-[var(--field-tint-3)]"
-          >
-            + Add Reflection
-          </button>
-        )}
-      </div>
+        </svg>
+      </button>
     </div>
   );
 }

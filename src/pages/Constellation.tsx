@@ -138,9 +138,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import BookmarkRail from '../components/BookmarkRail';
 import EditModeBanner from '../components/EditModeBanner';
 import EditModeToggle from '../components/EditModeToggle';
 import FilterBar from '../components/FilterBar';
+import FocusedEntryView from '../components/FocusedEntryView';
 import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
 import SidebarPanelStack from '../components/SidebarPanelStack';
@@ -196,8 +198,10 @@ export default function Constellation({
     expandedEntryId,
     handleEntryClick,
     handleExpandPanel,
-    handleMinimizePanel,
     handleClosePanel,
+    canUndoFocus,
+    handleUndoFocus,
+    handleExitFocus,
     sortMode,
     handleSortModeChange,
     categoryGroups,
@@ -296,6 +300,7 @@ export default function Constellation({
   // measured off `headerContentRef` instead. This is what StarMap still
   // gets as its own `topOffset` prop (see below), unchanged in meaning
   // from before this restructure.
+  const isFocused = expandedEntryId !== null;
   const containerRef = useRef<HTMLDivElement>(null);
   const headerContentRef = useRef<HTMLDivElement>(null);
   const [containerLayout, setContainerLayout] = useState({ top: 0, left: 0 });
@@ -329,7 +334,10 @@ export default function Constellation({
       observer.disconnect();
       window.removeEventListener('resize', updateLayout);
     };
-  }, []);
+    // Re-run when focused mode toggles: FocusedEntryView swaps in its own
+    // header block (also attached to `headerContentRef`), so the observer
+    // has to re-attach to whichever header element is now mounted.
+  }, [isFocused]);
 
   // StarMap's own `sidebarWidth` prop, for its click-to-center math - see
   // the layout comment above and StarMap.tsx's CLICK-TO-CENTER comment.
@@ -394,54 +402,95 @@ export default function Constellation({
        * `containerLayout.top` used for width - see that state's own
        * comment above.
        */}
-      <div
-        ref={containerRef}
-        className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
-        style={{
-          width: `calc(33vw - ${containerLayout.left}px)`,
-          maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
-        }}
-      >
-        <div ref={headerContentRef} className="flex-shrink-0 space-y-4 p-4">
-          <VizPageHeader
-            title="Constellation"
-            subtitle="Drag to pan, scroll to zoom, and click a star to see the entry behind it."
-          />
-
-          <FilterBar
-            sortMode={sortMode}
-            onSortModeChange={handleSortModeChange}
-            categories={categories}
-            filterCategories={filterCategories}
-            onToggleFilterCategory={handleToggleFilterCategory}
-            onResetFilters={handleResetFilters}
-            hasSelection={hasSelection}
-          />
-        </div>
-
-        {/*
-         * Sidebar panel stack - only takes up space once there's a
-         * selection, same as before this restructure (see
-         * `containerLayout`'s own comment above for why `sidebarWidth`
-         * still only reacts to `hasSelection`, not to this container's
-         * own always-present background). `flex-1 overflow-y-auto` is
-         * what lets this region scroll independently within the
-         * container's own `maxHeight` cap above, rather than growing the
-         * container past the bottom of the screen.
-         */}
-        {hasSelection && (
-          <div className="dark-scrollbar flex-1 overflow-y-auto px-4 pb-4">
-            <SidebarPanelStack
+      {/*
+       * Wrapper shared by the sidebar container and the focused-mode
+       * BookmarkRail, which pokes out past the container's right edge -
+       * see BookmarkRail.tsx's OUTSIDE THE SIDEBAR comment for why the
+       * rail has to be the container's sibling rather than its child.
+       * `w-fit` shrink-wraps the container, so the rail's `left: 100%` is
+       * the container's live right edge. `relative z-10` lifts both above
+       * the `fixed` canvas, the same job the container's own `z-10` did
+       * before this wrapper existed.
+       */}
+      <div className="relative z-10 w-fit">
+        <div
+          ref={containerRef}
+          className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
+          style={{
+            width: `calc(33vw - ${containerLayout.left}px)`,
+            maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
+          }}
+        >
+          {/*
+           * FOCUSED MODE - see FocusedEntryView.tsx: while an entry is
+           * expanded, it takes over the whole sidebar in place of the page
+           * header, FilterBar, and panel stack below.
+           */}
+          {expandedEntryId ? (
+            <FocusedEntryView
               selectedEntries={selectedEntries}
-              sortMode={sortMode}
-              categoryGroups={categoryGroups}
-              onExpand={handleExpandPanel}
-              onMinimize={handleMinimizePanel}
-              onClose={handleClosePanel}
+              focusedEntryId={expandedEntryId}
+              headerRef={headerContentRef}
+              canUndo={canUndoFocus}
+              onBack={handleExitFocus}
+              onUndo={handleUndoFocus}
               onEdit={onEditEntry}
+              onClose={handleClosePanel}
               onUpdateEntry={onUpdateEntry}
             />
-          </div>
+          ) : (
+            <>
+              <div
+                ref={headerContentRef}
+                className="flex-shrink-0 space-y-4 p-4"
+              >
+                <VizPageHeader
+                  title="Constellation"
+                  subtitle="Drag to pan, scroll to zoom, and click a star to see the entry behind it."
+                />
+
+                <FilterBar
+                  sortMode={sortMode}
+                  onSortModeChange={handleSortModeChange}
+                  categories={categories}
+                  filterCategories={filterCategories}
+                  onToggleFilterCategory={handleToggleFilterCategory}
+                  onResetFilters={handleResetFilters}
+                  hasSelection={hasSelection}
+                />
+              </div>
+
+              {/*
+               * Sidebar panel stack - only takes up space once there's a
+               * selection, same as before this restructure (see
+               * `containerLayout`'s own comment above for why `sidebarWidth`
+               * still only reacts to `hasSelection`, not to this container's
+               * own always-present background). `flex-1 overflow-y-auto` is
+               * what lets this region scroll independently within the
+               * container's own `maxHeight` cap above, rather than growing the
+               * container past the bottom of the screen.
+               */}
+              {hasSelection && (
+                <div className="dark-scrollbar flex-1 overflow-y-auto px-4 pb-4">
+                  <SidebarPanelStack
+                    selectedEntries={selectedEntries}
+                    sortMode={sortMode}
+                    categoryGroups={categoryGroups}
+                    onExpand={handleExpandPanel}
+                    onClose={handleClosePanel}
+                  />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {expandedEntryId && (
+          <BookmarkRail
+            selectedEntries={selectedEntries}
+            focusedEntryId={expandedEntryId}
+            onSelect={handleExpandPanel}
+          />
         )}
       </div>
 

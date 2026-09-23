@@ -461,6 +461,11 @@ import { formatSingleDate } from '../utils/formatEntryDate';
 import EntryTooltip from './EntryTooltip';
 import VizEmptyState from './VizEmptyState';
 import { assignLanes, assignLaneAroundRanges } from '../utils/laneAssignment';
+import {
+  FOCUSED_GLOW_OPACITY,
+  FOCUSED_GLOW_STROKE_WIDTH,
+  FOCUSED_RING_STROKE_WIDTH,
+} from '../utils/focusHighlight';
 
 interface SpiralTimelineProps {
   entries: Entry[];
@@ -2017,6 +2022,10 @@ export default function SpiralTimeline({
 
               {ranges.map(({ entry, pathD, color }) => {
                 const isOpened = openedEntryIdSet.has(entry.id);
+                // FOCUSED ENTRY: the one the sidebar's FocusedEntryView is
+                // showing gets a brighter opened highlight - see
+                // utils/focusHighlight.ts.
+                const isFocused = entry.id === expandedEntryId;
                 const isFilteredOut = !activeCategorySet.has(
                   entry.activityType
                 );
@@ -2104,8 +2113,16 @@ export default function SpiralTimeline({
                           d={pathD}
                           fill="none"
                           stroke={OPENED_HIGHLIGHT_COLOR}
-                          strokeWidth={OPENED_ARC_GLOW_EXTRA_RADIUS * 2}
-                          strokeOpacity={OPENED_ARC_GLOW_OPACITY}
+                          strokeWidth={
+                            (isFocused
+                              ? FOCUSED_GLOW_STROKE_WIDTH
+                              : OPENED_ARC_GLOW_EXTRA_RADIUS) * 2
+                          }
+                          strokeOpacity={
+                            isFocused
+                              ? FOCUSED_GLOW_OPACITY
+                              : OPENED_ARC_GLOW_OPACITY
+                          }
                           filter="url(#opened-arc-glow)"
                           className="pointer-events-none"
                         />
@@ -2113,7 +2130,11 @@ export default function SpiralTimeline({
                           d={pathD}
                           fill="none"
                           stroke={OPENED_HIGHLIGHT_COLOR}
-                          strokeWidth={ARC_RING_WIDTH * 2}
+                          strokeWidth={
+                            (isFocused
+                              ? FOCUSED_RING_STROKE_WIDTH
+                              : ARC_RING_WIDTH) * 2
+                          }
                           className="pointer-events-none"
                         />
                       </>
@@ -2142,6 +2163,7 @@ export default function SpiralTimeline({
 
               {points.map(({ entry, x, y, color }) => {
                 const isOpened = openedEntryIdSet.has(entry.id);
+                const isFocused = entry.id === expandedEntryId;
                 const isFilteredOut = !activeCategorySet.has(
                   entry.activityType
                 );
@@ -2162,8 +2184,10 @@ export default function SpiralTimeline({
                         r={POINT_RADIUS + 5}
                         fill="none"
                         stroke={OPENED_HIGHLIGHT_COLOR}
-                        strokeWidth={4}
-                        strokeOpacity={GLOW_OPACITY}
+                        strokeWidth={isFocused ? FOCUSED_GLOW_STROKE_WIDTH : 4}
+                        strokeOpacity={
+                          isFocused ? FOCUSED_GLOW_OPACITY : GLOW_OPACITY
+                        }
                         filter="url(#opened-spiral-glow)"
                         className="pointer-events-none"
                       />
@@ -2229,7 +2253,9 @@ export default function SpiralTimeline({
                         r={POINT_RADIUS + 3}
                         fill="none"
                         stroke={OPENED_HIGHLIGHT_COLOR}
-                        strokeWidth={1.5}
+                        strokeWidth={
+                          isFocused ? FOCUSED_RING_STROKE_WIDTH : 1.5
+                        }
                         className="pointer-events-none"
                       />
                     )}

@@ -132,6 +132,11 @@ import { getActivityColor } from '../utils/colors';
 // across both visualization views rather than duplicated per-component.
 import EntryTooltip from './EntryTooltip';
 import VizEmptyState from './VizEmptyState';
+import {
+  FOCUSED_GLOW_OPACITY,
+  FOCUSED_GLOW_STROKE_WIDTH,
+  FOCUSED_RING_STROKE_WIDTH,
+} from '../utils/focusHighlight';
 
 interface StarMapProps {
   entries: Entry[];
@@ -826,6 +831,10 @@ export default function StarMap({
 
           {stars.map(({ entry, x, y, radius, color }) => {
             const isOpened = openedEntryIdSet.has(entry.id);
+            // FOCUSED ENTRY: the one the sidebar's FocusedEntryView is
+            // showing gets a brighter opened highlight - see
+            // utils/focusHighlight.ts.
+            const isFocused = entry.id === expandedEntryId;
             const isFilteredOut = !activeCategorySet.has(entry.activityType);
             return (
               // Opacity is set on the whole group (glow + star + ring)
@@ -848,8 +857,8 @@ export default function StarMap({
                     r={radius + 5}
                     fill="none"
                     stroke={OPENED_HIGHLIGHT_COLOR}
-                    strokeWidth={4}
-                    strokeOpacity={0.6}
+                    strokeWidth={isFocused ? FOCUSED_GLOW_STROKE_WIDTH : 4}
+                    strokeOpacity={isFocused ? FOCUSED_GLOW_OPACITY : 0.6}
                     filter="url(#opened-star-glow)"
                     className="pointer-events-none"
                   />
@@ -893,7 +902,7 @@ export default function StarMap({
                     r={radius + 3}
                     fill="none"
                     stroke={OPENED_HIGHLIGHT_COLOR}
-                    strokeWidth={1.5}
+                    strokeWidth={isFocused ? FOCUSED_RING_STROKE_WIDTH : 1.5}
                     className="pointer-events-none"
                   />
                 )}

@@ -171,6 +171,11 @@ import { getActivityColor } from '../utils/colors';
 import EntryTooltip from './EntryTooltip';
 import VizEmptyState from './VizEmptyState';
 import { assignLanes } from '../utils/laneAssignment';
+import {
+  FOCUSED_GLOW_OPACITY,
+  FOCUSED_GLOW_STROKE_WIDTH,
+  FOCUSED_RING_STROKE_WIDTH,
+} from '../utils/focusHighlight';
 
 interface LinearTimelineProps {
   entries: Entry[];
@@ -1058,6 +1063,10 @@ export default function LinearTimeline({
             // work across the full length.
             ranges.map(({ entry, cxStart, cxEnd, color, lane }) => {
               const isOpened = openedEntryIdSet.has(entry.id);
+              // FOCUSED ENTRY: the one the sidebar's FocusedEntryView is
+              // showing gets a brighter opened highlight - see
+              // utils/focusHighlight.ts.
+              const isFocused = entry.id === expandedEntryId;
               const isFilteredOut = !activeCategorySet.has(entry.activityType);
               const y = BASELINE_Y + (lane + 1) * LANE_HEIGHT;
               return (
@@ -1090,8 +1099,8 @@ export default function LinearTimeline({
                       {...capsuleOutlineRect(cxStart, cxEnd, y, 5)}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}
-                      strokeWidth={4}
-                      strokeOpacity={0.6}
+                      strokeWidth={isFocused ? FOCUSED_GLOW_STROKE_WIDTH : 4}
+                      strokeOpacity={isFocused ? FOCUSED_GLOW_OPACITY : 0.6}
                       filter="url(#opened-point-glow)"
                       className="pointer-events-none"
                     />
@@ -1146,7 +1155,7 @@ export default function LinearTimeline({
                       {...capsuleOutlineRect(cxStart, cxEnd, y, 3)}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}
-                      strokeWidth={1.5}
+                      strokeWidth={isFocused ? FOCUSED_RING_STROKE_WIDTH : 1.5}
                       className="pointer-events-none"
                     />
                   )}
@@ -1156,6 +1165,7 @@ export default function LinearTimeline({
           {isReady &&
             points.map(({ entry, cx, color }) => {
               const isOpened = openedEntryIdSet.has(entry.id);
+              const isFocused = entry.id === expandedEntryId;
               const isFilteredOut = !activeCategorySet.has(entry.activityType);
               return (
                 // SELECTED-ENTRY HIGHLIGHT: same per-entry <g> + opacity
@@ -1177,8 +1187,8 @@ export default function LinearTimeline({
                       r={POINT_RADIUS + 5}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}
-                      strokeWidth={4}
-                      strokeOpacity={0.6}
+                      strokeWidth={isFocused ? FOCUSED_GLOW_STROKE_WIDTH : 4}
+                      strokeOpacity={isFocused ? FOCUSED_GLOW_OPACITY : 0.6}
                       filter="url(#opened-point-glow)"
                       className="pointer-events-none"
                     />
@@ -1219,7 +1229,7 @@ export default function LinearTimeline({
                       r={POINT_RADIUS + 3}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}
-                      strokeWidth={1.5}
+                      strokeWidth={isFocused ? FOCUSED_RING_STROKE_WIDTH : 1.5}
                       className="pointer-events-none"
                     />
                   )}

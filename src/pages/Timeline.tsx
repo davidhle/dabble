@@ -100,9 +100,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import BookmarkRail from '../components/BookmarkRail';
 import EditModeBanner from '../components/EditModeBanner';
 import EditModeToggle from '../components/EditModeToggle';
 import FilterBar from '../components/FilterBar';
+import FocusedEntryView from '../components/FocusedEntryView';
 import LinearTimeline from '../components/LinearTimeline';
 import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
@@ -146,8 +148,10 @@ export default function Timeline({
     expandedEntryId,
     handleEntryClick,
     handleExpandPanel,
-    handleMinimizePanel,
     handleClosePanel,
+    canUndoFocus,
+    handleUndoFocus,
+    handleExitFocus,
     sortMode,
     handleSortModeChange,
     categoryGroups,
@@ -216,6 +220,7 @@ export default function Timeline({
   // identical to Constellation.tsx's own measurement setup; see its
   // layout comment for the full reasoning behind each. `topOffset` is
   // still handed to LinearTimeline below - see the STAGE 2 comment above.
+  const isFocused = expandedEntryId !== null;
   const containerRef = useRef<HTMLDivElement>(null);
   const headerContentRef = useRef<HTMLDivElement>(null);
   const [containerLayout, setContainerLayout] = useState({ top: 0, left: 0 });
@@ -242,7 +247,10 @@ export default function Timeline({
       observer.disconnect();
       window.removeEventListener('resize', updateLayout);
     };
-  }, []);
+    // Re-run when focused mode toggles: FocusedEntryView swaps in its own
+    // header block (also attached to `headerContentRef`), so the observer
+    // has to re-attach to whichever header element is now mounted.
+  }, [isFocused]);
 
   // The unified container's live rendered width, passed to LinearTimeline
   // so its AUTO-RECENTER effect can keep its horizontal-centering math
@@ -275,44 +283,85 @@ export default function Timeline({
        * UNIFIED SIDEBAR CONTAINER - identical structure/reasoning to
        * Constellation.tsx's own container; see its layout comment.
        */}
-      <div
-        ref={containerRef}
-        className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
-        style={{
-          width: `calc(33vw - ${containerLayout.left}px)`,
-          maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
-        }}
-      >
-        <div ref={headerContentRef} className="flex-shrink-0 space-y-4 p-4">
-          <VizPageHeader
-            title="Linear Timeline"
-            subtitle="Drag to pan, scroll to zoom, and click a point to see the entry behind it."
-          />
-
-          <FilterBar
-            sortMode={sortMode}
-            onSortModeChange={handleSortModeChange}
-            categories={categories}
-            filterCategories={filterCategories}
-            onToggleFilterCategory={handleToggleFilterCategory}
-            onResetFilters={handleResetFilters}
-            hasSelection={hasSelection}
-          />
-        </div>
-
-        {hasSelection && (
-          <div className="dark-scrollbar flex-1 overflow-y-auto px-4 pb-4">
-            <SidebarPanelStack
+      {/*
+       * Wrapper shared by the sidebar container and the focused-mode
+       * BookmarkRail, which pokes out past the container's right edge -
+       * see BookmarkRail.tsx's OUTSIDE THE SIDEBAR comment for why the
+       * rail has to be the container's sibling rather than its child.
+       * `w-fit` shrink-wraps the container, so the rail's `left: 100%` is
+       * the container's live right edge. `relative z-10` lifts both above
+       * the `fixed` canvas, the same job the container's own `z-10` did
+       * before this wrapper existed.
+       */}
+      <div className="relative z-10 w-fit">
+        <div
+          ref={containerRef}
+          className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
+          style={{
+            width: `calc(33vw - ${containerLayout.left}px)`,
+            maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
+          }}
+        >
+          {/*
+           * FOCUSED MODE - see FocusedEntryView.tsx: while an entry is
+           * expanded, it takes over the whole sidebar in place of the page
+           * header, FilterBar, and panel stack below.
+           */}
+          {expandedEntryId ? (
+            <FocusedEntryView
               selectedEntries={selectedEntries}
-              sortMode={sortMode}
-              categoryGroups={categoryGroups}
-              onExpand={handleExpandPanel}
-              onMinimize={handleMinimizePanel}
-              onClose={handleClosePanel}
+              focusedEntryId={expandedEntryId}
+              headerRef={headerContentRef}
+              canUndo={canUndoFocus}
+              onBack={handleExitFocus}
+              onUndo={handleUndoFocus}
               onEdit={onEditEntry}
+              onClose={handleClosePanel}
               onUpdateEntry={onUpdateEntry}
             />
-          </div>
+          ) : (
+            <>
+              <div
+                ref={headerContentRef}
+                className="flex-shrink-0 space-y-4 p-4"
+              >
+                <VizPageHeader
+                  title="Linear Timeline"
+                  subtitle="Drag to pan, scroll to zoom, and click a point to see the entry behind it."
+                />
+
+                <FilterBar
+                  sortMode={sortMode}
+                  onSortModeChange={handleSortModeChange}
+                  categories={categories}
+                  filterCategories={filterCategories}
+                  onToggleFilterCategory={handleToggleFilterCategory}
+                  onResetFilters={handleResetFilters}
+                  hasSelection={hasSelection}
+                />
+              </div>
+
+              {hasSelection && (
+                <div className="dark-scrollbar flex-1 overflow-y-auto px-4 pb-4">
+                  <SidebarPanelStack
+                    selectedEntries={selectedEntries}
+                    sortMode={sortMode}
+                    categoryGroups={categoryGroups}
+                    onExpand={handleExpandPanel}
+                    onClose={handleClosePanel}
+                  />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {expandedEntryId && (
+          <BookmarkRail
+            selectedEntries={selectedEntries}
+            focusedEntryId={expandedEntryId}
+            onSelect={handleExpandPanel}
+          />
         )}
       </div>
 

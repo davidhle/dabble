@@ -128,15 +128,21 @@ export interface EntrySelectionContextValue {
   expandedEntryId: string | null;
   handleEntryClick: (entry: Entry) => void;
   handleExpandPanel: (entryId: string) => void;
-  /**
-   * Collapses one specific expanded panel back to its minimized row - the
-   * mirror of handleExpandPanel, wired to EntryPanel.tsx's minimize button
-   * on an EXPANDED panel (see that file's PanelIconButton row). Targeted
-   * by entryId rather than just "collapse whichever is expanded" so it
-   * stays correct even though only one panel is ever expanded at a time.
-   */
-  handleMinimizePanel: (entryId: string) => void;
   handleClosePanel: (entryId: string) => void;
+  /**
+   * FOCUSED MODE HISTORY - see the "FOCUSED MODE" comment above
+   * `focusHistory`'s state below. `canUndoFocus` is whether
+   * `handleUndoFocus` currently has anywhere to go back to (drives the
+   * Undo button's disabled state in FocusedEntryView.tsx).
+   */
+  canUndoFocus: boolean;
+  /** Steps back to the previously focused entry, popping the history stack. */
+  handleUndoFocus: () => void;
+  /**
+   * Exits focused mode entirely (the focused view's Back button) - collapses
+   * the expanded panel, which also clears the history stack.
+   */
+  handleExitFocus: () => void;
   sortMode: SortMode;
   handleSortModeChange: (mode: SortMode) => void;
   categoryGroups: CategoryGroup[];
@@ -212,6 +218,28 @@ const EntrySelectionContext = createContext<EntrySelectionContextValue | null>(
  * rest of the list, so a panel doesn't jump around in the stack just
  * because the user is clicking through it.
  */
+/**
+ * Finds where `handleUndoFocus` should go back to: the most recent history
+ * id that's still open in the sidebar AND isn't the entry already in
+ * focus (closing an entry, or bouncing A -> B -> A, can leave such ids at
+ * the top of the stack - stepping "back" to either would be a no-op).
+ * Returns the target plus the stack left over once it's popped, or a
+ * `null` target when there's nowhere to go back to.
+ */
+function findUndoTarget(
+  history: string[],
+  currentId: string | null,
+  openIds: Set<string>
+): { target: string | null; rest: string[] } {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const id = history[i];
+    if (id !== currentId && openIds.has(id)) {
+      return { target: id, rest: history.slice(0, i) };
+    }
+  }
+  return { target: null, rest: [] };
+}
+
 function insertSortedByTimestampDesc(
   list: SelectedEntry[],
   selectedEntry: SelectedEntry
@@ -411,20 +439,6 @@ export function EntrySelectionProvider({
     [cancelResetPending]
   );
 
-  const handleMinimizePanel = useCallback(
-    (entryId: string) => {
-      cancelResetPending();
-      setSelectedEntries(prev =>
-        prev.map(selected =>
-          selected.entry.id === entryId
-            ? { ...selected, expanded: false }
-            : selected
-        )
-      );
-    },
-    [cancelResetPending]
-  );
-
   const handleClosePanel = useCallback(
     (entryId: string) => {
       cancelResetPending();
@@ -469,6 +483,81 @@ export function EntrySelectionProvider({
     () => selectedEntries.find(selected => selected.expanded)?.entry.id ?? null,
     [selectedEntries]
   );
+
+  // ──────────────────────────────────────────────────────────────────────
+  // FOCUSED MODE: HISTORY STACK
+  // ──────────────────────────────────────────────────────────────────────
+  // "Focused mode" (FocusedEntryView.tsx's full-sidebar takeover) is simply
+  // `expandedEntryId !== null` - no separate flag. That's deliberate: every
+  // canvas's recenter effect is already keyed on `expandedEntryId`, so
+  // switching focus by ANY route (a bookmark click, a canvas click, an
+  // Undo) recenters the canvas with no extra wiring.
+  //
+  // `focusHistory` is the stack of PREVIOUSLY focused ids. Rather than
+  // pushing from every handler that can move focus (handleEntryClick,
+  // handleExpandPanel, ...), one effect watches `expandedEntryId` itself:
+  //   - it went null (Back, Escape, closing/deselecting the focused entry)
+  //     -> focused mode ended, so the history is cleared; the next click
+  //     into any entry starts a fresh history.
+  //   - it moved from one id to another -> push the outgoing id, unless
+  //     the move WAS an undo (`isUndoingFocusRef`), which already popped.
+  const [focusHistory, setFocusHistory] = useState<string[]>([]);
+  const previousFocusedIdRef = useRef<string | null>(null);
+  const isUndoingFocusRef = useRef(false);
+
+  useEffect(() => {
+    const previousId = previousFocusedIdRef.current;
+    previousFocusedIdRef.current = expandedEntryId;
+    const wasUndo = isUndoingFocusRef.current;
+    isUndoingFocusRef.current = false;
+
+    if (expandedEntryId === null) {
+      setFocusHistory(prev => (prev.length > 0 ? [] : prev));
+      return;
+    }
+    if (!wasUndo && previousId !== null && previousId !== expandedEntryId) {
+      setFocusHistory(prev => [...prev, previousId]);
+    }
+  }, [expandedEntryId]);
+
+  const openedEntryIdSet = useMemo(
+    () => new Set(openedEntryIds),
+    [openedEntryIds]
+  );
+
+  const canUndoFocus = useMemo(
+    () =>
+      findUndoTarget(focusHistory, expandedEntryId, openedEntryIdSet).target !==
+      null,
+    [focusHistory, expandedEntryId, openedEntryIdSet]
+  );
+
+  const handleUndoFocus = useCallback(() => {
+    const { target, rest } = findUndoTarget(
+      focusHistory,
+      expandedEntryId,
+      openedEntryIdSet
+    );
+    if (target === null) return;
+    cancelResetPending();
+    isUndoingFocusRef.current = true;
+    setFocusHistory(rest);
+    setSelectedEntries(prev =>
+      prev.map(selected => ({
+        ...selected,
+        expanded: selected.entry.id === target,
+      }))
+    );
+  }, [focusHistory, expandedEntryId, openedEntryIdSet, cancelResetPending]);
+
+  const handleExitFocus = useCallback(() => {
+    cancelResetPending();
+    setSelectedEntries(prev =>
+      prev.map(selected =>
+        selected.expanded ? { ...selected, expanded: false } : selected
+      )
+    );
+  }, [cancelResetPending]);
 
   // The actual Escape-key listener - two-press confirmation for a full
   // reset, immediate collapse for an expanded panel. Declared here
@@ -543,8 +632,10 @@ export function EntrySelectionProvider({
       expandedEntryId,
       handleEntryClick,
       handleExpandPanel,
-      handleMinimizePanel,
       handleClosePanel,
+      canUndoFocus,
+      handleUndoFocus,
+      handleExitFocus,
       sortMode,
       handleSortModeChange,
       categoryGroups,
@@ -567,8 +658,10 @@ export function EntrySelectionProvider({
       expandedEntryId,
       handleEntryClick,
       handleExpandPanel,
-      handleMinimizePanel,
       handleClosePanel,
+      canUndoFocus,
+      handleUndoFocus,
+      handleExitFocus,
       sortMode,
       handleSortModeChange,
       categoryGroups,
