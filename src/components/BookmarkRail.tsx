@@ -32,20 +32,17 @@
  * BEHIND the container (the container is `z-10`, this rail `z-0`, both
  * within the wrapper's own stacking context), so each tab reads as
  * emerging from underneath the page rather than floating next to it.
- * Each tab's left padding is widened by the same amount so its text
- * clears the tucked-under strip.
  *
- * STICKY-NOTE LOOK: each tab is a solid fill of its entry's category
+ * STICKY-NOTE LOOK: each tab is a plain block of its entry's category
  * color - the same color as its star/point/arc and its filter chip - so
  * the rail reads as a row of colored sticky notes, identical in both
- * themes. Text is `text-gray-900` regardless of theme or color, the SAME
- * contrast treatment FilterBar.tsx's active category chips use for text
- * on a solid category-color fill (see the comment on that chip's
- * className) rather than separate contrast logic here.
+ * themes. Deliberately NO text on the tab: no single text color stays
+ * legible across every category color at this size (dark text on the
+ * darker blues falls well under readable contrast), so identification is
+ * left entirely to the hover tooltip (title + date) and, for screen
+ * readers, each tab's `aria-label`.
  *
- * SIZE: deliberately narrow - a tab peeking out, not a card. Only the
- * first few characters of the title fit; the hover tooltip carries the
- * full title and date, and the aria-label the full title.
+ * SIZE: deliberately narrow - a tab peeking out, not a card.
  *
  * TOOLTIP PORTAL: the hover tooltip renders into `document.body`. The
  * wrapper this lives in has no `backdrop-filter`, so an inline `fixed`
@@ -98,7 +95,7 @@ export default function BookmarkRail({
       // the canvas past the sidebar's bottom. Right padding leaves room
       // for the hover nudge and shadow, which the scroll container would
       // otherwise clip.
-      className="dark-scrollbar absolute top-5 z-0 flex max-h-[calc(100%-2.5rem)] w-16 flex-col gap-1.5 overflow-y-auto py-0.5 pr-2"
+      className="dark-scrollbar absolute top-5 z-0 flex max-h-[calc(100%-2.5rem)] w-9 flex-col gap-1.5 overflow-y-auto py-0.5 pr-2"
       style={{ left: `calc(100% - ${TAB_TUCK}px)` }}
     >
       {entries.map(entry => (
@@ -124,14 +121,10 @@ export default function BookmarkRail({
           }
           onMouseLeave={() => setHovered(null)}
           aria-label={`Focus ${entry.title}`}
-          className="flex-shrink-0 truncate rounded-r-md py-1.5 pr-1 text-left text-[10px] font-semibold leading-tight text-gray-900 shadow-md transition-transform duration-150 hover:translate-x-1"
-          style={{
-            paddingLeft: TAB_TUCK + 4,
-            backgroundColor: getActivityColor(entry.activityType),
-          }}
-        >
-          {entry.title}
-        </button>
+          // `h-6`: a fixed height now that there's no text to size it.
+          className="h-6 flex-shrink-0 rounded-r-md shadow-md transition-transform duration-150 hover:translate-x-1"
+          style={{ backgroundColor: getActivityColor(entry.activityType) }}
+        />
       ))}
 
       {hovered &&
