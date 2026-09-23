@@ -350,19 +350,28 @@ function App() {
                     <Constellation
                       entries={entries}
                       onEditEntry={setEditingEntry}
+                      onUpdateEntry={updateEntry}
                     />
                   }
                 />
                 <Route
                   path="linear"
                   element={
-                    <Timeline entries={entries} onEditEntry={setEditingEntry} />
+                    <Timeline
+                      entries={entries}
+                      onEditEntry={setEditingEntry}
+                      onUpdateEntry={updateEntry}
+                    />
                   }
                 />
                 <Route
                   path="spiral"
                   element={
-                    <Spiral entries={entries} onEditEntry={setEditingEntry} />
+                    <Spiral
+                      entries={entries}
+                      onEditEntry={setEditingEntry}
+                      onUpdateEntry={updateEntry}
+                    />
                   }
                 />
               </Route>

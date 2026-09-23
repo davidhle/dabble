@@ -37,6 +37,8 @@ interface SidebarPanelStackProps {
    * full entry object.
    */
   onEdit: (entry: Entry) => void;
+  /** Wired to App.tsx's `updateEntry` - see EntryPanel.tsx's `onUpdate`. */
+  onUpdateEntry: (entry: Entry) => void;
 }
 
 export default function SidebarPanelStack({
@@ -47,6 +49,7 @@ export default function SidebarPanelStack({
   onMinimize,
   onClose,
   onEdit,
+  onUpdateEntry,
 }: SidebarPanelStackProps) {
   return (
     <div className="flex flex-col gap-3">
@@ -79,6 +82,7 @@ export default function SidebarPanelStack({
               onMinimize={() => onMinimize(entry.id)}
               onClose={() => onClose(entry.id)}
               onEdit={() => onEdit(entry)}
+              onUpdate={onUpdateEntry}
             />
           ))}
         </>
@@ -100,6 +104,7 @@ export default function SidebarPanelStack({
                 onMinimize={() => onMinimize(entry.id)}
                 onClose={() => onClose(entry.id)}
                 onEdit={() => onEdit(entry)}
+                onUpdate={onUpdateEntry}
               />
             ))}
           </div>

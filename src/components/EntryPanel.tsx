@@ -55,14 +55,23 @@
  * a purely cosmetic touch to break up what's otherwise an all-caps
  * text-only label, applied consistently here since this is the one
  * shared panel every visualization view renders through (see above).
+ *
+ * REFLECTIONS (Stage 1 - data model + basic functionality): an "Add
+ * Reflection" button opens AddReflectionForm.tsx inline, and any saved
+ * reflections are listed chronologically below the entry's own content.
+ * This is a deliberately minimal placeholder display - Stage 2 reworks it
+ * into a dedicated full-sidebar entry view with an Original/Reflections
+ * toggle.
  */
 
-import { Entry } from '../types/Entry';
+import { useState } from 'react';
+import { Entry, Reflection } from '../types/Entry';
 import { getActivityColor } from '../utils/colors';
 import { getCategoryName } from '../utils/categories';
 import { linkify, LINK_CLASSNAME } from '../utils/linkify';
 import { getMediaLinkLabel } from '../utils/mediaLinks';
-import { formatEntryDate } from '../utils/formatEntryDate';
+import { formatEntryDate, formatSingleDate } from '../utils/formatEntryDate';
+import AddReflectionForm from './AddReflectionForm';
 import { formatLocationDisplay } from '../utils/formatLocation';
 
 interface EntryPanelProps {
@@ -88,6 +97,12 @@ interface EntryPanelProps {
    * Also not used by a minimized row, for the same reason as `onEdit`.
    */
   onMinimize: () => void;
+  /**
+   * Persists a modified copy of this entry (same id) - wired to App.tsx's
+   * `updateEntry`. Used to append a new reflection; see the REFLECTIONS
+   * comment at the top of this file.
+   */
+  onUpdate: (entry: Entry) => void;
 }
 
 /**
@@ -165,7 +180,10 @@ export default function EntryPanel({
   onClose,
   onEdit,
   onMinimize,
+  onUpdate,
 }: EntryPanelProps) {
+  const [isAddingReflection, setIsAddingReflection] = useState(false);
+
   // Looked up from the dynamic category list rather than a fixed option
   // list, so a user-created category's name displays correctly here too -
   // see the DYNAMIC CATEGORIES comment in AddEntryForm.tsx for how those
@@ -239,6 +257,19 @@ export default function EntryPanel({
   // Appended only when present - see the render below for the "no empty
   // separator" behavior when an entry has no location.
   const formattedLocation = formatLocationDisplay(entry.location);
+
+  // Chronological (oldest first). ISO strings sort correctly as strings.
+  const sortedReflections = [...(entry.reflections ?? [])].sort((a, b) =>
+    a.writtenDate.localeCompare(b.writtenDate)
+  );
+
+  const handleSaveReflection = (reflection: Reflection) => {
+    onUpdate({
+      ...entry,
+      reflections: [...(entry.reflections ?? []), reflection],
+    });
+    setIsAddingReflection(false);
+  };
 
   return (
     <div
@@ -445,6 +476,80 @@ export default function EntryPanel({
               ))}
             </div>
           </div>
+        )}
+
+        {/*
+         * Reflections - Stage 1 placeholder display; see the REFLECTIONS
+         * comment at the top of this file. Same chip/link styling as the
+         * entry's own Mood and Media Links sections above.
+         */}
+        {sortedReflections.length > 0 && (
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
+              🪞 Reflections
+            </p>
+            <div className="mt-1.5 space-y-3">
+              {sortedReflections.map(reflection => (
+                <div
+                  key={reflection.id}
+                  className="border-l-2 pl-3"
+                  style={{ borderColor: 'var(--panel-border-color)' }}
+                >
+                  <p className="text-xs text-[var(--text-muted-color)]">
+                    {/* Date-only, stored at midnight UTC - see Reflection.writtenDate. */}
+                    {formatSingleDate(new Date(reflection.writtenDate), false)}
+                  </p>
+                  {reflection.mood && reflection.mood.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {reflection.mood.map(mood => (
+                        <span
+                          key={mood}
+                          className="inline-flex items-center rounded-full bg-teal-400/20 px-2.5 py-0.5 text-xs font-medium text-[var(--teal-accent-text)]"
+                        >
+                          {mood}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--text-secondary-color)]">
+                    {linkify(reflection.text)}
+                  </p>
+                  {reflection.mediaLinks &&
+                    reflection.mediaLinks.length > 0 && (
+                      <div className="mt-1 flex flex-col gap-1">
+                        {reflection.mediaLinks.map((media, index) => (
+                          <a
+                            key={index}
+                            href={media.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`text-sm ${LINK_CLASSNAME}`}
+                          >
+                            {getMediaLinkLabel(media.url)}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {isAddingReflection ? (
+          <AddReflectionForm
+            entry={entry}
+            onSave={handleSaveReflection}
+            onCancel={() => setIsAddingReflection(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsAddingReflection(true)}
+            className="rounded-md bg-[var(--field-tint-2)] px-3 py-1.5 text-sm font-medium text-[var(--text-secondary-color)] hover:bg-[var(--field-tint-3)]"
+          >
+            + Add Reflection
+          </button>
         )}
       </div>
     </div>

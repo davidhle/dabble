@@ -97,14 +97,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import {
-  Entry,
-  MediaLink,
-  MediaType,
-  COMMON_MOODS,
-  SUGGESTED_TAGS,
-  createEntry,
-} from '../types/Entry';
+import { Entry, MediaLink, SUGGESTED_TAGS, createEntry } from '../types/Entry';
 import { Category, DEFAULT_CATEGORIES } from '../types/Category';
 import {
   loadCategories,
@@ -114,6 +107,8 @@ import {
   previewCategoryColorOptions,
 } from '../utils/categories';
 import { COUNTRIES } from '../data/countries';
+import MoodPicker from './MoodPicker';
+import MediaLinksInput from './MediaLinksInput';
 
 /**
  * Sentinel <option> value for the trailing "+ Add new category" dropdown
@@ -240,15 +235,8 @@ export default function AddEntryForm({
 
   // ─── Step 2 Fields: Reflections & Media ───
   const [moods, setMoods] = useState<string[]>([]);
-  // Free-text entry for a custom mood not covered by COMMON_MOODS' preset
-  // chips - same "type + Enter/Add button" interaction as the Tags input
-  // above, so a mood the user types is added to `moods` (and rendered
-  // with the same selected-chip styling as a toggled preset) rather than
-  // requiring a fixed vocabulary.
-  const [moodInput, setMoodInput] = useState('');
   const [notes, setNotes] = useState('');
   const [mediaLinks, setMediaLinks] = useState<MediaLink[]>([]);
-  const [mediaUrl, setMediaUrl] = useState('');
 
   // ─── Form State ───
   const [errors, setErrors] = useState<FormErrors>({});
@@ -282,8 +270,6 @@ export default function AddEntryForm({
     setIsAddingCategory(false);
     setNewCategoryName('');
     setTagInput('');
-    setMoodInput('');
-    setMediaUrl('');
     setErrors({});
     setIsConfirmingDelete(false);
 
@@ -588,7 +574,6 @@ export default function AddEntryForm({
     setTags([]);
     setTagInput('');
     setMoods([]);
-    setMoodInput('');
     setMediaLinks([]);
     setCountry('');
     setCity('');
@@ -600,7 +585,6 @@ export default function AddEntryForm({
     setTimeOnly('');
     setIsMultiDay(false);
     setEndDate('');
-    setMediaUrl('');
     setErrors({});
   }, [categories]);
 
@@ -740,72 +724,9 @@ export default function AddEntryForm({
     }
   };
 
-  // ─── Mood Management ───
-
-  const toggleMood = (mood: string) => {
-    if (moods.includes(mood)) {
-      setMoods(moods.filter(m => m !== mood));
-    } else {
-      setMoods([...moods, mood]);
-    }
-  };
-
-  // Mirrors addTag's shape exactly (trim, ignore blank/duplicate, clear the
-  // input) so a custom mood is added with the same interaction as a tag -
-  // the one difference is moods aren't lowercased, since (unlike tags)
-  // they're displayed back to the user as typed ("Excited", not
-  // "excited") to match COMMON_MOODS' own capitalized presets.
-  const addMood = (mood: string) => {
-    const trimmedMood = mood.trim();
-    if (trimmedMood && !moods.includes(trimmedMood)) {
-      setMoods([...moods, trimmedMood]);
-    }
-    setMoodInput('');
-  };
-
-  const handleMoodInputKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      addMood(moodInput);
-    }
-  };
-
-  // ─── Media Link Management ───
-  //
-  // INVESTIGATION NOTE (media links "not appearing" after submit): tracing
-  // this end to end - addMediaLink below pushes onto `mediaLinks` state,
-  // handleSubmit passes that same array straight into createEntry's
-  // `mediaLinks` field with no transformation, and entriesStorage.ts's
-  // saveEntries just JSON.stringifies the whole entry - confirms a media
-  // link added here (via the "Add" button) DOES reach localStorage intact.
-  // The actual bug was downstream: EntryPanel.tsx (the shared sidebar
-  // panel Constellation.tsx/Timeline.tsx both render) had no Media Links
-  // section at all, so a correctly-saved link had nowhere to display - see
-  // EntryPanel.tsx's own comment on its new Media Links section.
-
-  const addMediaLink = () => {
-    if (mediaUrl.trim()) {
-      const newMedia: MediaLink = {
-        // Was `'Video' as any` - an `any` escape hatch that happened to
-        // match MediaType.Video's runtime value regardless of the actual
-        // URL's platform (an Instagram or TikTok link would still be
-        // stored typed as "Video"). Using the enum member directly fixes
-        // the type-checking bypass; getMediaLinkLabel in
-        // utils/mediaLinks.ts (used by EntryPanel.tsx's display) derives
-        // the platform label from the URL's own hostname instead of
-        // trusting this field, since this form has no per-platform input
-        // to set it accurately anyway.
-        type: MediaType.Video,
-        url: mediaUrl.trim(),
-      };
-      setMediaLinks([...mediaLinks, newMedia]);
-      setMediaUrl('');
-    }
-  };
-
-  const removeMediaLink = (index: number) => {
-    setMediaLinks(mediaLinks.filter((_, i) => i !== index));
-  };
+  // Mood and media link editing (plus their in-progress text inputs) live
+  // in the shared MoodPicker.tsx / MediaLinksInput.tsx components, so
+  // AddReflectionForm.tsx can reuse them unchanged.
 
   if (!isOpen) return null;
 
@@ -1467,81 +1388,7 @@ export default function AddEntryForm({
                      * ═══════════════════════════════════════════ */
                     <div className="space-y-4">
                       {/* Mood Selector */}
-                      <div>
-                        <label className="block text-sm font-medium text-[var(--text-secondary-color)]">
-                          Mood
-                        </label>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {COMMON_MOODS.map(mood => (
-                            <button
-                              key={mood}
-                              type="button"
-                              onClick={() => toggleMood(mood)}
-                              // bg-teal-400/20 + text-[var(--teal-accent-text)]
-                              // (not --accent-color) deliberately - the same
-                              // Mood pill EntryPanel.tsx uses for this exact
-                              // entry's moods once saved (see its own
-                              // comment), so the preview while composing
-                              // already looks like the real thing, and Mood
-                              // stays visually distinct from a plain
-                              // primary-action control.
-                              className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
-                                moods.includes(mood)
-                                  ? 'bg-teal-400/20 text-[var(--teal-accent-text)]'
-                                  : 'bg-[var(--field-tint-2)] text-[var(--text-secondary-color)] hover:bg-[var(--field-tint-3)]'
-                              }`}
-                            >
-                              {mood}
-                            </button>
-                          ))}
-                          {/*
-                           * Custom (non-preset) moods the user has typed in
-                           * below - rendered with the exact same selected-
-                           * chip classNames as a toggled COMMON_MOODS button
-                           * above, and removed the same way (click to
-                           * toggle off via the shared toggleMood), so a
-                           * custom mood is visually and behaviorally
-                           * indistinguishable from a preset one once added.
-                           */}
-                          {moods
-                            .filter(mood => !COMMON_MOODS.includes(mood))
-                            .map(mood => (
-                              <button
-                                key={mood}
-                                type="button"
-                                onClick={() => toggleMood(mood)}
-                                className="rounded-full bg-teal-400/20 px-3 py-1 text-sm font-medium text-[var(--teal-accent-text)] transition-colors"
-                              >
-                                {mood}
-                              </button>
-                            ))}
-                        </div>
-
-                        {/*
-                         * Custom mood text input - same interaction pattern
-                         * as the Tags input on Step 1 (type + Enter, or
-                         * click Add) rather than a separate "Other" field,
-                         * so a mood not covered by the preset chips above
-                         * is just as quick to add as a tag is.
-                         */}
-                        <div className="mt-2 flex gap-2">
-                          <input
-                            type="text"
-                            value={moodInput}
-                            onChange={e => setMoodInput(e.target.value)}
-                            onKeyDown={handleMoodInputKeyDown}
-                            placeholder="Add a custom mood (press Enter)"
-                            className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => addMood(moodInput)}
-                            className="rounded-md bg-[var(--field-tint-2)] px-4 py-2 text-sm font-medium text-[var(--text-secondary-color)] hover:bg-[var(--field-tint-3)]"
-                          >
-                            Add
-                          </button>
-                        </div>
-                      </div>
+                      <MoodPicker moods={moods} onChange={setMoods} />
 
                       {/* Notes */}
                       <div>
@@ -1562,54 +1409,10 @@ export default function AddEntryForm({
                       </div>
 
                       {/* Media Links (YouTube/Vimeo URLs) */}
-                      <div>
-                        <label className="block text-sm font-medium text-[var(--text-secondary-color)]">
-                          Media Links
-                        </label>
-                        <p className="mt-0.5 text-xs text-[var(--text-muted-color)]">
-                          Add a link - YouTube, Vimeo, Instagram, etc.
-                        </p>
-                        <div className="mt-1 flex gap-2">
-                          <input
-                            type="url"
-                            value={mediaUrl}
-                            onChange={e => setMediaUrl(e.target.value)}
-                            placeholder="https://youtube.com/watch?v=..."
-                            className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
-                          />
-                          <button
-                            type="button"
-                            onClick={addMediaLink}
-                            disabled={!mediaUrl.trim()}
-                            className="rounded-md bg-[var(--field-tint-2)] px-4 py-2 text-sm font-medium text-[var(--text-secondary-color)] hover:bg-[var(--field-tint-3)] disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            Add
-                          </button>
-                        </div>
-
-                        {/* Added Media List */}
-                        {mediaLinks.length > 0 && (
-                          <div className="mt-2 space-y-1">
-                            {mediaLinks.map((media, index) => (
-                              <div
-                                key={index}
-                                className="flex items-center justify-between rounded-md bg-[var(--field-tint-1)] px-3 py-2"
-                              >
-                                <span className="truncate text-sm text-[var(--text-secondary-color)]">
-                                  {media.url}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => removeMediaLink(index)}
-                                  className="ml-2 flex-shrink-0 text-red-400 hover:text-red-300"
-                                >
-                                  &times;
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      <MediaLinksInput
+                        mediaLinks={mediaLinks}
+                        onChange={setMediaLinks}
+                      />
 
                       {/*
                        * Photo Upload Placeholder

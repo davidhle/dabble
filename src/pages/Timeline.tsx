@@ -120,9 +120,15 @@ interface TimelineProps {
   entries: Entry[];
   /** Opens `entry` in the shared AddEntryForm's edit mode - see App.tsx's `editingEntry` state. */
   onEditEntry: (entry: Entry) => void;
+  /** App.tsx's `updateEntry` - used by EntryPanel to save reflections. */
+  onUpdateEntry: (entry: Entry) => void;
 }
 
-export default function Timeline({ entries, onEditEntry }: TimelineProps) {
+export default function Timeline({
+  entries,
+  onEditEntry,
+  onUpdateEntry,
+}: TimelineProps) {
   // See the STAGE 3 comment above: `selectedRange` is the shared,
   // cross-page time filter; `timeFilteredEntries` is `entries` hard-cut
   // down to only what's `isEntryWithinRange` of it - this (not `entries`)
@@ -304,6 +310,7 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
               onMinimize={handleMinimizePanel}
               onClose={handleClosePanel}
               onEdit={onEditEntry}
+              onUpdateEntry={onUpdateEntry}
             />
           </div>
         )}

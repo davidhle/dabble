@@ -158,11 +158,14 @@ interface ConstellationProps {
   entries: Entry[];
   /** Opens `entry` in the shared AddEntryForm's edit mode - see App.tsx's `editingEntry` state. */
   onEditEntry: (entry: Entry) => void;
+  /** App.tsx's `updateEntry` - used by EntryPanel to save reflections. */
+  onUpdateEntry: (entry: Entry) => void;
 }
 
 export default function Constellation({
   entries,
   onEditEntry,
+  onUpdateEntry,
 }: ConstellationProps) {
   // See the SHARED TIME-RANGE FILTER comment above: `selectedRange` is the
   // shared, cross-page time filter (same context Timeline.tsx reads);
@@ -436,6 +439,7 @@ export default function Constellation({
               onMinimize={handleMinimizePanel}
               onClose={handleClosePanel}
               onEdit={onEditEntry}
+              onUpdateEntry={onUpdateEntry}
             />
           </div>
         )}
