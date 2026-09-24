@@ -142,6 +142,8 @@ export default function Spiral({
     canUndoFocus,
     handleUndoFocus,
     handleExitFocus,
+    focusedView,
+    handleFocusedViewChange,
     sortMode,
     handleSortModeChange,
     categoryGroups,
@@ -349,6 +351,8 @@ export default function Spiral({
               headerRef={headerContentRef}
               canUndo={canUndoFocus}
               onBack={handleExitFocus}
+              view={focusedView}
+              onViewChange={handleFocusedViewChange}
               onUndo={handleUndoFocus}
               onEdit={onEditEntry}
               onClose={handleClosePanel}

@@ -20,7 +20,7 @@
  *     Edit/Close for this entry on the right.
  *   - This entry's own title as the heading, and the same "category ·
  *     date · location" subtitle line the old expanded panel showed.
- *   - An Original / Reflections toggle, styled like FilterBar's By Date /
+ *   - An Original Entry / Reflections toggle, styled like FilterBar's By Date /
  *     By Category sort toggle.
  *   - The scrollable body: EntryContent.tsx's EntryOriginalContent or
  *     EntryReflections, depending on the toggle.
@@ -32,11 +32,14 @@
  * measuring its `topOffset` off whichever header block is currently
  * mounted - see Constellation.tsx's `headerContentRef`.
  *
- * TOGGLE STATE: `view` is local state that defaults to 'original'. The
- * page unmounts this component whenever focused mode ends, so every fresh
- * entry into focused mode starts on Original; switching between entries
- * via a bookmark or Undo keeps whichever tab is open (handy for reading
- * reflections across several entries in a row). The body scroll region
+ * TOGGLE STATE: `view` lives in EntrySelectionContext.tsx (`focusedView`),
+ * not here, because switching Constellation/Timeline/Spiral unmounts this
+ * component along with the page - keeping it in the shared context lets the
+ * open tab survive that navigation, just like the focused entry does. The
+ * context resets it to 'original' whenever focused mode ends, so every
+ * fresh entry into focused mode starts on Original Entry; switching
+ * between entries via a bookmark or Undo keeps whichever tab is open
+ * (handy for reading reflections across several entries in a row). The body scroll region
  * and the reflections tab ARE keyed on the entry id, though, so switching
  * entries resets scroll position and discards a half-written reflection
  * form rather than carrying it over onto a different entry.
@@ -48,17 +51,16 @@
  * See that file.
  */
 
-import { Ref, useState } from 'react';
+import { Ref } from 'react';
 import { Entry } from '../types/Entry';
 import { SelectedEntry } from '../hooks/useEntrySelection';
+import { FocusedView } from '../context/EntrySelectionContext';
 import { getActivityColor } from '../utils/colors';
 import { getCategoryName } from '../utils/categories';
 import { formatEntryDate } from '../utils/formatEntryDate';
 import { formatLocationDisplay } from '../utils/formatLocation';
 import { EntryOriginalContent, EntryReflections } from './EntryContent';
 import IconButton from './IconButton';
-
-type FocusedView = 'original' | 'reflections';
 
 interface FocusedEntryViewProps {
   /** The full selection - the focused entry is looked up from it. */
@@ -68,6 +70,9 @@ interface FocusedEntryViewProps {
   /** Attached to the header block, for the page's `topOffset` measurement. */
   headerRef: Ref<HTMLDivElement>;
   canUndo: boolean;
+  /** EntrySelectionContext's `focusedView` - see TOGGLE STATE above. */
+  view: FocusedView;
+  onViewChange: (view: FocusedView) => void;
   onBack: () => void;
   onUndo: () => void;
   /** Opens this entry in the shared AddEntryForm's edit mode - see App.tsx's `editingEntry`. */
@@ -83,14 +88,14 @@ export default function FocusedEntryView({
   focusedEntryId,
   headerRef,
   canUndo,
+  view,
+  onViewChange,
   onBack,
   onUndo,
   onEdit,
   onClose,
   onUpdateEntry,
 }: FocusedEntryViewProps) {
-  const [view, setView] = useState<FocusedView>('original');
-
   const entry = selectedEntries.find(
     selected => selected.entry.id === focusedEntryId
   )?.entry;
@@ -214,7 +219,7 @@ export default function FocusedEntryView({
             <button
               key={mode}
               type="button"
-              onClick={() => setView(mode)}
+              onClick={() => onViewChange(mode)}
               aria-pressed={view === mode}
               className={`flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
                 view === mode
@@ -222,7 +227,7 @@ export default function FocusedEntryView({
                   : 'text-[var(--text-muted-color)] hover:text-[var(--text-color)]'
               }`}
             >
-              {mode === 'original' ? 'Original' : 'Reflections'}
+              {mode === 'original' ? 'Original Entry' : 'Reflections'}
             </button>
           ))}
         </div>

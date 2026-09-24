@@ -202,6 +202,8 @@ export default function Constellation({
     canUndoFocus,
     handleUndoFocus,
     handleExitFocus,
+    focusedView,
+    handleFocusedViewChange,
     sortMode,
     handleSortModeChange,
     categoryGroups,
@@ -433,6 +435,8 @@ export default function Constellation({
               headerRef={headerContentRef}
               canUndo={canUndoFocus}
               onBack={handleExitFocus}
+              view={focusedView}
+              onViewChange={handleFocusedViewChange}
               onUndo={handleUndoFocus}
               onEdit={onEditEntry}
               onClose={handleClosePanel}

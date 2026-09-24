@@ -152,6 +152,8 @@ export default function Timeline({
     canUndoFocus,
     handleUndoFocus,
     handleExitFocus,
+    focusedView,
+    handleFocusedViewChange,
     sortMode,
     handleSortModeChange,
     categoryGroups,
@@ -314,6 +316,8 @@ export default function Timeline({
               headerRef={headerContentRef}
               canUndo={canUndoFocus}
               onBack={handleExitFocus}
+              view={focusedView}
+              onViewChange={handleFocusedViewChange}
               onUndo={handleUndoFocus}
               onEdit={onEditEntry}
               onClose={handleClosePanel}

@@ -120,6 +120,9 @@ export interface CategoryGroup {
   entries: SelectedEntry[];
 }
 
+/** Which tab FocusedEntryView.tsx's Original Entry / Reflections toggle shows. */
+export type FocusedView = 'original' | 'reflections';
+
 export interface EntrySelectionContextValue {
   selectedEntries: SelectedEntry[];
   /** Every id currently represented by a sidebar panel, expanded or not. */
@@ -143,6 +146,15 @@ export interface EntrySelectionContextValue {
    * the expanded panel, which also clears the history stack.
    */
   handleExitFocus: () => void;
+  /**
+   * FocusedEntryView.tsx's Original Entry / Reflections tab. Lives here
+   * (not in that component) so it survives switching between
+   * Constellation/Timeline/Spiral, which unmounts the page - and with it
+   * the focused view - just like `expandedEntryId` itself. Resets to
+   * 'original' whenever focused mode ends - see `focusHistory`'s effect.
+   */
+  focusedView: FocusedView;
+  handleFocusedViewChange: (view: FocusedView) => void;
   sortMode: SortMode;
   handleSortModeChange: (mode: SortMode) => void;
   categoryGroups: CategoryGroup[];
@@ -502,6 +514,7 @@ export function EntrySelectionProvider({
   //   - it moved from one id to another -> push the outgoing id, unless
   //     the move WAS an undo (`isUndoingFocusRef`), which already popped.
   const [focusHistory, setFocusHistory] = useState<string[]>([]);
+  const [focusedView, setFocusedView] = useState<FocusedView>('original');
   const previousFocusedIdRef = useRef<string | null>(null);
   const isUndoingFocusRef = useRef(false);
 
@@ -513,6 +526,7 @@ export function EntrySelectionProvider({
 
     if (expandedEntryId === null) {
       setFocusHistory(prev => (prev.length > 0 ? [] : prev));
+      setFocusedView('original');
       return;
     }
     if (!wasUndo && previousId !== null && previousId !== expandedEntryId) {
@@ -549,6 +563,10 @@ export function EntrySelectionProvider({
       }))
     );
   }, [focusHistory, expandedEntryId, openedEntryIdSet, cancelResetPending]);
+
+  const handleFocusedViewChange = useCallback((view: FocusedView) => {
+    setFocusedView(view);
+  }, []);
 
   const handleExitFocus = useCallback(() => {
     cancelResetPending();
@@ -636,6 +654,8 @@ export function EntrySelectionProvider({
       canUndoFocus,
       handleUndoFocus,
       handleExitFocus,
+      focusedView,
+      handleFocusedViewChange,
       sortMode,
       handleSortModeChange,
       categoryGroups,
@@ -662,6 +682,8 @@ export function EntrySelectionProvider({
       canUndoFocus,
       handleUndoFocus,
       handleExitFocus,
+      focusedView,
+      handleFocusedViewChange,
       sortMode,
       handleSortModeChange,
       categoryGroups,
