@@ -48,7 +48,7 @@
  * See that file.
  */
 
-import { ReactNode, Ref, useState } from 'react';
+import { Ref, useState } from 'react';
 import { Entry } from '../types/Entry';
 import { SelectedEntry } from '../hooks/useEntrySelection';
 import { getActivityColor } from '../utils/colors';
@@ -56,6 +56,7 @@ import { getCategoryName } from '../utils/categories';
 import { formatEntryDate } from '../utils/formatEntryDate';
 import { formatLocationDisplay } from '../utils/formatLocation';
 import { EntryOriginalContent, EntryReflections } from './EntryContent';
+import IconButton from './IconButton';
 
 type FocusedView = 'original' | 'reflections';
 
@@ -75,36 +76,6 @@ interface FocusedEntryViewProps {
   onClose: (entryId: string) => void;
   /** App.tsx's `updateEntry` - used to save reflections. */
   onUpdateEntry: (entry: Entry) => void;
-}
-
-/**
- * One circular icon button in the controls row - circular hit target plus
- * a hover background, the same treatment the old expanded panel header's
- * edit/minimize/close buttons used.
- */
-function IconButton({
-  onClick,
-  label,
-  disabled = false,
-  children,
-}: {
-  onClick: () => void;
-  label: string;
-  disabled?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      title={label}
-      className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[var(--text-muted-color)] hover:bg-[var(--field-tint-2)] hover:text-[var(--text-secondary-color)] disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-[var(--text-muted-color)]"
-    >
-      {children}
-    </button>
-  );
 }
 
 export default function FocusedEntryView({

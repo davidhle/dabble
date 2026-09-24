@@ -14,6 +14,10 @@
  * parent entry's own date (its endTimestamp if it spans multiple days,
  * otherwise its timestamp) - a reflection can't predate the thing it
  * reflects on - and can't be later than today.
+ *
+ * ADD VS. EDIT MODE: passing `reflection` pre-fills every field from it
+ * and saves with that reflection's own id, so the caller can replace it in
+ * place in `entry.reflections`. The same date range applies in both modes.
  */
 
 import { useState } from 'react';
@@ -46,23 +50,34 @@ function getMinReflectionDate(entry: Entry): string {
 
 interface AddReflectionFormProps {
   entry: Entry;
-  /** Called with the new reflection; the caller persists it onto `entry`. */
+  /** The reflection being edited - omit to add a new one. */
+  reflection?: Reflection;
+  /** Called with the new/edited reflection; the caller persists it onto `entry`. */
   onSave: (reflection: Reflection) => void;
   onCancel: () => void;
 }
 
 export default function AddReflectionForm({
   entry,
+  reflection,
   onSave,
   onCancel,
 }: AddReflectionFormProps) {
   const minDate = getMinReflectionDate(entry);
   const maxDate = toLocalDateString(new Date());
 
-  const [writtenDate, setWrittenDate] = useState(maxDate);
-  const [moods, setMoods] = useState<string[]>([]);
-  const [text, setText] = useState('');
-  const [mediaLinks, setMediaLinks] = useState<MediaLink[]>([]);
+  // writtenDate is stored at midnight UTC, so its UTC date is the picked date.
+  const [writtenDate, setWrittenDate] = useState(
+    reflection ? reflection.writtenDate.slice(0, 10) : maxDate
+  );
+  const [moods, setMoods] = useState<string[]>(reflection?.mood ?? []);
+  const [text, setText] = useState(reflection?.text ?? '');
+  const [mediaLinks, setMediaLinks] = useState<MediaLink[]>(
+    reflection?.mediaLinks ?? []
+  );
+  // Scopes the input ids to this form, since an edit form and the add
+  // form for the same entry could otherwise share them.
+  const idSuffix = reflection ? reflection.id : entry.id;
   const [errors, setErrors] = useState<{ writtenDate?: string; text?: string }>(
     {}
   );
@@ -87,7 +102,7 @@ export default function AddReflectionForm({
   const handleSave = () => {
     if (!validate()) return;
     onSave({
-      id: crypto.randomUUID(),
+      id: reflection?.id ?? crypto.randomUUID(),
       // Placeholder midnight UTC, like an Entry with hasTime: false.
       writtenDate: new Date(`${writtenDate}T00:00:00Z`).toISOString(),
       text: text.trim(),
@@ -107,13 +122,13 @@ export default function AddReflectionForm({
     >
       <div>
         <label
-          htmlFor={`reflection-date-${entry.id}`}
+          htmlFor={`reflection-date-${idSuffix}`}
           className="block text-sm font-medium text-[var(--text-secondary-color)]"
         >
           Written on
         </label>
         <input
-          id={`reflection-date-${entry.id}`}
+          id={`reflection-date-${idSuffix}`}
           type="date"
           value={writtenDate}
           min={minDate}
@@ -130,13 +145,13 @@ export default function AddReflectionForm({
 
       <div>
         <label
-          htmlFor={`reflection-text-${entry.id}`}
+          htmlFor={`reflection-text-${idSuffix}`}
           className="block text-sm font-medium text-[var(--text-secondary-color)]"
         >
           Reflection
         </label>
         <textarea
-          id={`reflection-text-${entry.id}`}
+          id={`reflection-text-${idSuffix}`}
           value={text}
           onChange={e => setText(e.target.value)}
           rows={4}
@@ -163,7 +178,7 @@ export default function AddReflectionForm({
           onClick={handleSave}
           className="rounded-md bg-[var(--accent-color)] px-4 py-2 text-sm font-medium text-[var(--accent-foreground-color)] hover:brightness-90"
         >
-          Save Reflection
+          {reflection ? 'Save Changes' : 'Save Reflection'}
         </button>
       </div>
     </div>
