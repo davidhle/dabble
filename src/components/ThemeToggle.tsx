@@ -26,6 +26,8 @@ export default function ThemeToggle() {
 
   return (
     <button
+      // Measured by TimeRangeSelector.tsx to center itself beside the stack.
+      data-corner-stack
       onClick={toggleTheme}
       // Same z-40 tier as ResetButton/ResetToast/TimeRangeSelector - above
       // a canvas (z-0) and the header stack (z-10), below the

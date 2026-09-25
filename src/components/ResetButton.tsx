@@ -30,6 +30,8 @@ interface ResetButtonProps {
 export default function ResetButton({ onClick }: ResetButtonProps) {
   return (
     <button
+      // Measured by TimeRangeSelector.tsx to center itself beside the stack.
+      data-corner-stack
       onClick={onClick}
       // fixed bottom-right, deliberately far from <ResetToast>'s
       // bottom-center position (see Constellation.tsx) so the two never

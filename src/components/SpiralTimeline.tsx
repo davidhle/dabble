@@ -300,6 +300,15 @@
  * pushes t=1 further OUTWARD than `domainRange` itself already
  * resolved to, never inward.
  *
+ * ONLY WHEN THE SELECTION REACHES TODAY: both the extension above and the
+ * dotted line/glyph below apply only when `domainRange.end` is within
+ * `NOW_PROXIMITY_MS` of today's real date (`reachesNow`). A bounded
+ * historical selection (e.g. all of 2021) keeps its geometry scoped to
+ * exactly that window - center = its start, rim = its end, with
+ * `totalRotations` and the year gridlines/glyphs following - and draws no
+ * now-marker, since today isn't part of what's being viewed. This is
+ * judged against the real clock, not the brush's position on its track.
+ *
  * THE DOTTED LINE + GLYPH: drawn as a second, much shorter sampled
  * polyline (same `spiralPoint`-per-sample technique the main curve
  * itself uses - see "DRAWING THE SPIRAL LINE" above - just scoped to
@@ -810,6 +819,17 @@ const NOW_GLYPH_FONT_SIZE_PX = 18;
 const NOW_GLYPH_OPACITY = 0.7;
 const NOW_GLYPH_HOVER_OPACITY = 1;
 
+/**
+ * How far (ms) before today the selected range's end may sit and still
+ * count as "reaching now" - see the top-of-file "NOW MARKER" comment's
+ * "ONLY WHEN THE SELECTION REACHES TODAY" section. TimeRangeSelector's
+ * brush can't extend past the latest entry, so a selection dragged all
+ * the way right usually ends a few days or weeks short of today; this
+ * tolerance treats that as "includes today" while still excluding a
+ * bounded historical window (e.g. all of 2021).
+ */
+const NOW_PROXIMITY_MS = 31 * 24 * 60 * 60 * 1000;
+
 /** How often (ms) the "now" glyph's hover tooltip re-renders its displayed clock while actively hovered - see the "Hover tooltip" comment further down. */
 const NOW_TOOLTIP_TICK_MS = 1000;
 
@@ -1182,10 +1202,15 @@ export default function SpiralTimeline({
   // MARKER" extension - see that top-of-file comment for the full
   // reasoning - which pushes `domain[1]` out to `now` whenever `now` is
   // later, and ONLY then; it never touches `domain[0]`.
+  // `reachesNow` gates both the extension and the "now" marker - see the
+  // top-of-file "ONLY WHEN THE SELECTION REACHES TODAY" section.
+  const reachesNow =
+    domainRange.end.getTime() >= now.getTime() - NOW_PROXIMITY_MS;
+
   const [minDate, maxDate] = useMemo(() => {
     const domain: [Date, Date] = [domainRange.start, domainRange.end];
 
-    if (now.getTime() > domain[1].getTime()) {
+    if (reachesNow && now.getTime() > domain[1].getTime()) {
       domain[1] = now;
     }
 
@@ -1195,7 +1220,9 @@ export default function SpiralTimeline({
     }
 
     return domain;
-  }, [domainRange, now]);
+  }, [domainRange, now, reachesNow]);
+
+  const clampT = (t: number): number => Math.max(0, Math.min(1, t));
 
   const normalize = (date: Date): number => {
     const span = maxDate.getTime() - minDate.getTime();
@@ -1444,8 +1471,11 @@ export default function SpiralTimeline({
     const rangeItems = sortedEntries
       .filter(entry => entry.endTimestamp)
       .map(entry => {
-        const tStart = normalize(new Date(entry.timestamp));
-        const tEnd = normalize(new Date(entry.endTimestamp as string));
+        // Clamped to [0, 1]: a range entry only partly overlapping the
+        // selected window (see isEntryWithinRange) is cut at the spiral's
+        // center/rim rather than extrapolated past them.
+        const tStart = clampT(normalize(new Date(entry.timestamp)));
+        const tEnd = clampT(normalize(new Date(entry.endTimestamp as string)));
         return {
           entry,
           tStart,
@@ -1647,7 +1677,12 @@ export default function SpiralTimeline({
     // No entries at all, or (an unusual edge case - a future-dated
     // entry) the latest entry is somehow already later than "now" -
     // either way there's no sensible forward-in-time line to draw.
-    if (!latestEntryDate || now.getTime() < latestEntryDate.getTime()) {
+    // Also nothing to draw when the selection doesn't reach today at all.
+    if (
+      !reachesNow ||
+      !latestEntryDate ||
+      now.getTime() < latestEntryDate.getTime()
+    ) {
       return null;
     }
 
@@ -1710,6 +1745,7 @@ export default function SpiralTimeline({
   }, [
     latestEntryDate,
     now,
+    reachesNow,
     spiralParams,
     minDate,
     maxDate,

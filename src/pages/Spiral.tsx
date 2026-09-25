@@ -67,14 +67,7 @@
  * not in how selecting, filtering, or time-windowing them works.
  */
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BookmarkRail from '../components/BookmarkRail';
 import EditModeBanner from '../components/EditModeBanner';
 import EditModeToggle from '../components/EditModeToggle';
@@ -95,15 +88,6 @@ import { useEntrySelection } from '../hooks/useEntrySelection';
 import { useSidebarWidth } from '../hooks/useSidebarWidth';
 import { useTimeRange } from '../context/TimeRangeContext';
 import { useEditMode } from '../context/EditModeContext';
-
-/**
- * Gap (px) between the STAR GLYPH FOOTNOTE (see its own comment below,
- * near the returned JSX) and TimeRangeSelector's card - same role as
- * VizEmptyState.tsx's own `GAP` constant for its "above instead of
- * beside" layout, just a smaller value since this is a single-line
- * caption, not a bordered card.
- */
-const STAR_GLYPH_FOOTNOTE_GAP = 8;
 
 interface SpiralProps {
   entries: Entry[];
@@ -298,51 +282,6 @@ export default function Spiral({
     };
   }, [hasSelection, sidebarSide]);
 
-  // TimeRangeSelector's own CARD's live rendered position - used only by
-  // the STAR GLYPH FOOTNOTE below (Spiral-only; Constellation.tsx/
-  // Timeline.tsx no longer need this measurement themselves now that
-  // EditModeBanner.tsx/VizEmptyState.tsx's "filtered" message both anchor
-  // top-right instead of beside TimeRangeSelector - see
-  // utils/topRightTooltipStack.ts). `sidebarWidth` is a dependency (not
-  // just mount) because TimeRangeSelector re-centers its card within a
-  // narrower `[sidebarWidth, viewport right]` box as the sidebar opens/
-  // closes - a pure horizontal TRANSLATION of the same-sized card, which a
-  // ResizeObserver alone would miss (it only fires on size changes, not
-  // position). The window resize listener alongside it catches the OTHER
-  // way this position can change: the viewport itself resizing.
-  // `useLayoutEffect` (not `useEffect`) so this is measured before the
-  // first paint the footnote could appear in, avoiding a one-frame flash
-  // at the wrong position.
-  const timeRangeSelectorCardRef = useRef<HTMLDivElement>(null);
-  const [timeRangeSelectorRect, setTimeRangeSelectorRect] = useState({
-    top: 0,
-    right: 0,
-    height: 0,
-  });
-
-  useLayoutEffect(() => {
-    const el = timeRangeSelectorCardRef.current;
-    if (!el) return;
-
-    const updateRect = () => {
-      const rect = el.getBoundingClientRect();
-      setTimeRangeSelectorRect({
-        top: rect.top,
-        right: rect.right,
-        height: rect.height,
-      });
-    };
-    updateRect();
-
-    const observer = new ResizeObserver(updateRect);
-    observer.observe(el);
-    window.addEventListener('resize', updateRect);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', updateRect);
-    };
-  }, [sidebarWidth, sidebarSide]);
-
   return (
     // Fragment, not a `space-y-4` div - see Constellation.tsx's identical
     // comment: `space-y-*` would misalign SpiralTimeline's `fixed inset-0`
@@ -485,56 +424,19 @@ export default function Spiral({
        * sidebar-aware centering as Constellation.tsx's/Timeline.tsx's own
        * <TimeRangeSelector>. Passed the full, unfiltered `entries` (not
        * `timeFilteredEntries`) for its density ticks - same reasoning as
-       * the other two pages' own comment on this prop. `ref` is the
-       * TimeRangeSelector.tsx forwardRef, measured above for the STAR
-       * GLYPH FOOTNOTE below - the only remaining consumer of that
-       * measurement on this page.
+       * the other two pages' own comment on this prop. `caption` is the
+       * STAR GLYPH FOOTNOTE: explains SpiralTimeline's own "✦" year-glyph
+       * markers (see its "YEAR GLYPHS" comment) with the same glyph
+       * character. Spiral-only, since Constellation.tsx/Timeline.tsx have no
+       * year glyph to explain; TimeRangeSelector draws it just above its
+       * card so it stays centered on the card at any sidebar width.
        */}
       <TimeRangeSelector
-        ref={timeRangeSelectorCardRef}
         entries={entries}
         sidebarWidth={sidebarWidth}
         sidebarSide={sidebarSide}
+        caption="✦ marks a year along the spiral."
       />
-
-      {/*
-       * STAR GLYPH FOOTNOTE: explains SpiralTimeline's own "✦" year-glyph
-       * markers (see its "YEAR GLYPHS" comment) - the same glyph character
-       * is reused here so this note visually matches what's actually drawn
-       * on the canvas. Spiral-only: this lives here rather than in
-       * TimeRangeSelector.tsx itself, which Constellation.tsx/Timeline.tsx
-       * also render and neither of which has a year glyph to explain.
-       *
-       * POSITIONING: stacked directly above TimeRangeSelector's card,
-       * centered within `[sidebarWidth, viewport right]` - the same
-       * horizontal centering approach TimeRangeSelector.tsx uses for
-       * itself, just one row higher. `bottom` (not `top`) is derived from
-       * `timeRangeSelectorRect.top` (the card's own measured top edge)
-       * rather than a flat guessed pixel offset: this keeps the footnote
-       * flush just above the card regardless of the card's own rendered
-       * height, and regardless of how `sidebarWidth`/viewport width shift
-       * where that card actually centers itself - i.e. the exact same
-       * sidebar-aware centering TimeRangeSelector uses for itself, kept in
-       * sync via the same measured rect rather than a second independent
-       * calculation. `pointer-events-none` since this is read-only caption
-       * text that shouldn't intercept clicks meant for the canvas/scrubber
-       * around it.
-       */}
-      <div
-        className="pointer-events-none fixed z-40 flex justify-center px-6"
-        style={{
-          bottom:
-            window.innerHeight -
-            timeRangeSelectorRect.top +
-            STAR_GLYPH_FOOTNOTE_GAP,
-          left: sidebarSide === 'left' ? sidebarWidth : 0,
-          right: sidebarSide === 'right' ? sidebarWidth : 0,
-        }}
-      >
-        <p className="text-xs text-[var(--text-muted-color)]">
-          ✦ marks a year along the spiral.
-        </p>
-      </div>
 
       {isEditMode && <EditModeBanner />}
 

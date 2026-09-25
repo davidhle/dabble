@@ -7,9 +7,9 @@
  * TimeRangeContext.tsx's top-of-file comment for why the range state
  * itself lives above the router regardless of which page renders this.
  *
- * Also centers itself within whatever's left of the viewport past
- * LinearTimeline.tsx's sidebar overlay, via the `sidebarWidth` prop - see
- * the SIDEBAR-AWARE CENTERING comment on the returned JSX below.
+ * Also centers itself in the free span between the sidebar overlay (via
+ * the `sidebarWidth` prop) and the bottom-right button stack - see the
+ * STACK-AWARE CENTERING comment on the returned JSX below.
  *
  * ──────────────────────────────────────────────────────────────────────
  * DOMAIN IS ALWAYS fullRange, NEVER selectedRange
@@ -71,6 +71,7 @@
 
 import {
   forwardRef,
+  ReactNode,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -98,14 +99,21 @@ interface TimeRangeSelectorProps {
    * isn't rendered) - same prop, same source (Timeline.tsx's measured
    * `sidebarWidth`), and same purpose as LinearTimeline.tsx's own
    * `sidebarWidth`: this control's outer wrapper (see the return JSX
-   * below) uses it to center itself within the REMAINING visible width -
-   * `[sidebarWidth, viewport width]` - instead of the full viewport,
+   * below) uses it to center itself between the sidebar and the
+   * bottom-right button stack - instead of the full viewport,
    * whenever a panel is open, the same "exclude the sidebar's band"
    * pattern used everywhere else a sidebar-aware layout is needed.
    */
   sidebarWidth: number;
   /** Which screen edge `sidebarWidth`'s band is on - the wrapper insets from that side instead. */
   sidebarSide: SidebarSide;
+  /**
+   * Optional one-line caption rendered just above the card, centered on
+   * it (Spiral.tsx's year-glyph footnote). Lives inside the card so it
+   * follows STACK-AWARE CENTERING for free, rather than the page
+   * re-deriving the card's position.
+   */
+  caption?: ReactNode;
 }
 
 /** Plot margins - room so the brush's handles (which extend slightly past the selection edges) aren't clipped at the container's own edges. */
@@ -123,16 +131,19 @@ const formatDate = d3.timeFormat('%b %d, %Y');
 /**
  * `forwardRef`, forwarded to the CARD div below (the `w-full max-w-xl
  * rounded-2xl ...` one) - not the outer `fixed` wrapper, which merely
- * spans the full `[sidebarWidth, viewport right]` region it centers
+ * spans the full sidebar-to-button-stack region it centers
  * itself within. A calling page (see VizEmptyState.tsx's "filtered"
  * message) needs the CARD's own actual rendered position/size to
  * position something relative to it (e.g. immediately to its right) -
  * the outer wrapper's own box wouldn't give that, since it's always
- * exactly `[sidebarWidth, viewport right]` regardless of how wide the
+ * exactly that region regardless of how wide the
  * card centered inside it actually renders.
  */
 const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
-  function TimeRangeSelector({ entries, sidebarWidth, sidebarSide }, cardRef) {
+  function TimeRangeSelector(
+    { entries, sidebarWidth, sidebarSide, caption },
+    cardRef
+  ) {
     const { fullRange, selectedRange, setSelectedRange } = useTimeRange();
 
     const containerRef = useRef<HTMLDivElement>(null);
@@ -155,6 +166,57 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
       observer.observe(el);
       return () => observer.disconnect();
     }, []);
+
+    // How far the corner button stack (ThemeToggle/ResetButton/
+    // EditModeToggle, tagged `data-corner-stack`) reaches in from its own
+    // screen edge. Measured off the real buttons rather than hardcoded, so
+    // it tracks --chrome-edge-gutter (which grows with the viewport) and
+    // any future change to the buttons' own size - see STACK-AWARE
+    // CENTERING below. Measured from whichever edge each button is nearer,
+    // so the value is the same in either corner and never goes stale
+    // while index.css flips the stack to the other side.
+    const [stackInset, setStackInset] = useState(0);
+
+    useLayoutEffect(() => {
+      const buttons = document.querySelectorAll('[data-corner-stack]');
+
+      const updateInset = () => {
+        const vw = document.documentElement.clientWidth;
+        let inset = 0;
+        buttons.forEach(b => {
+          const rect = b.getBoundingClientRect();
+          inset = Math.max(
+            inset,
+            rect.left > vw / 2 ? vw - rect.left : rect.right
+          );
+        });
+        setStackInset(inset);
+      };
+      updateInset();
+      // Window resize: the gutter is viewport-relative, so the stack moves
+      // without resizing. ResizeObserver: the buttons themselves resizing.
+      const observer = new ResizeObserver(updateInset);
+      buttons.forEach(b => observer.observe(b));
+      window.addEventListener('resize', updateInset);
+      return () => {
+        observer.disconnect();
+        window.removeEventListener('resize', updateInset);
+      };
+    }, []);
+
+    // The obstacle on each side the card centers between: whichever of the
+    // sidebar or the button stack reaches further in from that edge. The
+    // stack sits opposite the sidebar (see index.css's `data-corner-stack`
+    // rule). An edge with neither reserves the stack's band anyway, so
+    // with no sidebar open the card stays centered on the viewport.
+    const stackSide: SidebarSide = sidebarSide === 'left' ? 'right' : 'left';
+    const insetFor = (edge: SidebarSide) =>
+      Math.max(
+        sidebarSide === edge ? sidebarWidth : 0,
+        stackSide === edge ? stackInset : 0
+      ) || stackInset;
+    const leftInset = insetFor('left');
+    const rightInset = insetFor('right');
 
     const innerWidth = Math.max(0, width - MARGIN.left - MARGIN.right);
 
@@ -300,40 +362,35 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
       // z-40: same tier as ResetButton/ResetToast, above the canvas (z-0)
       // and header (z-10), below the AddEntryForm modal (z-50).
       //
-      // SIDEBAR-AWARE CENTERING: `left: sidebarWidth` (an inline style, not
-      // a Tailwind class, since `sidebarWidth` is a runtime number) replaces
-      // the flat `inset-x-0` this used to be - narrowing this flex
-      // container's own box down to exactly `[sidebarWidth, viewport right
-      // edge]` rather than the full viewport width. `justify-center` then
-      // centers the card WITHIN that narrowed box instead of the whole
-      // window, so the control visually centers on the REMAINING visible
-      // canvas the same way LinearTimeline.tsx's own content now starts
-      // past the sidebar (see its CANVAS ORIGIN SHIFT comment) - two
-      // different mechanisms (a shifted flex box here; a shifted SVG
-      // drawing origin there) converging on the same "center within what's
-      // actually visible" result. `sidebarWidth === 0` (no panel open)
-      // makes `left: 0`, equivalent to the old `inset-x-0` - full-width
-      // centering, unchanged.
+      // STACK-AWARE CENTERING: `left`/`right` (inline styles, since both
+      // are runtime numbers) narrow this flex container's own box down to
+      // exactly the free span between the two obstacles - `leftInset`/
+      // `rightInset` above: the sidebar's edge on one side, the button
+      // stack's inner edge on the other. `justify-center` then centers the
+      // card WITHIN that span, so the gap from the sidebar to the card
+      // always equals the gap from the card to the stack, at any sidebar
+      // width or side - the same "center within what's actually visible"
+      // result LinearTimeline.tsx reaches with its CANVAS ORIGIN SHIFT.
       //
-      // Horizontal padding clears the bottom-right button stack
-      // (ThemeToggle/ResetButton/EditModeToggle: --chrome-edge-gutter +
-      // their 44px width + a 12px gap) on BOTH sides, so the card stays
-      // centered but shrinks rather than sliding under those buttons when
-      // the visible canvas gets narrow - e.g. a sidebar dragged wide (see
+      // `px-3` keeps a minimum 12px gap on both sides, so the card shrinks
+      // (still centered) rather than touching either obstacle when the
+      // span gets narrow - e.g. a sidebar dragged wide (see
       // SidebarResizeHandle.tsx) on a laptop-sized screen.
       <div
-        className="fixed bottom-6 z-40 flex justify-center px-[calc(var(--chrome-edge-gutter)+56px)]"
-        // Mirrored when the sidebar is on the right: inset from the right
-        // by its band instead, so the card centers in the space to its left.
-        style={{
-          left: sidebarSide === 'left' ? sidebarWidth : 0,
-          right: sidebarSide === 'right' ? sidebarWidth : 0,
-        }}
+        className="fixed bottom-6 z-40 flex justify-center px-3"
+        style={{ left: leftInset, right: rightInset }}
       >
         <div
           ref={cardRef}
-          className="w-full max-w-xl rounded-2xl border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] px-4 py-3 shadow-lg backdrop-blur"
+          className="relative w-full max-w-xl rounded-2xl border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] px-4 py-3 shadow-lg backdrop-blur"
         >
+          {caption && (
+            // `pointer-events-none`: read-only text that shouldn't
+            // intercept clicks meant for the canvas behind it.
+            <p className="pointer-events-none absolute inset-x-0 bottom-full mb-2 text-center text-xs text-[var(--text-muted-color)]">
+              {caption}
+            </p>
+          )}
           {/*
            * WIDTH MEASUREMENT div - see the top-of-file comment for why this
            * has to be a separate, unpadded element from the card above

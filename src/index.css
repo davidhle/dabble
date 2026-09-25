@@ -398,6 +398,18 @@
   }
 }
 
+/*
+ * The bottom corner button stack (ThemeToggle/ResetButton/EditModeToggle,
+ * each tagged `data-corner-stack`) moves to the bottom-LEFT corner while
+ * the sidebar is on the right, keeping the two out of each other's way.
+ * `data-sidebar-side` is set by useSidebarWidth.ts; this selector
+ * outranks the buttons' own `right-[var(--chrome-edge-gutter)]` class.
+ */
+html[data-sidebar-side='right'] [data-corner-stack] {
+  right: auto;
+  left: var(--chrome-edge-gutter);
+}
+
 body {
   margin: 0;
   min-width: 320px;

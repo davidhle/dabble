@@ -35,6 +35,8 @@ export default function EditModeToggle() {
 
   return (
     <button
+      // Measured by TimeRangeSelector.tsx to center itself beside the stack.
+      data-corner-stack
       onClick={toggleEditMode}
       aria-pressed={isEditMode}
       // z-40: same layer as ResetButton/ThemeToggle - above a canvas

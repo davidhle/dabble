@@ -20,7 +20,7 @@
  * of the viewport, and the max wins when a narrow viewport can't fit both.
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 /** localStorage keys - same naming convention as useTheme.ts's THEME_STORAGE_KEY. */
 export const SIDEBAR_WIDTH_STORAGE_KEY = 'dabble-sidebar-width';
@@ -111,6 +111,21 @@ export function useSidebarWidth(gaps: { left: number; right: number }) {
       return next;
     });
   }, []);
+
+  // Mirrors `side` onto <html data-sidebar-side> for as long as a
+  // visualization page is mounted, so the bottom corner button stack
+  // (`[data-corner-stack]` - see index.css) can hop to the opposite corner
+  // via CSS alone, including ThemeToggle, which Layout.tsx renders outside
+  // any page. Removed on unmount so Home/About keep the default corner.
+  // Layout (not plain) effect so the buttons never paint a frame on the
+  // same side as the sidebar.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.dataset.sidebarSide = side;
+    return () => {
+      delete root.dataset.sidebarSide;
+    };
+  }, [side]);
 
   const width =
     userWidth === null
