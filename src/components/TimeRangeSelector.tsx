@@ -80,6 +80,7 @@ import {
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
 import { useTimeRange } from '../context/TimeRangeContext';
+import type { SidebarSide } from '../hooks/useSidebarWidth';
 
 interface TimeRangeSelectorProps {
   /**
@@ -103,6 +104,8 @@ interface TimeRangeSelectorProps {
    * pattern used everywhere else a sidebar-aware layout is needed.
    */
   sidebarWidth: number;
+  /** Which screen edge `sidebarWidth`'s band is on - the wrapper insets from that side instead. */
+  sidebarSide: SidebarSide;
 }
 
 /** Plot margins - room so the brush's handles (which extend slightly past the selection edges) aren't clipped at the container's own edges. */
@@ -129,7 +132,7 @@ const formatDate = d3.timeFormat('%b %d, %Y');
  * card centered inside it actually renders.
  */
 const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
-  function TimeRangeSelector({ entries, sidebarWidth }, cardRef) {
+  function TimeRangeSelector({ entries, sidebarWidth, sidebarSide }, cardRef) {
     const { fullRange, selectedRange, setSelectedRange } = useTimeRange();
 
     const containerRef = useRef<HTMLDivElement>(null);
@@ -311,9 +314,21 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
       // actually visible" result. `sidebarWidth === 0` (no panel open)
       // makes `left: 0`, equivalent to the old `inset-x-0` - full-width
       // centering, unchanged.
+      //
+      // Horizontal padding clears the bottom-right button stack
+      // (ThemeToggle/ResetButton/EditModeToggle: --chrome-edge-gutter +
+      // their 44px width + a 12px gap) on BOTH sides, so the card stays
+      // centered but shrinks rather than sliding under those buttons when
+      // the visible canvas gets narrow - e.g. a sidebar dragged wide (see
+      // SidebarResizeHandle.tsx) on a laptop-sized screen.
       <div
-        className="fixed bottom-6 right-0 z-40 flex justify-center px-6"
-        style={{ left: sidebarWidth }}
+        className="fixed bottom-6 z-40 flex justify-center px-[calc(var(--chrome-edge-gutter)+56px)]"
+        // Mirrored when the sidebar is on the right: inset from the right
+        // by its band instead, so the card centers in the space to its left.
+        style={{
+          left: sidebarSide === 'left' ? sidebarWidth : 0,
+          right: sidebarSide === 'right' ? sidebarWidth : 0,
+        }}
       >
         <div
           ref={cardRef}

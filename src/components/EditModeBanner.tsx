@@ -14,7 +14,7 @@
  * screen from the sidebar panel stack (`fixed left-0`), this position
  * also needs no sidebar-width-aware centering the way the bottom-right
  * chrome (ResetButton/ThemeToggle/the old TimeRangeSelector-relative
- * position) does - `right-6` alone stays correct whether or not the
+ * position) does - `right-[var(--chrome-edge-gutter)]` alone stays correct whether or not the
  * sidebar is open.
  *
  * ALWAYS THE TOP SLOT:
@@ -42,7 +42,7 @@ import { TOP_SLOT } from '../utils/topRightTooltipStack';
 export default function EditModeBanner() {
   return (
     <div
-      className="pointer-events-auto fixed right-6 z-40 max-w-sm rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm text-[var(--yellow-accent-text)]"
+      className="pointer-events-auto fixed right-[var(--chrome-edge-gutter)] z-40 max-w-sm rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm text-[var(--yellow-accent-text)]"
       style={{ top: TOP_SLOT }}
       role="status"
     >

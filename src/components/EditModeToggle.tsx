@@ -40,7 +40,7 @@ export default function EditModeToggle() {
       // z-40: same layer as ResetButton/ThemeToggle - above a canvas
       // (z-0) and the header stack (z-10), below the AddEntryForm modal
       // (z-50). bottom-[136px]: see the header comment above.
-      className={`fixed bottom-[136px] right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full border shadow-lg backdrop-blur transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--accent-color)] focus:ring-offset-2 focus:ring-offset-[var(--bg-color)] ${
+      className={`fixed bottom-[136px] right-[var(--chrome-edge-gutter)] z-40 flex h-11 w-11 items-center justify-center rounded-full border shadow-lg backdrop-blur transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--accent-color)] focus:ring-offset-2 focus:ring-offset-[var(--bg-color)] ${
         isEditMode
           ? 'border-[var(--accent-color)] bg-[var(--accent-color)] text-[var(--accent-foreground-color)] hover:brightness-90'
           : 'border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] text-[var(--text-color)] hover:bg-[var(--chrome-hover-bg-color)]'

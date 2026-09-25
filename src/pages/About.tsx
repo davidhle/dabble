@@ -168,6 +168,21 @@ export default function About() {
                 description:
                   'Update any entry after the fact — correct a date, add a location, reclassify its category — or switch on Edit Mode to jump straight from any star, point, or arc into its editor.',
               },
+              {
+                name: 'Reflections',
+                description:
+                  'Add dated, backdatable follow-up notes to any past entry — capture how you feel about it in hindsight, with its own mood, text, and media, while staying linked to the original. Navigate between multiple open entries via small bookmark tabs, complete with a full undo history.',
+              },
+              {
+                name: 'Customizable sidebar',
+                description:
+                  'Resize the sidebar by dragging its edge, or flip it to either side of the screen — useful on a wide monitor, or if a right-anchored layout simply suits you better.',
+              },
+              {
+                name: 'Category management',
+                description:
+                  'Rename any category, or recolor it from a curated palette, a set of colors already in use, or a full custom color picker — all from one place.',
+              },
             ]}
           />
         </div>
@@ -181,7 +196,6 @@ export default function About() {
               'Visualizing connections between events (e.g., locations, feelings, life events)',
               'Custom positioning of the points in the constellation view',
               'Media attachments (photos, voice notes, ...)',
-              "Retroactive reflections/annotations on past events — add a dated note or reflection to an existing entry after the fact (with its own timestamp and emotional state at the time of writing), while staying linked to the original event. The reflection's own date can be backdated to any point between the original event and today (e.g. transcribing an old journal entry that reflected on a past event sometime after it happened).",
               'Robust location input — attach a real, mappable location to an entry (via a geocoding-based location search) rather than just plain text, while still supporting simple free-text location entries. This lays the groundwork for future connections between entries based on shared geographic location.',
               'List/table view — browse all entries as a sortable, filterable table or database-style list, with a toggle to switch between a compact table view and a card/block-based view (similar to Notion), as an alternative way to explore entries outside of the visualizations.',
               'Video thumbnails and previews from linked media (YouTube, Instagram, etc.)',

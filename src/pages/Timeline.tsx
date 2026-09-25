@@ -109,12 +109,15 @@ import LinearTimeline from '../components/LinearTimeline';
 import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
 import SidebarPanelStack from '../components/SidebarPanelStack';
+import SidebarResizeHandle from '../components/SidebarResizeHandle';
+import SidebarSideToggle from '../components/SidebarSideToggle';
 import TimeRangeSelector from '../components/TimeRangeSelector';
 import VizPageHeader from '../components/VizPageHeader';
 import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
 import { useEntrySelection } from '../hooks/useEntrySelection';
+import { useSidebarWidth } from '../hooks/useSidebarWidth';
 import { useTimeRange } from '../context/TimeRangeContext';
 import { useEditMode } from '../context/EditModeContext';
 
@@ -225,7 +228,22 @@ export default function Timeline({
   const isFocused = expandedEntryId !== null;
   const containerRef = useRef<HTMLDivElement>(null);
   const headerContentRef = useRef<HTMLDivElement>(null);
-  const [containerLayout, setContainerLayout] = useState({ top: 0, left: 0 });
+  const [containerLayout, setContainerLayout] = useState({
+    top: 0,
+    left: 0,
+    right: 0,
+  });
+  // The container's CSS width - the `33vw - offset` default, or the user's
+  // dragged width - and which screen edge it's anchored to (see
+  // useSidebarWidth.ts / SidebarResizeHandle.tsx / SidebarSideToggle.tsx).
+  const {
+    width: containerWidth,
+    resizeTo: resizeSidebar,
+    persist: persistSidebarWidth,
+    resetWidth: resetSidebarWidth,
+    side: sidebarSide,
+    toggleSide: toggleSidebarSide,
+  } = useSidebarWidth(containerLayout);
   const [topOffset, setTopOffset] = useState(0);
 
   useEffect(() => {
@@ -236,7 +254,11 @@ export default function Timeline({
     const updateLayout = () => {
       const containerRect = containerEl.getBoundingClientRect();
       const headerRect = headerEl.getBoundingClientRect();
-      setContainerLayout({ top: containerRect.top, left: containerRect.left });
+      setContainerLayout({
+        top: containerRect.top,
+        left: containerRect.left,
+        right: document.documentElement.clientWidth - containerRect.right,
+      });
       setTopOffset(headerRect.bottom);
     };
     updateLayout();
@@ -252,7 +274,9 @@ export default function Timeline({
     // Re-run when focused mode toggles: FocusedEntryView swaps in its own
     // header block (also attached to `headerContentRef`), so the observer
     // has to re-attach to whichever header element is now mounted.
-  }, [isFocused]);
+    // ...and when the sidebar flips sides: the container moves without
+    // resizing, which the ResizeObserver above wouldn't report.
+  }, [isFocused, sidebarSide]);
 
   // The unified container's live rendered width, passed to LinearTimeline
   // so its AUTO-RECENTER effect can keep its horizontal-centering math
@@ -269,12 +293,27 @@ export default function Timeline({
       return;
     }
 
-    const updateWidth = () => setSidebarWidth(el.getBoundingClientRect().width);
+    // The width of the screen band the sidebar occupies, measured from its
+    // own edge - see useSidebarWidth.ts's SidebarSide comment.
+    const updateWidth = () => {
+      const rect = el.getBoundingClientRect();
+      setSidebarWidth(
+        sidebarSide === 'left'
+          ? rect.right
+          : document.documentElement.clientWidth - rect.left
+      );
+    };
     updateWidth();
+    // A window resize can move the container without resizing it (a
+    // dragged, fixed-px width), which the ResizeObserver alone misses.
     const observer = new ResizeObserver(updateWidth);
     observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasSelection]);
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [hasSelection, sidebarSide]);
 
   return (
     // Fragment, not a `space-y-4` div - see Constellation.tsx's identical
@@ -295,12 +334,22 @@ export default function Timeline({
        * the `fixed` canvas, the same job the container's own `z-10` did
        * before this wrapper existed.
        */}
-      <div className="relative z-10 w-fit">
+      {/*
+       * `ml-auto` when the sidebar is on the right: pushes the shrink-
+       * wrapped wrapper to `main`'s right padding edge, i.e. --edge-gutter
+       * from the screen's right edge - the same responsive offset the
+       * left-side anchor gets from `main`'s left padding, mirrored.
+       */}
+      <div
+        className={`relative z-10 w-fit ${
+          sidebarSide === 'right' ? 'ml-auto' : ''
+        }`}
+      >
         <div
           ref={containerRef}
           className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
           style={{
-            width: `calc(33vw - ${containerLayout.left}px)`,
+            width: containerWidth,
             maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
           }}
         >
@@ -360,8 +409,19 @@ export default function Timeline({
           )}
         </div>
 
+        <SidebarResizeHandle
+          side={sidebarSide}
+          targetRef={containerRef}
+          onResize={resizeSidebar}
+          onResizeEnd={persistSidebarWidth}
+          onReset={resetSidebarWidth}
+        />
+
+        <SidebarSideToggle side={sidebarSide} onToggle={toggleSidebarSide} />
+
         {expandedEntryId && (
           <BookmarkRail
+            side={sidebarSide}
             selectedEntries={selectedEntries}
             focusedEntryId={expandedEntryId}
             onSelect={handleExpandPanel}
@@ -378,6 +438,7 @@ export default function Timeline({
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}
         sidebarWidth={sidebarWidth}
+        sidebarSide={sidebarSide}
         topOffset={topOffset}
         domainRange={selectedRange}
         isEditMode={isEditMode}
@@ -395,7 +456,11 @@ export default function Timeline({
        * own content now starts past - see both files' own comments on
        * their respective (different) sidebar-aware layout mechanisms.
        */}
-      <TimeRangeSelector entries={entries} sidebarWidth={sidebarWidth} />
+      <TimeRangeSelector
+        entries={entries}
+        sidebarWidth={sidebarWidth}
+        sidebarSide={sidebarSide}
+      />
 
       {isEditMode && <EditModeBanner />}
 

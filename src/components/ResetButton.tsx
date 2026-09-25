@@ -38,7 +38,7 @@ export default function ResetButton({ onClick }: ResetButtonProps) {
       // AddEntryForm modal (z-50). bottom-20: stacked above
       // ThemeToggle.tsx, which now sits at bottom-6, closest to the
       // corner - see this file's header comment.
-      className="fixed bottom-20 right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] text-[var(--text-color)] shadow-lg backdrop-blur transition-colors hover:bg-[var(--chrome-hover-bg-color)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-color)] focus:ring-offset-2 focus:ring-offset-[var(--bg-color)]"
+      className="fixed bottom-20 right-[var(--chrome-edge-gutter)] z-40 flex h-11 w-11 items-center justify-center rounded-full border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] text-[var(--text-color)] shadow-lg backdrop-blur transition-colors hover:bg-[var(--chrome-hover-bg-color)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-color)] focus:ring-offset-2 focus:ring-offset-[var(--bg-color)]"
       aria-label="Reset view"
       title="Reset view"
     >

@@ -57,11 +57,19 @@ import { Entry } from '../types/Entry';
 import { SelectedEntry } from '../hooks/useEntrySelection';
 import { getActivityColor } from '../utils/colors';
 import EntryTooltip from './EntryTooltip';
+import type { SidebarSide } from '../hooks/useSidebarWidth';
 
-/** How far (px) the rail starts inside the sidebar's right edge, tucked under it. */
+/** How far (px) the rail starts inside the sidebar's canvas-facing edge, tucked under it. */
 const TAB_TUCK = 8;
 
 interface BookmarkRailProps {
+  /**
+   * Which side the sidebar is on - the rail pokes out of the OPPOSITE
+   * (canvas-facing) edge: rightward for a left sidebar, leftward for a
+   * right one, with the tab shape, hover nudge, and shadow padding
+   * mirrored to match.
+   */
+  side: SidebarSide;
   selectedEntries: SelectedEntry[];
   /** The focused entry (`expandedEntryId`) - excluded from the rail. */
   focusedEntryId: string;
@@ -70,6 +78,7 @@ interface BookmarkRailProps {
 }
 
 export default function BookmarkRail({
+  side,
   selectedEntries,
   focusedEntryId,
   onSelect,
@@ -95,8 +104,14 @@ export default function BookmarkRail({
       // the canvas past the sidebar's bottom. Right padding leaves room
       // for the hover nudge and shadow, which the scroll container would
       // otherwise clip.
-      className="dark-scrollbar absolute top-5 z-0 flex max-h-[calc(100%-2.5rem)] w-9 flex-col gap-1.5 overflow-y-auto py-0.5 pr-2"
-      style={{ left: `calc(100% - ${TAB_TUCK}px)` }}
+      // `max-h` also stops short of SidebarSideToggle, which sits on this
+      // same edge near the sidebar's bottom.
+      className={`dark-scrollbar absolute top-5 z-0 flex max-h-[calc(100%-4.5rem)] w-9 flex-col gap-1.5 overflow-y-auto py-0.5 ${
+        side === 'left' ? 'pr-2' : 'pl-2'
+      }`}
+      style={{
+        [side === 'left' ? 'left' : 'right']: `calc(100% - ${TAB_TUCK}px)`,
+      }}
     >
       {entries.map(entry => (
         <button
@@ -122,7 +137,11 @@ export default function BookmarkRail({
           onMouseLeave={() => setHovered(null)}
           aria-label={`Focus ${entry.title}`}
           // `h-6`: a fixed height now that there's no text to size it.
-          className="h-6 flex-shrink-0 rounded-r-md shadow-md transition-transform duration-150 hover:translate-x-1"
+          className={`h-6 flex-shrink-0 shadow-md transition-transform duration-150 ${
+            side === 'left'
+              ? 'rounded-r-md hover:translate-x-1'
+              : 'rounded-l-md hover:-translate-x-1'
+          }`}
           style={{ backgroundColor: getActivityColor(entry.activityType) }}
         />
       ))}

@@ -34,7 +34,7 @@
  */
 
 import { useState } from 'react';
-import { Link, Outlet } from 'react-router-dom';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import AddEntryForm from './AddEntryForm';
 import ManageCategoriesModal from './ManageCategoriesModal';
 import ThemeToggle from './ThemeToggle';
@@ -56,6 +56,9 @@ interface LayoutProps {
   /** Setter for `editingEntry` (App.tsx's `setEditingEntry`) - used here to clear it once the form closes. */
   onEditEntry: (entry: Entry | null) => void;
 }
+
+/** Routes whose page is a full-bleed canvas + left sidebar - see `main` below. */
+const VIZ_PATHS = new Set(['/constellation', '/linear', '/spiral']);
 
 export default function Layout({
   entries,
@@ -79,6 +82,11 @@ export default function Layout({
     closeManageCategoriesModal,
     refreshCategories,
   } = useEntrySelectionContext();
+
+  // The three visualization pages anchor their sidebar to the screen's
+  // left edge (see `main` below) rather than to a centered content column.
+  const { pathname } = useLocation();
+  const isVizPage = VIZ_PATHS.has(pathname);
   /**
    * LOCAL STATE: Modal visibility
    *
@@ -216,7 +224,13 @@ export default function Layout({
         className="pointer-events-none fixed inset-x-0 top-0 z-10"
         aria-label="Main navigation"
       >
-        <div className="mx-auto grid max-w-7xl grid-cols-[1fr_auto_1fr] items-start gap-4 px-4 pt-4 sm:px-6 lg:px-8">
+        {/*
+         * Full viewport width (no `max-w-7xl` column), inset by
+         * --edge-gutter (index.css) - so the left/right pills sit a
+         * viewport-scaled distance from the true screen edges rather than
+         * drifting inward toward a centered 1280px column on wide monitors.
+         */}
+        <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-4 px-[var(--edge-gutter)] pt-4">
           {/*
            * Shared pill styling across all three: `--panel-bg-color-solid`
            * + `--panel-border-color` + `shadow-lg` + `backdrop-blur` is
@@ -353,12 +367,22 @@ export default function Layout({
        * `headerLayout` comment) starting safely below the tallest pill
        * regardless, and remains a LIVE measurement wherever it reads off
        * this element's actual rendered position, so nothing downstream
-       * needs updating if this value changes. `px-4 sm:px-6 lg:px-8`/
-       * `mx-auto max-w-7xl` are unchanged from before - Constellation.tsx's
-       * own `left` measurement comment explicitly depends on this exact
-       * horizontal class set staying put.
+       * needs updating if this value changes.
+       *
+       * Horizontal: Home/About keep the centered `mx-auto max-w-7xl`
+       * reading column. The three visualization pages instead span the
+       * full viewport inset by --edge-gutter (the same token the navbar
+       * uses), so their sidebar lines up under the left nav pill and hugs
+       * the screen edge on wide monitors. Their own `containerLayout.left`
+       * measurement picks up whichever applies - nothing there hardcodes it.
        */}
-      <main className="mx-auto max-w-7xl px-4 pb-8 pt-24 sm:px-6 lg:px-8">
+      <main
+        className={
+          isVizPage
+            ? 'px-[var(--edge-gutter)] pb-8 pt-24'
+            : 'mx-auto max-w-7xl px-4 pb-8 pt-24 sm:px-6 lg:px-8'
+        }
+      >
         {/**
          * OUTLET - React Router's placeholder for nested routes
          *

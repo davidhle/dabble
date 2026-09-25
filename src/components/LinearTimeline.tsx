@@ -169,6 +169,7 @@ import { getActivityColor } from '../utils/colors';
 // header comment for why this was pulled out into one component instead
 // of each visualization keeping its own copy of the markup.
 import EntryTooltip from './EntryTooltip';
+import type { SidebarSide } from '../hooks/useSidebarWidth';
 import VizEmptyState from './VizEmptyState';
 import { assignLanes } from '../utils/laneAssignment';
 import {
@@ -239,6 +240,8 @@ interface LinearTimelineProps {
    * CLICK-TO-CENTER effect does.
    */
   sidebarWidth: number;
+  /** Which screen edge `sidebarWidth`'s band is on - see useSidebarWidth.ts's SidebarSide comment. */
+  sidebarSide: SidebarSide;
   /**
    * Timeline.tsx's measured `headerLayout.top` - the same measurement
    * Constellation.tsx takes for SidebarPanelStack's own `top`, i.e.
@@ -401,6 +404,7 @@ export default function LinearTimeline({
   openedEntryIds,
   expandedEntryId,
   sidebarWidth,
+  sidebarSide,
   topOffset,
   domainRange,
   isEditMode,
@@ -496,9 +500,20 @@ export default function LinearTimeline({
    * which still has to exclude the sidebar's band itself since StarMap's
    * own coordinate space is NOT shifted the way this one now is.
    */
+  //
+  // Mirrored when the sidebar is on the right: the content band starts at
+  // the plain left margin and instead stops short of the sidebar's band
+  // (plus the same gutter) on the right - so `innerWidth / 2` below still
+  // centers within the visible area either way.
+  const sidebarBand = sidebarWidth > 0 ? sidebarWidth + SIDEBAR_GUTTER : 0;
   const contentOriginX =
-    sidebarWidth > 0 ? sidebarWidth + SIDEBAR_GUTTER : MARGIN.left;
-  const innerWidth = Math.max(0, size.width - contentOriginX - MARGIN.right);
+    sidebarSide === 'left' && sidebarBand > 0 ? sidebarBand : MARGIN.left;
+  const contentEndMargin =
+    sidebarSide === 'right' && sidebarBand > 0 ? sidebarBand : MARGIN.right;
+  const innerWidth = Math.max(
+    0,
+    size.width - contentOriginX - contentEndMargin
+  );
 
   // Set for O(1) membership checks per point/range, rebuilt only when the
   // prop itself changes - same pattern as StarMap.tsx's activeCategorySet.
@@ -994,7 +1009,7 @@ export default function LinearTimeline({
     // own too), not every render that happens to touch one of the values
     // it reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedEntryId, sidebarWidth]);
+  }, [expandedEntryId, sidebarWidth, sidebarSide]);
 
   const isReady = size.width > 0 && size.height > 0;
 
@@ -1249,6 +1264,7 @@ export default function LinearTimeline({
           hasAnyEntries={hasAnyEntries}
           topOffset={topOffset}
           sidebarWidth={sidebarWidth}
+          sidebarSide={sidebarSide}
           editModeBannerVisible={isEditMode}
         />
       )}
