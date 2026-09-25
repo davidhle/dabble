@@ -18,7 +18,13 @@
  * DEFAULT_CATEGORIES' existing fixed ids directly.
  */
 
-import { Entry, EntryLocation, MediaLink, MediaType } from '../types/Entry';
+import {
+  Entry,
+  EntryLocation,
+  MediaLink,
+  MediaType,
+  Reflection,
+} from '../types/Entry';
 import { DEFAULT_CATEGORIES } from '../types/Category';
 import seedEntries from './seedEntries.json';
 
@@ -38,6 +44,12 @@ interface RawSeedEntry {
   dateDisplay?: string | null;
   /** Optional multi-day end date - see the endTimestamp field comment in types/Entry.ts. */
   endTimestamp?: string | null;
+  /**
+   * Optional follow-up reflections - see Entry.reflections. Already in the
+   * live app's Export Data shape (valid MediaType values etc.), so passed
+   * through as-is rather than adapted like the entry's own mediaLinks.
+   */
+  reflections?: Reflection[] | null;
 }
 
 /**
@@ -123,6 +135,7 @@ function toEntry(raw: RawSeedEntry): Entry {
     ...(raw.mood ? { mood: raw.mood } : {}),
     ...(raw.dateDisplay ? { dateDisplay: raw.dateDisplay } : {}),
     ...(raw.endTimestamp ? { endTimestamp: raw.endTimestamp } : {}),
+    ...(raw.reflections?.length ? { reflections: raw.reflections } : {}),
   };
 }
 
