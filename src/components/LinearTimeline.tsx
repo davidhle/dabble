@@ -169,8 +169,14 @@ import { getActivityColor } from '../utils/colors';
 // header comment for why this was pulled out into one component instead
 // of each visualization keeping its own copy of the markup.
 import EntryTooltip from './EntryTooltip';
+import type { SidebarSide } from '../hooks/useSidebarWidth';
 import VizEmptyState from './VizEmptyState';
 import { assignLanes } from '../utils/laneAssignment';
+import {
+  FOCUSED_GLOW_OPACITY,
+  FOCUSED_GLOW_STROKE_WIDTH,
+  FOCUSED_RING_STROKE_WIDTH,
+} from '../utils/focusHighlight';
 
 interface LinearTimelineProps {
   entries: Entry[];
@@ -234,6 +240,8 @@ interface LinearTimelineProps {
    * CLICK-TO-CENTER effect does.
    */
   sidebarWidth: number;
+  /** Which screen edge `sidebarWidth`'s band is on - see useSidebarWidth.ts's SidebarSide comment. */
+  sidebarSide: SidebarSide;
   /**
    * Timeline.tsx's measured `headerLayout.top` - the same measurement
    * Constellation.tsx takes for SidebarPanelStack's own `top`, i.e.
@@ -396,6 +404,7 @@ export default function LinearTimeline({
   openedEntryIds,
   expandedEntryId,
   sidebarWidth,
+  sidebarSide,
   topOffset,
   domainRange,
   isEditMode,
@@ -491,9 +500,20 @@ export default function LinearTimeline({
    * which still has to exclude the sidebar's band itself since StarMap's
    * own coordinate space is NOT shifted the way this one now is.
    */
+  //
+  // Mirrored when the sidebar is on the right: the content band starts at
+  // the plain left margin and instead stops short of the sidebar's band
+  // (plus the same gutter) on the right - so `innerWidth / 2` below still
+  // centers within the visible area either way.
+  const sidebarBand = sidebarWidth > 0 ? sidebarWidth + SIDEBAR_GUTTER : 0;
   const contentOriginX =
-    sidebarWidth > 0 ? sidebarWidth + SIDEBAR_GUTTER : MARGIN.left;
-  const innerWidth = Math.max(0, size.width - contentOriginX - MARGIN.right);
+    sidebarSide === 'left' && sidebarBand > 0 ? sidebarBand : MARGIN.left;
+  const contentEndMargin =
+    sidebarSide === 'right' && sidebarBand > 0 ? sidebarBand : MARGIN.right;
+  const innerWidth = Math.max(
+    0,
+    size.width - contentOriginX - contentEndMargin
+  );
 
   // Set for O(1) membership checks per point/range, rebuilt only when the
   // prop itself changes - same pattern as StarMap.tsx's activeCategorySet.
@@ -989,7 +1009,7 @@ export default function LinearTimeline({
     // own too), not every render that happens to touch one of the values
     // it reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedEntryId, sidebarWidth]);
+  }, [expandedEntryId, sidebarWidth, sidebarSide]);
 
   const isReady = size.width > 0 && size.height > 0;
 
@@ -1058,6 +1078,10 @@ export default function LinearTimeline({
             // work across the full length.
             ranges.map(({ entry, cxStart, cxEnd, color, lane }) => {
               const isOpened = openedEntryIdSet.has(entry.id);
+              // FOCUSED ENTRY: the one the sidebar's FocusedEntryView is
+              // showing gets a brighter opened highlight - see
+              // utils/focusHighlight.ts.
+              const isFocused = entry.id === expandedEntryId;
               const isFilteredOut = !activeCategorySet.has(entry.activityType);
               const y = BASELINE_Y + (lane + 1) * LANE_HEIGHT;
               return (
@@ -1090,8 +1114,8 @@ export default function LinearTimeline({
                       {...capsuleOutlineRect(cxStart, cxEnd, y, 5)}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}
-                      strokeWidth={4}
-                      strokeOpacity={0.6}
+                      strokeWidth={isFocused ? FOCUSED_GLOW_STROKE_WIDTH : 4}
+                      strokeOpacity={isFocused ? FOCUSED_GLOW_OPACITY : 0.6}
                       filter="url(#opened-point-glow)"
                       className="pointer-events-none"
                     />
@@ -1146,7 +1170,7 @@ export default function LinearTimeline({
                       {...capsuleOutlineRect(cxStart, cxEnd, y, 3)}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}
-                      strokeWidth={1.5}
+                      strokeWidth={isFocused ? FOCUSED_RING_STROKE_WIDTH : 1.5}
                       className="pointer-events-none"
                     />
                   )}
@@ -1156,6 +1180,7 @@ export default function LinearTimeline({
           {isReady &&
             points.map(({ entry, cx, color }) => {
               const isOpened = openedEntryIdSet.has(entry.id);
+              const isFocused = entry.id === expandedEntryId;
               const isFilteredOut = !activeCategorySet.has(entry.activityType);
               return (
                 // SELECTED-ENTRY HIGHLIGHT: same per-entry <g> + opacity
@@ -1177,8 +1202,8 @@ export default function LinearTimeline({
                       r={POINT_RADIUS + 5}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}
-                      strokeWidth={4}
-                      strokeOpacity={0.6}
+                      strokeWidth={isFocused ? FOCUSED_GLOW_STROKE_WIDTH : 4}
+                      strokeOpacity={isFocused ? FOCUSED_GLOW_OPACITY : 0.6}
                       filter="url(#opened-point-glow)"
                       className="pointer-events-none"
                     />
@@ -1219,7 +1244,7 @@ export default function LinearTimeline({
                       r={POINT_RADIUS + 3}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}
-                      strokeWidth={1.5}
+                      strokeWidth={isFocused ? FOCUSED_RING_STROKE_WIDTH : 1.5}
                       className="pointer-events-none"
                     />
                   )}
@@ -1239,6 +1264,7 @@ export default function LinearTimeline({
           hasAnyEntries={hasAnyEntries}
           topOffset={topOffset}
           sidebarWidth={sidebarWidth}
+          sidebarSide={sidebarSide}
           editModeBannerVisible={isEditMode}
         />
       )}

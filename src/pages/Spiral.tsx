@@ -75,12 +75,16 @@ import {
   useRef,
   useState,
 } from 'react';
+import BookmarkRail from '../components/BookmarkRail';
 import EditModeBanner from '../components/EditModeBanner';
 import EditModeToggle from '../components/EditModeToggle';
 import FilterBar from '../components/FilterBar';
+import FocusedEntryView from '../components/FocusedEntryView';
 import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
 import SidebarPanelStack from '../components/SidebarPanelStack';
+import SidebarResizeHandle from '../components/SidebarResizeHandle';
+import SidebarSideToggle from '../components/SidebarSideToggle';
 import SpiralTimeline from '../components/SpiralTimeline';
 import TimeRangeSelector from '../components/TimeRangeSelector';
 import VizPageHeader from '../components/VizPageHeader';
@@ -88,6 +92,7 @@ import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
 import { useEntrySelection } from '../hooks/useEntrySelection';
+import { useSidebarWidth } from '../hooks/useSidebarWidth';
 import { useTimeRange } from '../context/TimeRangeContext';
 import { useEditMode } from '../context/EditModeContext';
 
@@ -104,9 +109,15 @@ interface SpiralProps {
   entries: Entry[];
   /** Opens `entry` in the shared AddEntryForm's edit mode - see App.tsx's `editingEntry` state. */
   onEditEntry: (entry: Entry) => void;
+  /** App.tsx's `updateEntry` - used by EntryPanel to save reflections. */
+  onUpdateEntry: (entry: Entry) => void;
 }
 
-export default function Spiral({ entries, onEditEntry }: SpiralProps) {
+export default function Spiral({
+  entries,
+  onEditEntry,
+  onUpdateEntry,
+}: SpiralProps) {
   // `selectedRange` is the shared, cross-page time filter (same context
   // Constellation.tsx/Timeline.tsx read); `timeFilteredEntries` is
   // `entries` hard-cut down to only what's `isEntryWithinRange` of it -
@@ -130,8 +141,12 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
     expandedEntryId,
     handleEntryClick,
     handleExpandPanel,
-    handleMinimizePanel,
     handleClosePanel,
+    canUndoFocus,
+    handleUndoFocus,
+    handleExitFocus,
+    focusedView,
+    handleFocusedViewChange,
     sortMode,
     handleSortModeChange,
     categoryGroups,
@@ -193,9 +208,25 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
   // identical to Constellation.tsx's/Timeline.tsx's own measurement setup
   // for their unified `.bullet-journal-surface` container; see
   // Constellation.tsx's layout comment for the full reasoning behind each.
+  const isFocused = expandedEntryId !== null;
   const containerRef = useRef<HTMLDivElement>(null);
   const headerContentRef = useRef<HTMLDivElement>(null);
-  const [containerLayout, setContainerLayout] = useState({ top: 0, left: 0 });
+  const [containerLayout, setContainerLayout] = useState({
+    top: 0,
+    left: 0,
+    right: 0,
+  });
+  // The container's CSS width - the `33vw - offset` default, or the user's
+  // dragged width - and which screen edge it's anchored to (see
+  // useSidebarWidth.ts / SidebarResizeHandle.tsx / SidebarSideToggle.tsx).
+  const {
+    width: containerWidth,
+    resizeTo: resizeSidebar,
+    persist: persistSidebarWidth,
+    resetWidth: resetSidebarWidth,
+    side: sidebarSide,
+    toggleSide: toggleSidebarSide,
+  } = useSidebarWidth(containerLayout);
   const [topOffset, setTopOffset] = useState(0);
 
   useEffect(() => {
@@ -206,7 +237,11 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
     const updateLayout = () => {
       const containerRect = containerEl.getBoundingClientRect();
       const headerRect = headerEl.getBoundingClientRect();
-      setContainerLayout({ top: containerRect.top, left: containerRect.left });
+      setContainerLayout({
+        top: containerRect.top,
+        left: containerRect.left,
+        right: document.documentElement.clientWidth - containerRect.right,
+      });
       setTopOffset(headerRect.bottom);
     };
     updateLayout();
@@ -219,7 +254,12 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
       observer.disconnect();
       window.removeEventListener('resize', updateLayout);
     };
-  }, []);
+    // Re-run when focused mode toggles: FocusedEntryView swaps in its own
+    // header block (also attached to `headerContentRef`), so the observer
+    // has to re-attach to whichever header element is now mounted.
+    // ...and when the sidebar flips sides: the container moves without
+    // resizing, which the ResizeObserver above wouldn't report.
+  }, [isFocused, sidebarSide]);
 
   // The unified container's live rendered width, passed to SpiralTimeline
   // so its CLICK-TO-CENTER effect can keep its centering math accurate -
@@ -236,12 +276,27 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
       return;
     }
 
-    const updateWidth = () => setSidebarWidth(el.getBoundingClientRect().width);
+    // The width of the screen band the sidebar occupies, measured from its
+    // own edge - see useSidebarWidth.ts's SidebarSide comment.
+    const updateWidth = () => {
+      const rect = el.getBoundingClientRect();
+      setSidebarWidth(
+        sidebarSide === 'left'
+          ? rect.right
+          : document.documentElement.clientWidth - rect.left
+      );
+    };
     updateWidth();
+    // A window resize can move the container without resizing it (a
+    // dragged, fixed-px width), which the ResizeObserver alone misses.
     const observer = new ResizeObserver(updateWidth);
     observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasSelection]);
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [hasSelection, sidebarSide]);
 
   // TimeRangeSelector's own CARD's live rendered position - used only by
   // the STAR GLYPH FOOTNOTE below (Spiral-only; Constellation.tsx/
@@ -286,7 +341,7 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
       observer.disconnect();
       window.removeEventListener('resize', updateRect);
     };
-  }, [sidebarWidth]);
+  }, [sidebarWidth, sidebarSide]);
 
   return (
     // Fragment, not a `space-y-4` div - see Constellation.tsx's identical
@@ -304,43 +359,108 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
        * container uses, rather than able to stretch the container wider
        * than intended the way an unconstrained `w-fit` wrapper once could.
        */}
+      {/*
+       * Wrapper shared by the sidebar container and the focused-mode
+       * BookmarkRail, which pokes out past the container's right edge -
+       * see BookmarkRail.tsx's OUTSIDE THE SIDEBAR comment for why the
+       * rail has to be the container's sibling rather than its child.
+       * `w-fit` shrink-wraps the container, so the rail's `left: 100%` is
+       * the container's live right edge. `relative z-10` lifts both above
+       * the `fixed` canvas, the same job the container's own `z-10` did
+       * before this wrapper existed.
+       */}
+      {/*
+       * `ml-auto` when the sidebar is on the right: pushes the shrink-
+       * wrapped wrapper to `main`'s right padding edge, i.e. --edge-gutter
+       * from the screen's right edge - the same responsive offset the
+       * left-side anchor gets from `main`'s left padding, mirrored.
+       */}
       <div
-        ref={containerRef}
-        className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
-        style={{
-          width: `calc(33vw - ${containerLayout.left}px)`,
-          maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
-        }}
+        className={`relative z-10 w-fit ${
+          sidebarSide === 'right' ? 'ml-auto' : ''
+        }`}
       >
-        <div ref={headerContentRef} className="flex-shrink-0 space-y-4 p-4">
-          <VizPageHeader
-            title="Spiral Timeline"
-            subtitle="Drag to pan, scroll to zoom, and click a point (or arc) to see the entry behind it. Time coils outward from the center - oldest at the middle, most recent at the rim."
-          />
+        <div
+          ref={containerRef}
+          className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
+          style={{
+            width: containerWidth,
+            maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
+          }}
+        >
+          {/*
+           * FOCUSED MODE - see FocusedEntryView.tsx: while an entry is
+           * expanded, it takes over the whole sidebar in place of the page
+           * header, FilterBar, and panel stack below.
+           */}
+          {expandedEntryId ? (
+            <FocusedEntryView
+              selectedEntries={selectedEntries}
+              focusedEntryId={expandedEntryId}
+              headerRef={headerContentRef}
+              canUndo={canUndoFocus}
+              onBack={handleExitFocus}
+              view={focusedView}
+              onViewChange={handleFocusedViewChange}
+              onUndo={handleUndoFocus}
+              onEdit={onEditEntry}
+              onClose={handleClosePanel}
+              onUpdateEntry={onUpdateEntry}
+            />
+          ) : (
+            <>
+              <div
+                ref={headerContentRef}
+                className="flex-shrink-0 space-y-4 p-4"
+              >
+                <VizPageHeader
+                  title="Spiral Timeline"
+                  subtitle="Drag to pan, scroll to zoom, and click a point (or arc) to see the entry behind it. Time coils outward from the center - oldest at the middle, most recent at the rim."
+                />
 
-          <FilterBar
-            sortMode={sortMode}
-            onSortModeChange={handleSortModeChange}
-            categories={categories}
-            filterCategories={filterCategories}
-            onToggleFilterCategory={handleToggleFilterCategory}
-            onResetFilters={handleResetFilters}
-            hasSelection={hasSelection}
-          />
+                <FilterBar
+                  sortMode={sortMode}
+                  onSortModeChange={handleSortModeChange}
+                  categories={categories}
+                  filterCategories={filterCategories}
+                  onToggleFilterCategory={handleToggleFilterCategory}
+                  onResetFilters={handleResetFilters}
+                  hasSelection={hasSelection}
+                />
+              </div>
+
+              {hasSelection && (
+                <div className="dark-scrollbar flex-1 overflow-y-auto px-4 pb-4">
+                  <SidebarPanelStack
+                    selectedEntries={selectedEntries}
+                    sortMode={sortMode}
+                    categoryGroups={categoryGroups}
+                    onExpand={handleExpandPanel}
+                    onClose={handleClosePanel}
+                  />
+                </div>
+              )}
+            </>
+          )}
         </div>
 
-        {hasSelection && (
-          <div className="dark-scrollbar flex-1 overflow-y-auto px-4 pb-4">
-            <SidebarPanelStack
-              selectedEntries={selectedEntries}
-              sortMode={sortMode}
-              categoryGroups={categoryGroups}
-              onExpand={handleExpandPanel}
-              onMinimize={handleMinimizePanel}
-              onClose={handleClosePanel}
-              onEdit={onEditEntry}
-            />
-          </div>
+        <SidebarResizeHandle
+          side={sidebarSide}
+          targetRef={containerRef}
+          onResize={resizeSidebar}
+          onResizeEnd={persistSidebarWidth}
+          onReset={resetSidebarWidth}
+        />
+
+        <SidebarSideToggle side={sidebarSide} onToggle={toggleSidebarSide} />
+
+        {expandedEntryId && (
+          <BookmarkRail
+            side={sidebarSide}
+            selectedEntries={selectedEntries}
+            focusedEntryId={expandedEntryId}
+            onSelect={handleExpandPanel}
+          />
         )}
       </div>
 
@@ -353,6 +473,7 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}
         sidebarWidth={sidebarWidth}
+        sidebarSide={sidebarSide}
         resetViewSignal={resetViewSignal}
         domainRange={selectedRange}
         topOffset={topOffset}
@@ -373,6 +494,7 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
         ref={timeRangeSelectorCardRef}
         entries={entries}
         sidebarWidth={sidebarWidth}
+        sidebarSide={sidebarSide}
       />
 
       {/*
@@ -405,8 +527,8 @@ export default function Spiral({ entries, onEditEntry }: SpiralProps) {
             window.innerHeight -
             timeRangeSelectorRect.top +
             STAR_GLYPH_FOOTNOTE_GAP,
-          left: sidebarWidth,
-          right: 0,
+          left: sidebarSide === 'left' ? sidebarWidth : 0,
+          right: sidebarSide === 'right' ? sidebarWidth : 0,
         }}
       >
         <p className="text-xs text-[var(--text-muted-color)]">

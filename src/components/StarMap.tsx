@@ -131,7 +131,13 @@ import { getActivityColor } from '../utils/colors';
 // EntryTooltip.tsx's header comment for why this is a shared pattern
 // across both visualization views rather than duplicated per-component.
 import EntryTooltip from './EntryTooltip';
+import type { SidebarSide } from '../hooks/useSidebarWidth';
 import VizEmptyState from './VizEmptyState';
+import {
+  FOCUSED_GLOW_OPACITY,
+  FOCUSED_GLOW_STROKE_WIDTH,
+  FOCUSED_RING_STROKE_WIDTH,
+} from '../utils/focusHighlight';
 
 interface StarMapProps {
   entries: Entry[];
@@ -199,6 +205,8 @@ interface StarMapProps {
    * being implied by the canvas's own (previously shrinking) size.
    */
   sidebarWidth: number;
+  /** Which screen edge `sidebarWidth`'s band is on - see useSidebarWidth.ts's SidebarSide comment. */
+  sidebarSide: SidebarSide;
   /**
    * Bumped (incremented) by Constellation.tsx every time its Escape-key
    * full reset fires - see the RESET-VIEW effect below. A counter rather
@@ -316,6 +324,7 @@ export default function StarMap({
   expandedEntryId,
   filterCategories,
   sidebarWidth,
+  sidebarSide,
   resetViewSignal,
   topOffset,
   isEditMode,
@@ -542,7 +551,12 @@ export default function StarMap({
     const { width, height } = size;
     if (width === 0 || height === 0) return;
 
-    const targetX = sidebarWidth + (width - sidebarWidth) / 2;
+    // Center in whatever the sidebar's band leaves free - to its right
+    // when the sidebar is on the left, to its left when it's on the right.
+    const targetX =
+      sidebarSide === 'left'
+        ? sidebarWidth + (width - sidebarWidth) / 2
+        : (width - sidebarWidth) / 2;
     const targetY = height / 2;
 
     const currentTransform = d3.zoomTransform(svgNode);
@@ -557,7 +571,7 @@ export default function StarMap({
       .duration(650) // 500-750ms: smooth, not sluggish
       .call(zoomBehavior.transform, centeredTransform);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedEntryId, sidebarWidth]);
+  }, [expandedEntryId, sidebarWidth, sidebarSide]);
 
   /**
    * ─── RESET-VIEW: PROGRAMMATIC PAN/ZOOM RESET, TIED TO `resetViewSignal` ───
@@ -826,6 +840,10 @@ export default function StarMap({
 
           {stars.map(({ entry, x, y, radius, color }) => {
             const isOpened = openedEntryIdSet.has(entry.id);
+            // FOCUSED ENTRY: the one the sidebar's FocusedEntryView is
+            // showing gets a brighter opened highlight - see
+            // utils/focusHighlight.ts.
+            const isFocused = entry.id === expandedEntryId;
             const isFilteredOut = !activeCategorySet.has(entry.activityType);
             return (
               // Opacity is set on the whole group (glow + star + ring)
@@ -848,8 +866,8 @@ export default function StarMap({
                     r={radius + 5}
                     fill="none"
                     stroke={OPENED_HIGHLIGHT_COLOR}
-                    strokeWidth={4}
-                    strokeOpacity={0.6}
+                    strokeWidth={isFocused ? FOCUSED_GLOW_STROKE_WIDTH : 4}
+                    strokeOpacity={isFocused ? FOCUSED_GLOW_OPACITY : 0.6}
                     filter="url(#opened-star-glow)"
                     className="pointer-events-none"
                   />
@@ -893,7 +911,7 @@ export default function StarMap({
                     r={radius + 3}
                     fill="none"
                     stroke={OPENED_HIGHLIGHT_COLOR}
-                    strokeWidth={1.5}
+                    strokeWidth={isFocused ? FOCUSED_RING_STROKE_WIDTH : 1.5}
                     className="pointer-events-none"
                   />
                 )}
@@ -918,6 +936,7 @@ export default function StarMap({
           hasAnyEntries={hasAnyEntries}
           topOffset={topOffset}
           sidebarWidth={sidebarWidth}
+          sidebarSide={sidebarSide}
           editModeBannerVisible={isEditMode}
         />
       )}

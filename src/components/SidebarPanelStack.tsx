@@ -1,11 +1,15 @@
 /**
  * SidebarPanelStack.tsx - Stack Of Open Entry Panels
  *
- * Renders the stack of <EntryPanel> cards for whatever `selectedEntries`
+ * Renders the stack of <EntryPanel> rows for whatever `selectedEntries`
  * useEntrySelection.ts currently holds - factored out of Constellation.tsx
  * (its original, only caller) so Timeline.tsx and Spiral.tsx can reuse the
  * exact same sidebar instead of re-implementing it. See
  * useEntrySelection.ts for the state this renders.
+ *
+ * Only ever shown while NO entry is expanded: expanding one switches the
+ * whole sidebar to FocusedEntryView.tsx instead (see that file), so every
+ * row here renders minimized.
  *
  * NO POSITIONING/SURFACE OF ITS OWN: this used to be its own `fixed`,
  * absolutely-positioned overlay with its own width/top/left/background -
@@ -19,7 +23,6 @@
 
 import EntryPanel from './EntryPanel';
 import { SortMode } from './FilterBar';
-import { Entry } from '../types/Entry';
 import { CategoryGroup, SelectedEntry } from '../hooks/useEntrySelection';
 
 interface SidebarPanelStackProps {
@@ -27,16 +30,7 @@ interface SidebarPanelStackProps {
   sortMode: SortMode;
   categoryGroups: CategoryGroup[];
   onExpand: (entryId: string) => void;
-  /** Wired to useEntrySelection's `handleMinimizePanel` - see EntryPanel.tsx. */
-  onMinimize: (entryId: string) => void;
   onClose: (entryId: string) => void;
-  /**
-   * Opens `entry` in the shared AddEntryForm's edit mode - takes the full
-   * Entry (not just an id) since that's what App.tsx's `editingEntry`
-   * state needs, and this is the one place already holding each panel's
-   * full entry object.
-   */
-  onEdit: (entry: Entry) => void;
 }
 
 export default function SidebarPanelStack({
@@ -44,9 +38,7 @@ export default function SidebarPanelStack({
   sortMode,
   categoryGroups,
   onExpand,
-  onMinimize,
   onClose,
-  onEdit,
 }: SidebarPanelStackProps) {
   return (
     <div className="flex flex-col gap-3">
@@ -70,15 +62,12 @@ export default function SidebarPanelStack({
             <span>Sorted by date (newest first)</span>
           </div>
 
-          {selectedEntries.map(({ entry, expanded }) => (
+          {selectedEntries.map(({ entry }) => (
             <EntryPanel
               key={entry.id}
               entry={entry}
-              expanded={expanded}
               onExpand={() => onExpand(entry.id)}
-              onMinimize={() => onMinimize(entry.id)}
               onClose={() => onClose(entry.id)}
-              onEdit={() => onEdit(entry)}
             />
           ))}
         </>
@@ -91,15 +80,12 @@ export default function SidebarPanelStack({
             >
               {category.name}
             </div>
-            {groupEntries.map(({ entry, expanded }) => (
+            {groupEntries.map(({ entry }) => (
               <EntryPanel
                 key={entry.id}
                 entry={entry}
-                expanded={expanded}
                 onExpand={() => onExpand(entry.id)}
-                onMinimize={() => onMinimize(entry.id)}
                 onClose={() => onClose(entry.id)}
-                onEdit={() => onEdit(entry)}
               />
             ))}
           </div>

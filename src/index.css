@@ -364,6 +364,40 @@
   color-scheme: light;
 }
 
+/*
+ * SCREEN-EDGE GUTTERS
+ *
+ * --edge-gutter: distance from the viewport's left/right edge to the
+ * navbar pills (Layout.tsx) and, on the three visualization pages, the
+ * sidebar container. Below `lg` it's the same 16px/24px steps the old
+ * `px-4 sm:px-6` classes gave; from `lg` up it grows with the viewport
+ * (3vw) instead of sitting at a fixed 32px, so a large monitor pushes
+ * the chrome out toward the true edges - 32px through ~1070px wide,
+ * ~43px at 1440, ~58px at 1920, 77px at 2560, capped at 80px beyond.
+ *
+ * --chrome-edge-gutter: the right-anchored floating button stack
+ * (ThemeToggle/ResetButton/EditModeToggle) and the top-right banners
+ * (EditModeBanner/VizEmptyState). Never tighter than the 24px (`right-6`)
+ * they've always used, but tracks --edge-gutter once that's wider, so the
+ * stack stays lined up under the navbar's right-hand '+' pill.
+ */
+:root {
+  --edge-gutter: 16px;
+  --chrome-edge-gutter: max(24px, var(--edge-gutter));
+}
+
+@media (min-width: 640px) {
+  :root {
+    --edge-gutter: 24px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --edge-gutter: clamp(32px, 3vw, 80px);
+  }
+}
+
 body {
   margin: 0;
   min-width: 320px;

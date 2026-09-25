@@ -240,6 +240,46 @@ export interface Entry {
    * range is displayed.
    */
   endTimestamp?: string;
+
+  /**
+   * Dated follow-up notes written after the fact about this entry - see
+   * the Reflection interface below.
+   *
+   * OPTIONAL & BACKWARD-COMPATIBLE: absent on every entry created before
+   * reflections existed, and on any entry that simply has none yet -
+   * treated the same as an empty array everywhere it's read.
+   */
+  reflections?: Reflection[];
+}
+
+/**
+ * Reflection Interface
+ *
+ * A dated follow-up note attached to a past entry (e.g. "a month later,
+ * that footwork finally clicked"). Added via AddReflectionForm.tsx.
+ *
+ * STAGE 1 (data model + basic functionality): no title/category of its
+ * own, since it always belongs to its parent entry.
+ */
+export interface Reflection {
+  /** Generated with crypto.randomUUID(), like Entry.id. */
+  id: string;
+
+  /**
+   * When the reflection was written, as an ISO string. Backdatable, but
+   * never earlier than the parent entry's own date (its endTimestamp if
+   * set, otherwise its timestamp) and never later than today. Date-only:
+   * stored at placeholder midnight UTC, the same convention as an Entry
+   * with hasTime: false, so it must be read back in UTC.
+   */
+  writtenDate: string;
+
+  /** Same shape/meaning as Entry.mood. */
+  mood?: string[];
+
+  text: string;
+
+  mediaLinks?: MediaLink[];
 }
 
 /**

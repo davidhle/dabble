@@ -100,19 +100,24 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import BookmarkRail from '../components/BookmarkRail';
 import EditModeBanner from '../components/EditModeBanner';
 import EditModeToggle from '../components/EditModeToggle';
 import FilterBar from '../components/FilterBar';
+import FocusedEntryView from '../components/FocusedEntryView';
 import LinearTimeline from '../components/LinearTimeline';
 import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
 import SidebarPanelStack from '../components/SidebarPanelStack';
+import SidebarResizeHandle from '../components/SidebarResizeHandle';
+import SidebarSideToggle from '../components/SidebarSideToggle';
 import TimeRangeSelector from '../components/TimeRangeSelector';
 import VizPageHeader from '../components/VizPageHeader';
 import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
 import { useEntrySelection } from '../hooks/useEntrySelection';
+import { useSidebarWidth } from '../hooks/useSidebarWidth';
 import { useTimeRange } from '../context/TimeRangeContext';
 import { useEditMode } from '../context/EditModeContext';
 
@@ -120,9 +125,15 @@ interface TimelineProps {
   entries: Entry[];
   /** Opens `entry` in the shared AddEntryForm's edit mode - see App.tsx's `editingEntry` state. */
   onEditEntry: (entry: Entry) => void;
+  /** App.tsx's `updateEntry` - used by EntryPanel to save reflections. */
+  onUpdateEntry: (entry: Entry) => void;
 }
 
-export default function Timeline({ entries, onEditEntry }: TimelineProps) {
+export default function Timeline({
+  entries,
+  onEditEntry,
+  onUpdateEntry,
+}: TimelineProps) {
   // See the STAGE 3 comment above: `selectedRange` is the shared,
   // cross-page time filter; `timeFilteredEntries` is `entries` hard-cut
   // down to only what's `isEntryWithinRange` of it - this (not `entries`)
@@ -140,8 +151,12 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
     expandedEntryId,
     handleEntryClick,
     handleExpandPanel,
-    handleMinimizePanel,
     handleClosePanel,
+    canUndoFocus,
+    handleUndoFocus,
+    handleExitFocus,
+    focusedView,
+    handleFocusedViewChange,
     sortMode,
     handleSortModeChange,
     categoryGroups,
@@ -210,9 +225,25 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
   // identical to Constellation.tsx's own measurement setup; see its
   // layout comment for the full reasoning behind each. `topOffset` is
   // still handed to LinearTimeline below - see the STAGE 2 comment above.
+  const isFocused = expandedEntryId !== null;
   const containerRef = useRef<HTMLDivElement>(null);
   const headerContentRef = useRef<HTMLDivElement>(null);
-  const [containerLayout, setContainerLayout] = useState({ top: 0, left: 0 });
+  const [containerLayout, setContainerLayout] = useState({
+    top: 0,
+    left: 0,
+    right: 0,
+  });
+  // The container's CSS width - the `33vw - offset` default, or the user's
+  // dragged width - and which screen edge it's anchored to (see
+  // useSidebarWidth.ts / SidebarResizeHandle.tsx / SidebarSideToggle.tsx).
+  const {
+    width: containerWidth,
+    resizeTo: resizeSidebar,
+    persist: persistSidebarWidth,
+    resetWidth: resetSidebarWidth,
+    side: sidebarSide,
+    toggleSide: toggleSidebarSide,
+  } = useSidebarWidth(containerLayout);
   const [topOffset, setTopOffset] = useState(0);
 
   useEffect(() => {
@@ -223,7 +254,11 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
     const updateLayout = () => {
       const containerRect = containerEl.getBoundingClientRect();
       const headerRect = headerEl.getBoundingClientRect();
-      setContainerLayout({ top: containerRect.top, left: containerRect.left });
+      setContainerLayout({
+        top: containerRect.top,
+        left: containerRect.left,
+        right: document.documentElement.clientWidth - containerRect.right,
+      });
       setTopOffset(headerRect.bottom);
     };
     updateLayout();
@@ -236,7 +271,12 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
       observer.disconnect();
       window.removeEventListener('resize', updateLayout);
     };
-  }, []);
+    // Re-run when focused mode toggles: FocusedEntryView swaps in its own
+    // header block (also attached to `headerContentRef`), so the observer
+    // has to re-attach to whichever header element is now mounted.
+    // ...and when the sidebar flips sides: the container moves without
+    // resizing, which the ResizeObserver above wouldn't report.
+  }, [isFocused, sidebarSide]);
 
   // The unified container's live rendered width, passed to LinearTimeline
   // so its AUTO-RECENTER effect can keep its horizontal-centering math
@@ -253,12 +293,27 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
       return;
     }
 
-    const updateWidth = () => setSidebarWidth(el.getBoundingClientRect().width);
+    // The width of the screen band the sidebar occupies, measured from its
+    // own edge - see useSidebarWidth.ts's SidebarSide comment.
+    const updateWidth = () => {
+      const rect = el.getBoundingClientRect();
+      setSidebarWidth(
+        sidebarSide === 'left'
+          ? rect.right
+          : document.documentElement.clientWidth - rect.left
+      );
+    };
     updateWidth();
+    // A window resize can move the container without resizing it (a
+    // dragged, fixed-px width), which the ResizeObserver alone misses.
     const observer = new ResizeObserver(updateWidth);
     observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasSelection]);
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [hasSelection, sidebarSide]);
 
   return (
     // Fragment, not a `space-y-4` div - see Constellation.tsx's identical
@@ -269,43 +324,108 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
        * UNIFIED SIDEBAR CONTAINER - identical structure/reasoning to
        * Constellation.tsx's own container; see its layout comment.
        */}
+      {/*
+       * Wrapper shared by the sidebar container and the focused-mode
+       * BookmarkRail, which pokes out past the container's right edge -
+       * see BookmarkRail.tsx's OUTSIDE THE SIDEBAR comment for why the
+       * rail has to be the container's sibling rather than its child.
+       * `w-fit` shrink-wraps the container, so the rail's `left: 100%` is
+       * the container's live right edge. `relative z-10` lifts both above
+       * the `fixed` canvas, the same job the container's own `z-10` did
+       * before this wrapper existed.
+       */}
+      {/*
+       * `ml-auto` when the sidebar is on the right: pushes the shrink-
+       * wrapped wrapper to `main`'s right padding edge, i.e. --edge-gutter
+       * from the screen's right edge - the same responsive offset the
+       * left-side anchor gets from `main`'s left padding, mirrored.
+       */}
       <div
-        ref={containerRef}
-        className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
-        style={{
-          width: `calc(33vw - ${containerLayout.left}px)`,
-          maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
-        }}
+        className={`relative z-10 w-fit ${
+          sidebarSide === 'right' ? 'ml-auto' : ''
+        }`}
       >
-        <div ref={headerContentRef} className="flex-shrink-0 space-y-4 p-4">
-          <VizPageHeader
-            title="Linear Timeline"
-            subtitle="Drag to pan, scroll to zoom, and click a point to see the entry behind it."
-          />
+        <div
+          ref={containerRef}
+          className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
+          style={{
+            width: containerWidth,
+            maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
+          }}
+        >
+          {/*
+           * FOCUSED MODE - see FocusedEntryView.tsx: while an entry is
+           * expanded, it takes over the whole sidebar in place of the page
+           * header, FilterBar, and panel stack below.
+           */}
+          {expandedEntryId ? (
+            <FocusedEntryView
+              selectedEntries={selectedEntries}
+              focusedEntryId={expandedEntryId}
+              headerRef={headerContentRef}
+              canUndo={canUndoFocus}
+              onBack={handleExitFocus}
+              view={focusedView}
+              onViewChange={handleFocusedViewChange}
+              onUndo={handleUndoFocus}
+              onEdit={onEditEntry}
+              onClose={handleClosePanel}
+              onUpdateEntry={onUpdateEntry}
+            />
+          ) : (
+            <>
+              <div
+                ref={headerContentRef}
+                className="flex-shrink-0 space-y-4 p-4"
+              >
+                <VizPageHeader
+                  title="Linear Timeline"
+                  subtitle="Drag to pan, scroll to zoom, and click a point to see the entry behind it."
+                />
 
-          <FilterBar
-            sortMode={sortMode}
-            onSortModeChange={handleSortModeChange}
-            categories={categories}
-            filterCategories={filterCategories}
-            onToggleFilterCategory={handleToggleFilterCategory}
-            onResetFilters={handleResetFilters}
-            hasSelection={hasSelection}
-          />
+                <FilterBar
+                  sortMode={sortMode}
+                  onSortModeChange={handleSortModeChange}
+                  categories={categories}
+                  filterCategories={filterCategories}
+                  onToggleFilterCategory={handleToggleFilterCategory}
+                  onResetFilters={handleResetFilters}
+                  hasSelection={hasSelection}
+                />
+              </div>
+
+              {hasSelection && (
+                <div className="dark-scrollbar flex-1 overflow-y-auto px-4 pb-4">
+                  <SidebarPanelStack
+                    selectedEntries={selectedEntries}
+                    sortMode={sortMode}
+                    categoryGroups={categoryGroups}
+                    onExpand={handleExpandPanel}
+                    onClose={handleClosePanel}
+                  />
+                </div>
+              )}
+            </>
+          )}
         </div>
 
-        {hasSelection && (
-          <div className="dark-scrollbar flex-1 overflow-y-auto px-4 pb-4">
-            <SidebarPanelStack
-              selectedEntries={selectedEntries}
-              sortMode={sortMode}
-              categoryGroups={categoryGroups}
-              onExpand={handleExpandPanel}
-              onMinimize={handleMinimizePanel}
-              onClose={handleClosePanel}
-              onEdit={onEditEntry}
-            />
-          </div>
+        <SidebarResizeHandle
+          side={sidebarSide}
+          targetRef={containerRef}
+          onResize={resizeSidebar}
+          onResizeEnd={persistSidebarWidth}
+          onReset={resetSidebarWidth}
+        />
+
+        <SidebarSideToggle side={sidebarSide} onToggle={toggleSidebarSide} />
+
+        {expandedEntryId && (
+          <BookmarkRail
+            side={sidebarSide}
+            selectedEntries={selectedEntries}
+            focusedEntryId={expandedEntryId}
+            onSelect={handleExpandPanel}
+          />
         )}
       </div>
 
@@ -318,6 +438,7 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}
         sidebarWidth={sidebarWidth}
+        sidebarSide={sidebarSide}
         topOffset={topOffset}
         domainRange={selectedRange}
         isEditMode={isEditMode}
@@ -335,7 +456,11 @@ export default function Timeline({ entries, onEditEntry }: TimelineProps) {
        * own content now starts past - see both files' own comments on
        * their respective (different) sidebar-aware layout mechanisms.
        */}
-      <TimeRangeSelector entries={entries} sidebarWidth={sidebarWidth} />
+      <TimeRangeSelector
+        entries={entries}
+        sidebarWidth={sidebarWidth}
+        sidebarSide={sidebarSide}
+      />
 
       {isEditMode && <EditModeBanner />}
 

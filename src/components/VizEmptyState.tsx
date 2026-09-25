@@ -86,6 +86,7 @@ import {
   STACK_GAP,
   TOP_SLOT,
 } from '../utils/topRightTooltipStack';
+import type { SidebarSide } from '../hooks/useSidebarWidth';
 
 interface VizEmptyStateProps {
   /**
@@ -99,6 +100,8 @@ interface VizEmptyStateProps {
   topOffset: number;
   /** The sidebar overlay's current rendered width (0 when closed) - used only for the `hasAnyEntries === false` centered-in-canvas layout. */
   sidebarWidth: number;
+  /** Which screen edge `sidebarWidth`'s band is on - see useSidebarWidth.ts's SidebarSide comment. */
+  sidebarSide: SidebarSide;
   /**
    * Whether EditModeBanner is ALSO currently occupying the shared
    * top-right stack's top slot - used only for the `hasAnyEntries ===
@@ -111,6 +114,7 @@ export default function VizEmptyState({
   hasAnyEntries,
   topOffset,
   sidebarWidth,
+  sidebarSide,
   editModeBannerVisible,
 }: VizEmptyStateProps) {
   if (hasAnyEntries) {
@@ -120,7 +124,7 @@ export default function VizEmptyState({
 
     return (
       <div
-        className="pointer-events-auto fixed right-6 z-40 max-w-sm rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-sm text-[var(--indigo-accent-text)]"
+        className="pointer-events-auto fixed right-[var(--chrome-edge-gutter)] z-40 max-w-sm rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-sm text-[var(--indigo-accent-text)]"
         style={{ top }}
         role="status"
       >
@@ -134,7 +138,12 @@ export default function VizEmptyState({
   return (
     <div
       className="pointer-events-none absolute flex items-center justify-center px-6"
-      style={{ top: topOffset, left: sidebarWidth, right: 0, bottom: 0 }}
+      style={{
+        top: topOffset,
+        left: sidebarSide === 'left' ? sidebarWidth : 0,
+        right: sidebarSide === 'right' ? sidebarWidth : 0,
+        bottom: 0,
+      }}
     >
       <div
         className="pointer-events-auto max-w-sm rounded-md border border-indigo-500/40 bg-indigo-500/10 p-3 text-center text-sm text-[var(--indigo-accent-text)]"

@@ -149,7 +149,7 @@
  * This replaces that entirely: each year boundary is now a single small
  * glyph (a Unicode "✦" four-pointed star, rendered as SVG `<text>` rather
  * than a hand-drawn `<path>` star shape - a system font renders a crisp,
- * properly-anti-aliased star at 9px far more reliably than a handful of
+ * properly-anti-aliased star at this small size far more reliably than a handful of
  * short line segments would at that size) sitting exactly on the gridline
  * at that year's position, styled at a low, muted opacity against the
  * SAME `currentColor` the gridline itself already uses (see
@@ -459,8 +459,14 @@ import { formatSingleDate } from '../utils/formatEntryDate';
 // EntryTooltip.tsx's header comment for why this is a shared pattern
 // across every visualization view rather than duplicated per-component.
 import EntryTooltip from './EntryTooltip';
+import type { SidebarSide } from '../hooks/useSidebarWidth';
 import VizEmptyState from './VizEmptyState';
 import { assignLanes, assignLaneAroundRanges } from '../utils/laneAssignment';
+import {
+  FOCUSED_GLOW_OPACITY,
+  FOCUSED_GLOW_STROKE_WIDTH,
+  FOCUSED_RING_STROKE_WIDTH,
+} from '../utils/focusHighlight';
 
 interface SpiralTimelineProps {
   entries: Entry[];
@@ -522,6 +528,8 @@ interface SpiralTimelineProps {
    * entry out from under the sidebar overlay.
    */
   sidebarWidth: number;
+  /** Which screen edge `sidebarWidth`'s band is on - see useSidebarWidth.ts's SidebarSide comment. */
+  sidebarSide: SidebarSide;
   /**
    * Bumped by Spiral.tsx every time its Escape-key/reset-button full
    * reset fires - see the RESET-VIEW effect below. Same counter-not-
@@ -751,11 +759,12 @@ const MAX_SPIRAL_SAMPLES = 2000;
 
 /**
  * Font size (px) of a year glyph - see the top-of-file "YEAR GLYPHS"
- * comment. Small and quiet by design: this marks a waypoint on the
- * gridline, not an entry, so it should never compete with the larger,
- * colored `POINT_RADIUS`-sized entry stars.
+ * comment. Quiet by design: this marks a waypoint on the gridline, not an
+ * entry, so it should never compete with the colored `POINT_RADIUS`-sized
+ * entry stars. 13px draws the ✦ about 9-10px tip to tip - legible, but
+ * still thin-armed, muted, and smaller than an entry's solid 10px dot.
  */
-const YEAR_GLYPH_FONT_SIZE_PX = 9;
+const YEAR_GLYPH_FONT_SIZE_PX = 13;
 
 /**
  * Resting / hovered opacity of a year glyph, against the SAME
@@ -791,9 +800,11 @@ const NOW_LINE_DASH = '2,3';
  * Font size (px) of the sun/moon "now" glyph - a bit larger than
  * `YEAR_GLYPH_FONT_SIZE_PX`, since this marks the live present moment
  * (arguably the single most important waypoint on the whole spiral),
- * not just a quiet year boundary.
+ * not just a quiet year boundary. Still reads as secondary to an entry:
+ * the sun's solid center disc stays well under an entry dot's 10px, with
+ * only its thin rays reaching past it.
  */
-const NOW_GLYPH_FONT_SIZE_PX = 14;
+const NOW_GLYPH_FONT_SIZE_PX = 18;
 
 /** Resting / hovered opacity of the "now" glyph - same idea as `YEAR_GLYPH_OPACITY`/`YEAR_GLYPH_HOVER_OPACITY`, just a bit stronger at rest so it doesn't read as quietly as a plain year waypoint. */
 const NOW_GLYPH_OPACITY = 0.7;
@@ -810,7 +821,15 @@ const NOW_TOOLTIP_TICK_MS = 1000;
  * before the two shapes visually touch, not only once they'd fully
  * overlap.
  */
-const YEAR_GLYPH_COLLISION_RADIUS_PX = 10;
+const YEAR_GLYPH_COLLISION_RADIUS_PX = 12;
+
+/**
+ * Same idea as `YEAR_GLYPH_COLLISION_RADIUS_PX`, sized for the larger
+ * sun/moon glyph (roughly half its ~15px drawn width, plus `POINT_RADIUS`,
+ * plus a little clearance). The only entry that can realistically sit
+ * this close is the latest one, when it's dated within a few days of now.
+ */
+const NOW_GLYPH_COLLISION_RADIUS_PX = 15;
 
 /**
  * How far (px, along the curve's own arc length) a colliding year glyph
@@ -820,7 +839,22 @@ const YEAR_GLYPH_COLLISION_RADIUS_PX = 10;
  * glyph still reads as marking essentially the same point on the
  * gridline, not a different year boundary.
  */
-const YEAR_GLYPH_NUDGE_ARC_PX = 14;
+const YEAR_GLYPH_NUDGE_ARC_PX = 16;
+
+/**
+ * Most nudges (in either direction) a year glyph tries before giving up -
+ * see `findNonCollidingYearGlyphT`. The spiral's inner core can pack
+ * several entries within one or two nudges of a year boundary.
+ */
+const YEAR_GLYPH_MAX_NUDGE_STEPS = 4;
+
+/**
+ * Furthest (px, along the curve) the "now" glyph may be pushed OUTWARD
+ * past now's true position to clear an entry - see the "now" marker's
+ * own comment for why it only moves outward. Small enough that it still
+ * reads as "the present", not a future date.
+ */
+const NOW_GLYPH_MAX_NUDGE_ARC_PX = 30;
 
 /**
  * ──────────────────────────────────────────────────────────────────────
@@ -1095,6 +1129,7 @@ export default function SpiralTimeline({
   openedEntryIds,
   expandedEntryId,
   sidebarWidth,
+  sidebarSide,
   resetViewSignal,
   domainRange,
   topOffset,
@@ -1519,37 +1554,68 @@ export default function SpiralTimeline({
     [points, ranges]
   );
 
+  /** Whether a glyph drawn at `candidateT` would sit within `collisionRadius` of any entry marker (or any of `otherGlyphs`). */
+  const glyphCollidesAt = (
+    candidateT: number,
+    collisionRadius: number,
+    otherGlyphs: { x: number; y: number }[] = []
+  ) => {
+    const candidate = spiralPoint(candidateT, spiralParams);
+    return [...entryMarkerPositions, ...otherGlyphs].some(
+      marker =>
+        Math.hypot(marker.x - candidate.x, marker.y - candidate.y) <
+        collisionRadius
+    );
+  };
+
   /**
    * Finds a `t` for a year glyph that doesn't land on top of an entry
    * marker - see the top-of-file "YEAR GLYPHS" comment's "COLLISION
    * AVOIDANCE" section. Tries the glyph's own raw position first, then
-   * nudges forward along the curve, then backward; if even that's still
-   * colliding (an extreme edge case - entries densely packed on both
-   * sides), just accepts the forward-nudged position rather than
-   * searching indefinitely for a perfectly clear spot.
+   * nudges along the curve in growing steps - one nudge forward, one
+   * back, two forward, two back, up to `YEAR_GLYPH_MAX_NUDGE_STEPS` - so a
+   * glyph in the spiral's dense inner core (where several entries can sit
+   * within one or two nudges of each other) still finds a clear spot. If
+   * none is clear (an extreme edge case), it just accepts the first
+   * forward nudge rather than searching indefinitely. `placedGlyphs`
+   * (earlier years' final positions) count as obstacles too, since the
+   * earliest years' boundaries sit only a few px apart at the core and a
+   * nudge could otherwise stack one ✦ onto its neighbor.
    */
-  const findNonCollidingYearGlyphT = (t: number, arcLength: number): number => {
-    const collidesAt = (candidateT: number): boolean => {
-      const candidate = spiralPoint(candidateT, spiralParams);
-      return entryMarkerPositions.some(
-        marker =>
-          Math.hypot(marker.x - candidate.x, marker.y - candidate.y) <
-          YEAR_GLYPH_COLLISION_RADIUS_PX
+  const findNonCollidingYearGlyphT = (
+    t: number,
+    arcLength: number,
+    placedGlyphs: { x: number; y: number }[]
+  ): number => {
+    const collides = (candidateT: number) =>
+      glyphCollidesAt(candidateT, YEAR_GLYPH_COLLISION_RADIUS_PX, placedGlyphs);
+    if (!collides(t)) return t;
+
+    const nudgedT = (steps: number) =>
+      arcLengthToT(
+        Math.min(
+          totalPathLength,
+          Math.max(0, arcLength + steps * YEAR_GLYPH_NUDGE_ARC_PX)
+        )
       );
-    };
 
-    if (!collidesAt(t)) return t;
-
-    const forwardT = arcLengthToT(
-      Math.min(totalPathLength, arcLength + YEAR_GLYPH_NUDGE_ARC_PX)
-    );
-    if (!collidesAt(forwardT)) return forwardT;
-
-    const backwardT = arcLengthToT(
-      Math.max(0, arcLength - YEAR_GLYPH_NUDGE_ARC_PX)
-    );
-    return collidesAt(backwardT) ? forwardT : backwardT;
+    for (let step = 1; step <= YEAR_GLYPH_MAX_NUDGE_STEPS; step++) {
+      for (const direction of [1, -1]) {
+        const candidateT = nudgedT(step * direction);
+        if (!collides(candidateT)) return candidateT;
+      }
+    }
+    return nudgedT(1);
   };
+
+  // Each year glyph's final on-screen position, placed in order so each
+  // one also steers clear of the ones before it - see
+  // `findNonCollidingYearGlyphT`.
+  const yearGlyphs: { year: number; x: number; y: number }[] = [];
+  for (const { year, t } of yearBoundaries) {
+    const glyphT = findNonCollidingYearGlyphT(t, tToArcLength(t), yearGlyphs);
+    yearGlyphs.push({ year, ...spiralPoint(glyphT, spiralParams) });
+  }
 
   // ─── "Now" marker ───
   // See the top-of-file "NOW MARKER" comment for the full reasoning.
@@ -1593,16 +1659,46 @@ export default function SpiralTimeline({
     // density) as the main spiral curve itself - see the top-of-file
     // "DRAWING THE SPIRAL LINE" comment - just scoped to this much
     // shorter `[tStart, tEnd]` sub-span instead of the full `[0, 1]`.
+    // COLLISION AVOIDANCE for the sun/moon glyph: the one entry that can
+    // sit right on top of it is the latest one, dated within a few days of
+    // today - i.e. just BEHIND `tEnd` on the curve. Nudging backward (as a
+    // year glyph can) would push the glyph straight into that entry, so
+    // this one only moves OUTWARD, a couple px at a time: past t=1 when
+    // `now` is the domain's end, which `spiralPoint` extrapolates along the
+    // same curve. The dashed line below is drawn out to `glyphT` rather
+    // than `tEnd`, so the glyph stays attached to its line either way.
+    const pxPerT =
+      Math.hypot(
+        spiralPoint(tEnd + 1e-4, spiralParams).x -
+          spiralPoint(tEnd, spiralParams).x,
+        spiralPoint(tEnd + 1e-4, spiralParams).y -
+          spiralPoint(tEnd, spiralParams).y
+      ) / 1e-4;
+    const nudgeStepT = pxPerT > 0 ? 2 / pxPerT : 0;
+    let glyphT = tEnd;
+    for (
+      let nudged = 0;
+      nudgeStepT > 0 &&
+      nudged < NOW_GLYPH_MAX_NUDGE_ARC_PX &&
+      glyphCollidesAt(glyphT, NOW_GLYPH_COLLISION_RADIUS_PX);
+      nudged += 2
+    ) {
+      glyphT += nudgeStepT;
+    }
+
     const sampleCount = Math.max(
       2,
       Math.round(
-        (tEnd - tStart) * spiralParams.totalRotations * SAMPLES_PER_ROTATION
+        (glyphT - tStart) * spiralParams.totalRotations * SAMPLES_PER_ROTATION
       )
     );
     const samples: { x: number; y: number }[] = [];
     for (let i = 0; i <= sampleCount; i++) {
       samples.push(
-        spiralPoint(tStart + ((tEnd - tStart) * i) / sampleCount, spiralParams)
+        spiralPoint(
+          tStart + ((glyphT - tStart) * i) / sampleCount,
+          spiralParams
+        )
       );
     }
 
@@ -1610,8 +1706,15 @@ export default function SpiralTimeline({
       pathD: buildPolylinePath(samples),
       glyphPosition: samples[samples.length - 1],
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `normalize` closes over minDate/maxDate, already listed directly below (same pattern `points`/`ranges` use above)
-  }, [latestEntryDate, now, spiralParams, minDate, maxDate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `normalize` closes over minDate/maxDate and `glyphCollidesAt` over entryMarkerPositions, all listed directly below (same pattern `points`/`ranges` use above)
+  }, [
+    latestEntryDate,
+    now,
+    spiralParams,
+    minDate,
+    maxDate,
+    entryMarkerPositions,
+  ]);
 
   // ─── Pan/zoom behavior ───
   // Same mechanism as StarMap.tsx: attached once, and the 'zoom' handler
@@ -1707,7 +1810,12 @@ export default function SpiralTimeline({
     const { width, height } = size;
     if (width === 0 || height === 0) return;
 
-    const targetX = sidebarWidth + (width - sidebarWidth) / 2;
+    // Center in whatever the sidebar's band leaves free - to its right
+    // when the sidebar is on the left, to its left when it's on the right.
+    const targetX =
+      sidebarSide === 'left'
+        ? sidebarWidth + (width - sidebarWidth) / 2
+        : (width - sidebarWidth) / 2;
     const targetY = height / 2;
 
     const currentTransform = d3.zoomTransform(svgNode);
@@ -1722,7 +1830,7 @@ export default function SpiralTimeline({
       .duration(650) // 500-750ms: smooth, not sluggish, same as StarMap's
       .call(zoomBehavior.transform, centeredTransform);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedEntryId, sidebarWidth]);
+  }, [expandedEntryId, sidebarWidth, sidebarSide]);
 
   /**
    * ─── RESET-VIEW: PROGRAMMATIC PAN/ZOOM RESET, TIED TO `resetViewSignal` ───
@@ -2017,6 +2125,10 @@ export default function SpiralTimeline({
 
               {ranges.map(({ entry, pathD, color }) => {
                 const isOpened = openedEntryIdSet.has(entry.id);
+                // FOCUSED ENTRY: the one the sidebar's FocusedEntryView is
+                // showing gets a brighter opened highlight - see
+                // utils/focusHighlight.ts.
+                const isFocused = entry.id === expandedEntryId;
                 const isFilteredOut = !activeCategorySet.has(
                   entry.activityType
                 );
@@ -2104,8 +2216,16 @@ export default function SpiralTimeline({
                           d={pathD}
                           fill="none"
                           stroke={OPENED_HIGHLIGHT_COLOR}
-                          strokeWidth={OPENED_ARC_GLOW_EXTRA_RADIUS * 2}
-                          strokeOpacity={OPENED_ARC_GLOW_OPACITY}
+                          strokeWidth={
+                            (isFocused
+                              ? FOCUSED_GLOW_STROKE_WIDTH
+                              : OPENED_ARC_GLOW_EXTRA_RADIUS) * 2
+                          }
+                          strokeOpacity={
+                            isFocused
+                              ? FOCUSED_GLOW_OPACITY
+                              : OPENED_ARC_GLOW_OPACITY
+                          }
                           filter="url(#opened-arc-glow)"
                           className="pointer-events-none"
                         />
@@ -2113,7 +2233,11 @@ export default function SpiralTimeline({
                           d={pathD}
                           fill="none"
                           stroke={OPENED_HIGHLIGHT_COLOR}
-                          strokeWidth={ARC_RING_WIDTH * 2}
+                          strokeWidth={
+                            (isFocused
+                              ? FOCUSED_RING_STROKE_WIDTH
+                              : ARC_RING_WIDTH) * 2
+                          }
                           className="pointer-events-none"
                         />
                       </>
@@ -2142,6 +2266,7 @@ export default function SpiralTimeline({
 
               {points.map(({ entry, x, y, color }) => {
                 const isOpened = openedEntryIdSet.has(entry.id);
+                const isFocused = entry.id === expandedEntryId;
                 const isFilteredOut = !activeCategorySet.has(
                   entry.activityType
                 );
@@ -2162,8 +2287,10 @@ export default function SpiralTimeline({
                         r={POINT_RADIUS + 5}
                         fill="none"
                         stroke={OPENED_HIGHLIGHT_COLOR}
-                        strokeWidth={4}
-                        strokeOpacity={GLOW_OPACITY}
+                        strokeWidth={isFocused ? FOCUSED_GLOW_STROKE_WIDTH : 4}
+                        strokeOpacity={
+                          isFocused ? FOCUSED_GLOW_OPACITY : GLOW_OPACITY
+                        }
                         filter="url(#opened-spiral-glow)"
                         className="pointer-events-none"
                       />
@@ -2229,7 +2356,9 @@ export default function SpiralTimeline({
                         r={POINT_RADIUS + 3}
                         fill="none"
                         stroke={OPENED_HIGHLIGHT_COLOR}
-                        strokeWidth={1.5}
+                        strokeWidth={
+                          isFocused ? FOCUSED_RING_STROKE_WIDTH : 1.5
+                        }
                         className="pointer-events-none"
                       />
                     )}
@@ -2237,12 +2366,10 @@ export default function SpiralTimeline({
                 );
               })}
 
-              {yearBoundaries.map(({ year, t }) => {
-                // Nudged away from any colliding entry marker (see the
-                // top-of-file "YEAR GLYPHS" comment's "COLLISION
-                // AVOIDANCE" section) before computing its final position.
-                const glyphT = findNonCollidingYearGlyphT(t, tToArcLength(t));
-                const { x, y } = spiralPoint(glyphT, spiralParams);
+              {yearGlyphs.map(({ year, x, y }) => {
+                // Already nudged away from any colliding entry marker or
+                // earlier glyph - see `yearGlyphs` and the top-of-file
+                // "YEAR GLYPHS" comment's "COLLISION AVOIDANCE" section.
                 const isHovered =
                   hovered?.kind === 'year' && hovered.year === year;
 
@@ -2316,6 +2443,7 @@ export default function SpiralTimeline({
           hasAnyEntries={hasAnyEntries}
           topOffset={topOffset}
           sidebarWidth={sidebarWidth}
+          sidebarSide={sidebarSide}
           editModeBannerVisible={isEditMode}
         />
       )}

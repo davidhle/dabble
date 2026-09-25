@@ -138,12 +138,16 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import BookmarkRail from '../components/BookmarkRail';
 import EditModeBanner from '../components/EditModeBanner';
 import EditModeToggle from '../components/EditModeToggle';
 import FilterBar from '../components/FilterBar';
+import FocusedEntryView from '../components/FocusedEntryView';
 import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
 import SidebarPanelStack from '../components/SidebarPanelStack';
+import SidebarResizeHandle from '../components/SidebarResizeHandle';
+import SidebarSideToggle from '../components/SidebarSideToggle';
 import StarMap from '../components/StarMap';
 import TimeRangeSelector from '../components/TimeRangeSelector';
 import VizPageHeader from '../components/VizPageHeader';
@@ -151,6 +155,7 @@ import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
 import { useEntrySelection } from '../hooks/useEntrySelection';
+import { useSidebarWidth } from '../hooks/useSidebarWidth';
 import { useTimeRange } from '../context/TimeRangeContext';
 import { useEditMode } from '../context/EditModeContext';
 
@@ -158,11 +163,14 @@ interface ConstellationProps {
   entries: Entry[];
   /** Opens `entry` in the shared AddEntryForm's edit mode - see App.tsx's `editingEntry` state. */
   onEditEntry: (entry: Entry) => void;
+  /** App.tsx's `updateEntry` - used by EntryPanel to save reflections. */
+  onUpdateEntry: (entry: Entry) => void;
 }
 
 export default function Constellation({
   entries,
   onEditEntry,
+  onUpdateEntry,
 }: ConstellationProps) {
   // See the SHARED TIME-RANGE FILTER comment above: `selectedRange` is the
   // shared, cross-page time filter (same context Timeline.tsx reads);
@@ -193,8 +201,12 @@ export default function Constellation({
     expandedEntryId,
     handleEntryClick,
     handleExpandPanel,
-    handleMinimizePanel,
     handleClosePanel,
+    canUndoFocus,
+    handleUndoFocus,
+    handleExitFocus,
+    focusedView,
+    handleFocusedViewChange,
     sortMode,
     handleSortModeChange,
     categoryGroups,
@@ -280,12 +292,11 @@ export default function Constellation({
   //     the container's own height changes with its content (the sort
   //     toggle showing/hiding with `hasSelection`, the category chip grid
   //     collapsing/expanding, panels opening/closing - see FilterBar.tsx).
-  //   - left: `main` in Layout.tsx is `mx-auto max-w-7xl px-4 sm:px-6
-  //     lg:px-8` - on any viewport *wider* than max-w-7xl (1280px), the
-  //     `mx-auto` centering margin adds on top of that padding, shifting
-  //     `left` right as the window keeps growing. A static Tailwind class
-  //     can't reproduce that - only measuring the container's actual
-  //     rendered position gives the exact number in every case.
+  //   - left: `main` in Layout.tsx pads this page by --edge-gutter
+  //     (index.css), a clamp()ed value that grows with the viewport on
+  //     wide screens. Measuring the container's actual rendered position
+  //     gives the exact number at every width without duplicating that
+  //     CSS math here.
   //
   // `topOffset` is a SEPARATE value - where the header TEXT block
   // (title/subtitle/FilterBar) itself ends, NOT the outer container's own
@@ -293,9 +304,25 @@ export default function Constellation({
   // measured off `headerContentRef` instead. This is what StarMap still
   // gets as its own `topOffset` prop (see below), unchanged in meaning
   // from before this restructure.
+  const isFocused = expandedEntryId !== null;
   const containerRef = useRef<HTMLDivElement>(null);
   const headerContentRef = useRef<HTMLDivElement>(null);
-  const [containerLayout, setContainerLayout] = useState({ top: 0, left: 0 });
+  const [containerLayout, setContainerLayout] = useState({
+    top: 0,
+    left: 0,
+    right: 0,
+  });
+  // The container's CSS width - the `33vw - offset` default, or the user's
+  // dragged width - and which screen edge it's anchored to (see
+  // useSidebarWidth.ts / SidebarResizeHandle.tsx / SidebarSideToggle.tsx).
+  const {
+    width: containerWidth,
+    resizeTo: resizeSidebar,
+    persist: persistSidebarWidth,
+    resetWidth: resetSidebarWidth,
+    side: sidebarSide,
+    toggleSide: toggleSidebarSide,
+  } = useSidebarWidth(containerLayout);
   const [topOffset, setTopOffset] = useState(0);
 
   useEffect(() => {
@@ -306,7 +333,11 @@ export default function Constellation({
     const updateLayout = () => {
       const containerRect = containerEl.getBoundingClientRect();
       const headerRect = headerEl.getBoundingClientRect();
-      setContainerLayout({ top: containerRect.top, left: containerRect.left });
+      setContainerLayout({
+        top: containerRect.top,
+        left: containerRect.left,
+        right: document.documentElement.clientWidth - containerRect.right,
+      });
       setTopOffset(headerRect.bottom);
     };
     updateLayout();
@@ -314,10 +345,10 @@ export default function Constellation({
     // ResizeObserver catches either element's own size changing (content
     // wrapping differently, the sort toggle/chip grid showing/hiding,
     // panels opening/closing). It does NOT fire when the container's
-    // *position* shifts without a size change though - which is exactly
-    // what happens to `left` once the viewport is wider than main's
-    // max-w-7xl cap (see above). A window resize listener catches that
-    // case too; both call the same `updateLayout`.
+    // *position* shifts without a size change though - e.g. `left`
+    // moving as --edge-gutter scales with the viewport (see above). A
+    // window resize listener catches that case too; both call the same
+    // `updateLayout`.
     const observer = new ResizeObserver(updateLayout);
     observer.observe(containerEl);
     observer.observe(headerEl);
@@ -326,14 +357,22 @@ export default function Constellation({
       observer.disconnect();
       window.removeEventListener('resize', updateLayout);
     };
-  }, []);
+    // Re-run when focused mode toggles: FocusedEntryView swaps in its own
+    // header block (also attached to `headerContentRef`), so the observer
+    // has to re-attach to whichever header element is now mounted.
+    // ...and when the sidebar flips sides: the container moves without
+    // resizing, which the ResizeObserver above wouldn't report.
+  }, [isFocused, sidebarSide]);
 
   // StarMap's own `sidebarWidth` prop, for its click-to-center math - see
   // the layout comment above and StarMap.tsx's CLICK-TO-CENTER comment.
   // Measured off `containerRef` (the SAME container `topOffset`/
   // `containerLayout` above already measure) rather than a second DOM
-  // node, since the unified container's own width IS the sidebar's width
-  // now. Deliberately gated on `hasSelection` (not just "does the node
+  // node. Despite the name, this is the container's RIGHT edge (viewport
+  // x), not its width: every consumer (StarMap's centering, VizEmptyState,
+  // TimeRangeSelector) uses it as "where the sidebar ends", which only
+  // equals the width when the container sits flush at x=0 - it's inset by
+  // --edge-gutter, which reaches 80px on wide screens. Deliberately gated on `hasSelection` (not just "does the node
   // exist" - the container itself is always mounted now, unlike the old
   // conditionally-rendered SidebarPanelStack overlay): the whole point of
   // this restructure is that the container's background/texture is always
@@ -349,12 +388,27 @@ export default function Constellation({
       return;
     }
 
-    const updateWidth = () => setSidebarWidth(el.getBoundingClientRect().width);
+    // The width of the screen band the sidebar occupies, measured from its
+    // own edge - see useSidebarWidth.ts's SidebarSide comment.
+    const updateWidth = () => {
+      const rect = el.getBoundingClientRect();
+      setSidebarWidth(
+        sidebarSide === 'left'
+          ? rect.right
+          : document.documentElement.clientWidth - rect.left
+      );
+    };
     updateWidth();
+    // A window resize can move the container without resizing it (a
+    // dragged, fixed-px width), which the ResizeObserver alone misses.
     const observer = new ResizeObserver(updateWidth);
     observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasSelection]);
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [hasSelection, sidebarSide]);
 
   return (
     // A Fragment, not a single `space-y-4` div, wraps the whole return:
@@ -381,7 +435,9 @@ export default function Constellation({
        * old SidebarPanelStack overlay always used - one third of the
        * viewport, minus this container's own offset from the viewport's
        * left edge. Consistent with Spiral.tsx/Timeline.tsx's identical
-       * width calc.
+       * width calc. That's the DEFAULT - once the user drags
+       * SidebarResizeHandle, `containerWidth` is their saved width instead
+       * (see useSidebarWidth.ts).
        *
        * `maxHeight`, not a `fixed bottom-0` box: caps this container at
        * however much vertical space remains below it in the viewport, so
@@ -391,53 +447,118 @@ export default function Constellation({
        * `containerLayout.top` used for width - see that state's own
        * comment above.
        */}
+      {/*
+       * Wrapper shared by the sidebar container and the focused-mode
+       * BookmarkRail, which pokes out past the container's right edge -
+       * see BookmarkRail.tsx's OUTSIDE THE SIDEBAR comment for why the
+       * rail has to be the container's sibling rather than its child.
+       * `w-fit` shrink-wraps the container, so the rail's `left: 100%` is
+       * the container's live right edge. `relative z-10` lifts both above
+       * the `fixed` canvas, the same job the container's own `z-10` did
+       * before this wrapper existed.
+       */}
+      {/*
+       * `ml-auto` when the sidebar is on the right: pushes the shrink-
+       * wrapped wrapper to `main`'s right padding edge, i.e. --edge-gutter
+       * from the screen's right edge - the same responsive offset the
+       * left-side anchor gets from `main`'s left padding, mirrored.
+       */}
       <div
-        ref={containerRef}
-        className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
-        style={{
-          width: `calc(33vw - ${containerLayout.left}px)`,
-          maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
-        }}
+        className={`relative z-10 w-fit ${
+          sidebarSide === 'right' ? 'ml-auto' : ''
+        }`}
       >
-        <div ref={headerContentRef} className="flex-shrink-0 space-y-4 p-4">
-          <VizPageHeader
-            title="Constellation"
-            subtitle="Drag to pan, scroll to zoom, and click a star to see the entry behind it."
-          />
+        <div
+          ref={containerRef}
+          className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
+          style={{
+            width: containerWidth,
+            maxHeight: `calc(100vh - ${containerLayout.top}px - 24px)`,
+          }}
+        >
+          {/*
+           * FOCUSED MODE - see FocusedEntryView.tsx: while an entry is
+           * expanded, it takes over the whole sidebar in place of the page
+           * header, FilterBar, and panel stack below.
+           */}
+          {expandedEntryId ? (
+            <FocusedEntryView
+              selectedEntries={selectedEntries}
+              focusedEntryId={expandedEntryId}
+              headerRef={headerContentRef}
+              canUndo={canUndoFocus}
+              onBack={handleExitFocus}
+              view={focusedView}
+              onViewChange={handleFocusedViewChange}
+              onUndo={handleUndoFocus}
+              onEdit={onEditEntry}
+              onClose={handleClosePanel}
+              onUpdateEntry={onUpdateEntry}
+            />
+          ) : (
+            <>
+              <div
+                ref={headerContentRef}
+                className="flex-shrink-0 space-y-4 p-4"
+              >
+                <VizPageHeader
+                  title="Constellation"
+                  subtitle="Drag to pan, scroll to zoom, and click a star to see the entry behind it."
+                />
 
-          <FilterBar
-            sortMode={sortMode}
-            onSortModeChange={handleSortModeChange}
-            categories={categories}
-            filterCategories={filterCategories}
-            onToggleFilterCategory={handleToggleFilterCategory}
-            onResetFilters={handleResetFilters}
-            hasSelection={hasSelection}
-          />
+                <FilterBar
+                  sortMode={sortMode}
+                  onSortModeChange={handleSortModeChange}
+                  categories={categories}
+                  filterCategories={filterCategories}
+                  onToggleFilterCategory={handleToggleFilterCategory}
+                  onResetFilters={handleResetFilters}
+                  hasSelection={hasSelection}
+                />
+              </div>
+
+              {/*
+               * Sidebar panel stack - only takes up space once there's a
+               * selection, same as before this restructure (see
+               * `containerLayout`'s own comment above for why `sidebarWidth`
+               * still only reacts to `hasSelection`, not to this container's
+               * own always-present background). `flex-1 overflow-y-auto` is
+               * what lets this region scroll independently within the
+               * container's own `maxHeight` cap above, rather than growing the
+               * container past the bottom of the screen.
+               */}
+              {hasSelection && (
+                <div className="dark-scrollbar flex-1 overflow-y-auto px-4 pb-4">
+                  <SidebarPanelStack
+                    selectedEntries={selectedEntries}
+                    sortMode={sortMode}
+                    categoryGroups={categoryGroups}
+                    onExpand={handleExpandPanel}
+                    onClose={handleClosePanel}
+                  />
+                </div>
+              )}
+            </>
+          )}
         </div>
 
-        {/*
-         * Sidebar panel stack - only takes up space once there's a
-         * selection, same as before this restructure (see
-         * `containerLayout`'s own comment above for why `sidebarWidth`
-         * still only reacts to `hasSelection`, not to this container's
-         * own always-present background). `flex-1 overflow-y-auto` is
-         * what lets this region scroll independently within the
-         * container's own `maxHeight` cap above, rather than growing the
-         * container past the bottom of the screen.
-         */}
-        {hasSelection && (
-          <div className="dark-scrollbar flex-1 overflow-y-auto px-4 pb-4">
-            <SidebarPanelStack
-              selectedEntries={selectedEntries}
-              sortMode={sortMode}
-              categoryGroups={categoryGroups}
-              onExpand={handleExpandPanel}
-              onMinimize={handleMinimizePanel}
-              onClose={handleClosePanel}
-              onEdit={onEditEntry}
-            />
-          </div>
+        <SidebarResizeHandle
+          side={sidebarSide}
+          targetRef={containerRef}
+          onResize={resizeSidebar}
+          onResizeEnd={persistSidebarWidth}
+          onReset={resetSidebarWidth}
+        />
+
+        <SidebarSideToggle side={sidebarSide} onToggle={toggleSidebarSide} />
+
+        {expandedEntryId && (
+          <BookmarkRail
+            side={sidebarSide}
+            selectedEntries={selectedEntries}
+            focusedEntryId={expandedEntryId}
+            onSelect={handleExpandPanel}
+          />
         )}
       </div>
 
@@ -468,6 +589,7 @@ export default function Constellation({
         expandedEntryId={expandedEntryId}
         filterCategories={filterCategories}
         sidebarWidth={sidebarWidth}
+        sidebarSide={sidebarSide}
         resetViewSignal={resetViewSignal}
         topOffset={topOffset}
         isEditMode={isEditMode}
@@ -483,7 +605,11 @@ export default function Constellation({
        * across the entire `fullRange`, not just within the current
        * selection.
        */}
-      <TimeRangeSelector entries={entries} sidebarWidth={sidebarWidth} />
+      <TimeRangeSelector
+        entries={entries}
+        sidebarWidth={sidebarWidth}
+        sidebarSide={sidebarSide}
+      />
 
       {isEditMode && <EditModeBanner />}
 
