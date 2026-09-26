@@ -338,9 +338,15 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
       const brush = brushBehaviorRef.current;
       if (!group || !brush || innerWidth === 0) return;
 
+      // Clamped to the track: `selectedRange` can legitimately extend
+      // past `fullRange` (e.g. SpiralTimeline's year-glyph click selects a
+      // whole calendar year, whose Jan 1/Dec 31 may fall outside the
+      // first/last entry), and d3-brush's `move` doesn't clamp on its own -
+      // unclamped, the handles would be drawn off either end of the track.
+      const clampX = (x: number) => Math.max(0, Math.min(innerWidth, x));
       d3.select(group).call(brush.move, [
-        scale(selectedRange.start),
-        scale(selectedRange.end),
+        clampX(scale(selectedRange.start)),
+        clampX(scale(selectedRange.end)),
       ]);
     }, [selectedRange, scale, innerWidth]);
 

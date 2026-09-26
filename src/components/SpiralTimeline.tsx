@@ -458,7 +458,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
 import { Category } from '../types/Category';
-import { DateRange } from '../context/TimeRangeContext';
+import { DateRange, useTimeRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
 // Same date/time formatting the "now" marker's tooltip uses for its live
 // clock - see the top-of-file "NOW MARKER" comment and formatSingleDate's
@@ -1158,6 +1158,38 @@ export default function SpiralTimeline({
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomLayerRef = useRef<SVGGElement>(null);
+
+  // YEAR GLYPH CLICK-TO-SCOPE: clicking a year glyph narrows the shared
+  // TimeRangeContext selection to that whole calendar year; clicking the
+  // glyph of the year that's ALREADY exactly selected resets back to the
+  // full range instead - the same "click again to undo" pattern entry
+  // clicks use for deselecting. Nothing else needs wiring: Spiral.tsx's
+  // entry filter, this component's own domain (via `domainRange`), and
+  // TimeRangeSelector's brush-sync effect all already react to
+  // `selectedRange`. The reset goes through `resetToFullRange` (not
+  // `setSelectedRange(fullRange)`) so toggling off resumes auto-tracking
+  // `fullRange`, exactly like the Escape/reset-button full reset does.
+  const { selectedRange, setSelectedRange, resetToFullRange } = useTimeRange();
+  const yearRange = (year: number): DateRange => ({
+    start: new Date(year, 0, 1, 0, 0, 0, 0),
+    end: new Date(year, 11, 31, 23, 59, 59, 999),
+  });
+  // Also drives the year tooltip's "click to show all years" hint, so the
+  // toggle-off is discoverable on the glyph that's currently active.
+  const isYearSelected = (year: number): boolean => {
+    const { start, end } = yearRange(year);
+    return (
+      selectedRange.start.getTime() === start.getTime() &&
+      selectedRange.end.getTime() === end.getTime()
+    );
+  };
+  const handleYearGlyphClick = (year: number) => {
+    if (isYearSelected(year)) {
+      resetToFullRange();
+    } else {
+      setSelectedRange(yearRange(year));
+    }
+  };
   // Holds the same zoom *behavior* instance attached to the <svg> below, so
   // CLICK-TO-CENTER/RESET-VIEW (see below) can programmatically drive it
   // later, outside of the 'zoom' event handler that normally drives it -
@@ -2410,18 +2442,17 @@ export default function SpiralTimeline({
                   hovered?.kind === 'year' && hovered.year === year;
 
                 return (
-                  <text
+                  // CLICK TARGET PRIORITY: glyphs render after every
+                  // range/point, so they already sit on top and win any
+                  // overlapping click. The transparent circle fills in the
+                  // gaps between the ✦'s thin arms, so a click anywhere on
+                  // the glyph lands here instead of falling through to a
+                  // range band underneath. Handlers live on the <g> so the
+                  // circle and the text share one hover/click target.
+                  <g
                     key={year}
-                    x={x}
-                    y={y}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fill="currentColor"
-                    fontSize={YEAR_GLYPH_FONT_SIZE_PX}
-                    opacity={
-                      isHovered ? YEAR_GLYPH_HOVER_OPACITY : YEAR_GLYPH_OPACITY
-                    }
-                    className="cursor-default select-none transition-opacity duration-150"
+                    className="cursor-pointer select-none"
+                    onClick={() => handleYearGlyphClick(year)}
                     onMouseEnter={event =>
                       setHovered({
                         kind: 'year',
@@ -2441,8 +2472,29 @@ export default function SpiralTimeline({
                     }
                     onMouseLeave={() => setHovered(null)}
                   >
-                    ✦
-                  </text>
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r={YEAR_GLYPH_FONT_SIZE_PX / 2}
+                      fill="transparent"
+                    />
+                    <text
+                      x={x}
+                      y={y}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill="currentColor"
+                      fontSize={YEAR_GLYPH_FONT_SIZE_PX}
+                      opacity={
+                        isHovered
+                          ? YEAR_GLYPH_HOVER_OPACITY
+                          : YEAR_GLYPH_OPACITY
+                      }
+                      className="transition-opacity duration-150"
+                    >
+                      ✦
+                    </text>
+                  </g>
                 );
               })}
             </>
@@ -2455,7 +2507,11 @@ export default function SpiralTimeline({
           <EntryTooltip entry={hovered.entry} x={hovered.x} y={hovered.y} />
         ) : hovered.kind === 'year' ? (
           <EntryTooltip
-            label={String(hovered.year)}
+            label={
+              isYearSelected(hovered.year)
+                ? `${hovered.year} · Click to show all years`
+                : String(hovered.year)
+            }
             x={hovered.x}
             y={hovered.y}
           />
