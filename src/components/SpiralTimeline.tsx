@@ -2360,7 +2360,9 @@ export default function SpiralTimeline({
    * its own `spiralPoint` output directly; a range entry uses `midpoint`
    * (see the `ranges` useMemo above) instead of a single endpoint, so
    * centering a long-duration entry doesn't push most of its arc off to
-   * one side of the target.
+   * one side of the target. Orbit entries follow the same rule: a
+   * single-date orbit entry centers on its hollow marker, an orbit range on
+   * its (un-waved) centerline midpoint.
    *
    * `sidebarWidth` IS A DEPENDENCY HERE - UNLIKE StarMap.tsx's OWN EFFECT:
    * StarMap deliberately excludes it (see that file's comment: "the pan
@@ -2399,12 +2401,16 @@ export default function SpiralTimeline({
     const zoomBehavior = zoomBehaviorRef.current;
     if (!svgNode || !zoomBehavior || !expandedEntryId) return;
 
-    const point = points.find(
-      candidate => candidate.entry.id === expandedEntryId
-    );
+    // Orbit entries live in their own arrays (split off before lane
+    // assignment), so both kinds are searched. An orbit range's
+    // `midpoint` is the curve's centerline at its mid-`t`, not a point on
+    // the sine wave - the wave's offset is only applied in its path.
+    const isExpanded = (candidate: { entry: Entry }) =>
+      candidate.entry.id === expandedEntryId;
+    const point = points.find(isExpanded) ?? orbitPoints.find(isExpanded);
     const range = point
       ? undefined
-      : ranges.find(candidate => candidate.entry.id === expandedEntryId);
+      : (ranges.find(isExpanded) ?? orbitRanges.find(isExpanded));
     const world = point ?? range?.midpoint;
     if (!world) return;
 
