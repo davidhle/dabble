@@ -23,21 +23,83 @@
  * - name: human-readable label shown in the UI.
  * - color: hex color used to tint stars, panels, and legends for entries
  *   in this category.
- * - domain: optional broader grouping (e.g. 'Movement', 'Climbing').
- *   StarMap does NOT currently use this for automatic positioning - each
- *   category gets its own independent center point on the constellation
- *   canvas regardless of domain (a domain-based clustering layout was
- *   tried and reverted). The field is kept in the data model for a
- *   possible future feature letting a user manually drag/reposition a
- *   domain's or category's region of the sky. Deliberately separate from
- *   `color`, which is assigned independently per category (see
+ * - domain: which of the two DOMAINS (below) this category belongs to -
+ *   'Movement' (something practiced) or 'Orbit' (context around the
+ *   practice). Optional on the stored shape because legacy/imported data
+ *   may predate it; ALWAYS read it through getCategoryDomain(), which
+ *   treats a missing (or unrecognized) value as 'Movement'. Entries carry
+ *   no domain of their own - it's always derived from their category (see
+ *   isOrbitEntry), so changing a category's domain needs no entry
+ *   migration. No visualization reads this yet; orbit entries still render
+ *   exactly like movement entries. Deliberately separate from `color`,
+ *   which is assigned independently per category (see
  *   utils/categories.ts) and has no notion of domain at all.
  */
 export interface Category {
   id: string;
   name: string;
   color: string;
-  domain?: string;
+  domain?: Domain;
+}
+
+/**
+ * DOMAINS
+ *
+ * The single source of truth for the two category domains - their id,
+ * user-facing label, and one-line description. Used by AddEntryForm's
+ * dropdown <optgroup>s and "+ Add new category" domain picker, and by
+ * ManageCategoriesModal's per-row domain toggle, so the wording only ever
+ * lives here.
+ */
+export const DOMAINS = [
+  {
+    id: 'Movement',
+    label: 'Movement',
+    description:
+      'Something you practiced or did — classes, battles, milestones in your practice.',
+  },
+  {
+    id: 'Orbit',
+    label: 'Orbit',
+    description:
+      'Context around your practice — life events, culture, or moments in the world that shaped it.',
+  },
+] as const;
+
+export type Domain = (typeof DOMAINS)[number]['id'];
+
+/** The domain a category without one (legacy/imported data) is treated as. */
+export const DEFAULT_DOMAIN: Domain = 'Movement';
+
+/** True when `value` is one of the known DOMAINS ids. */
+export function isDomain(value: unknown): value is Domain {
+  return DOMAINS.some(domain => domain.id === value);
+}
+
+/**
+ * Resolves a category's domain, treating a missing or unrecognized value
+ * as DEFAULT_DOMAIN ('Movement') - see the `domain` field comment above.
+ * Every domain read should go through this rather than `category.domain`
+ * directly.
+ */
+export function getCategoryDomain(category: Pick<Category, 'domain'>): Domain {
+  return isDomain(category.domain) ? category.domain : DEFAULT_DOMAIN;
+}
+
+/**
+ * True when `entry`'s category (looked up by id in `categories`) is in the
+ * 'Orbit' domain. An entry whose category can't be found (e.g. it was
+ * deleted) is NOT an orbit entry, matching getCategoryDomain's Movement
+ * default.
+ */
+export function isOrbitEntry(
+  entry: { activityType: string },
+  categories: Category[]
+): boolean {
+  const category = categories.find(
+    candidate => candidate.id === entry.activityType
+  );
+  return category !== undefined && getCategoryDomain(category) === 'Orbit';
 }
 
 /**
@@ -75,45 +137,37 @@ export const DEFAULT_CATEGORIES: Category[] = [
     name: 'Shuffle Dance',
     color: '#1176ce',
     domain: 'Movement',
-  }, 
+  },
   {
     id: 'HouseDance',
     name: 'House Dance',
     color: '#fb923c',
     domain: 'Movement',
-  }, 
-  { id: 'CWalk', 
-    name: 'C-Walk', 
-    color: '#607cfa', 
-    domain: 'Movement' 
-  }, 
-  { id: 'PoleDance', 
-    name: 'Pole Dance', 
-    color: '#f87171', 
-    domain: 'Movement' 
-  }, 
+  },
+  { id: 'CWalk', name: 'C-Walk', color: '#607cfa', domain: 'Movement' },
+  { id: 'PoleDance', name: 'Pole Dance', color: '#f87171', domain: 'Movement' },
   {
     id: 'ContemporaryDance',
     name: 'Contemporary Dance',
     color: '#c084fc',
-    domain: 'Movement'
+    domain: 'Movement',
   },
   {
     id: 'Ballet',
     name: 'Ballet',
     color: '#f0eb4c',
-    domain: 'Movement'
+    domain: 'Movement',
   },
   {
     id: 'DanceResearch',
     name: 'Dance Research',
     color: '#a9f46c',
-    domain: 'Orbit'
+    domain: 'Orbit',
   },
   {
     id: 'Yoga',
     name: 'Yoga',
     color: '#4cf0a5',
-    domain: 'Movement'
-  }
+    domain: 'Movement',
+  },
 ];

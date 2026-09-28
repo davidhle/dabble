@@ -25,7 +25,7 @@
  * function to merge safely.
  */
 
-import { Category } from '../types/Category';
+import { Category, getCategoryDomain, isDomain } from '../types/Category';
 import { Entry } from '../types/Entry';
 import { loadCategories, saveCategories } from './categories';
 import { loadEntries, saveEntries } from './entriesStorage';
@@ -93,14 +93,20 @@ function isValidEntry(value: unknown): value is Entry {
   );
 }
 
-/** Minimum shape a parsed category needs - see isValidEntry above. */
+/**
+ * Minimum shape a parsed category needs - see isValidEntry above.
+ * `domain` is optional (older exports predate it) but, when present, must
+ * be a string; an unrecognized string is tolerated here and normalized to
+ * the default by applyImportedData rather than failing the whole file.
+ */
 function isValidCategory(value: unknown): value is Category {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Record<string, unknown>;
   return (
     typeof candidate.id === 'string' &&
     typeof candidate.name === 'string' &&
-    typeof candidate.color === 'string'
+    typeof candidate.color === 'string' &&
+    (candidate.domain === undefined || typeof candidate.domain === 'string')
   );
 }
 
@@ -160,5 +166,15 @@ export function parseImportFile(file: File): Promise<DabbleExportData> {
  */
 export function applyImportedData(data: DabbleExportData): void {
   saveEntries(data.entries);
-  saveCategories(data.categories);
+  // Spread (not a field-by-field rebuild) so every category field - known
+  // or future - survives the import; only `domain` is normalized, so a
+  // legacy file without one (or with an unknown value) is stored as the
+  // explicit default rather than left ambiguous.
+  saveCategories(
+    data.categories.map(category =>
+      isDomain(category.domain)
+        ? category
+        : { ...category, domain: getCategoryDomain(category) }
+    )
+  );
 }

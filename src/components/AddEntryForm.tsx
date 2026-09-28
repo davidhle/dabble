@@ -98,7 +98,14 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Entry, MediaLink, SUGGESTED_TAGS, createEntry } from '../types/Entry';
-import { Category, DEFAULT_CATEGORIES } from '../types/Category';
+import {
+  Category,
+  DEFAULT_CATEGORIES,
+  DEFAULT_DOMAIN,
+  DOMAINS,
+  Domain,
+  getCategoryDomain,
+} from '../types/Category';
 import {
   loadCategories,
   addCategory,
@@ -190,6 +197,11 @@ export default function AddEntryForm({
   // RGB/hex color input.
   const [newCategoryColorPreview, setNewCategoryColorPreview] = useState('');
   const [colorOptions, setColorOptions] = useState<string[]>([]);
+  // Which of DOMAINS the new category will be saved under - reset to
+  // DEFAULT_DOMAIN every time the sub-form opens (see
+  // handleActivityTypeChange).
+  const [newCategoryDomain, setNewCategoryDomain] =
+    useState<Domain>(DEFAULT_DOMAIN);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -424,6 +436,7 @@ export default function AddEntryForm({
       const options = previewCategoryColorOptions(6);
       setColorOptions(options);
       setNewCategoryColorPreview(options[0]);
+      setNewCategoryDomain(DEFAULT_DOMAIN);
       setIsAddingCategory(true);
       return;
     }
@@ -442,7 +455,11 @@ export default function AddEntryForm({
     const trimmedName = newCategoryName.trim();
     if (!trimmedName) return;
 
-    const newCategory = addCategory(trimmedName, newCategoryColorPreview);
+    const newCategory = addCategory(
+      trimmedName,
+      newCategoryColorPreview,
+      newCategoryDomain
+    );
     setCategories(loadCategories());
     setActivityType(newCategory.id);
     setIsAddingCategory(false);
@@ -926,11 +943,28 @@ export default function AddEntryForm({
                           }
                           className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                         >
-                          {categories.map(category => (
-                            <option key={category.id} value={category.id}>
-                              {category.name}
-                            </option>
-                          ))}
+                          {/*
+                           * One <optgroup> per domain (see DOMAINS in
+                           * types/Category.ts), in DOMAINS order - an empty
+                           * domain's group is skipped rather than rendered
+                           * as a bare heading with nothing under it.
+                           */}
+                          {DOMAINS.map(domain => {
+                            const domainCategories = categories.filter(
+                              category =>
+                                getCategoryDomain(category) === domain.id
+                            );
+                            if (domainCategories.length === 0) return null;
+                            return (
+                              <optgroup key={domain.id} label={domain.label}>
+                                {domainCategories.map(category => (
+                                  <option key={category.id} value={category.id}>
+                                    {category.name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            );
+                          })}
                           {/*
                            * Trailing sentinel option - visually set apart
                            * (italic + a leading "+") from the real
@@ -1043,7 +1077,55 @@ export default function AddEntryForm({
                               ))}
                             </div>
                           )}
-                          <div className="mt-2 flex justify-end gap-2">
+
+                          {/*
+                           * Domain picker - radio-style cards, one per
+                           * DOMAINS entry, showing its label + one-line
+                           * description. Defaults to Movement each time the
+                           * sub-form opens.
+                           */}
+                          <fieldset className="mt-3">
+                            <legend className="block text-sm font-medium text-[var(--text-secondary-color)]">
+                              Domain
+                            </legend>
+                            <div className="mt-1 grid gap-2 sm:grid-cols-2">
+                              {DOMAINS.map(domain => {
+                                const isSelected =
+                                  newCategoryDomain === domain.id;
+                                return (
+                                  <label
+                                    key={domain.id}
+                                    className={`flex cursor-pointer gap-2 rounded-md border px-3 py-2 transition-colors ${
+                                      isSelected
+                                        ? 'border-[var(--accent-color)] bg-[var(--field-tint-2)]'
+                                        : 'border-[var(--panel-border-color)] bg-[var(--field-tint-1)] hover:bg-[var(--field-tint-2)]'
+                                    }`}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name="newCategoryDomain"
+                                      value={domain.id}
+                                      checked={isSelected}
+                                      onChange={() =>
+                                        setNewCategoryDomain(domain.id)
+                                      }
+                                      className="mt-0.5 flex-shrink-0 accent-[var(--accent-color)]"
+                                    />
+                                    <span>
+                                      <span className="block text-sm font-medium text-[var(--text-color)]">
+                                        {domain.label}
+                                      </span>
+                                      <span className="block text-xs text-[var(--text-muted-color)]">
+                                        {domain.description}
+                                      </span>
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </fieldset>
+
+                          <div className="mt-3 flex justify-end gap-2">
                             <button
                               type="button"
                               onClick={handleCancelAddCategory}

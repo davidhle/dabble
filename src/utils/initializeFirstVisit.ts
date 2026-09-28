@@ -69,6 +69,7 @@ export function initializeDefaultDataForFirstVisit(): void {
 
   backfillNewBundledDefaults();
   backfillBundledFields();
+  backfillBundledCategoryDomains();
 }
 
 /**
@@ -107,7 +108,9 @@ export function initializeDefaultDataForFirstVisit(): void {
 function backfillNewBundledDefaults(): void {
   const deletedCategoryIds = new Set(loadDeletedCategoryIds());
   const storedCategories = loadCategories();
-  const storedCategoryIds = new Set(storedCategories.map(category => category.id));
+  const storedCategoryIds = new Set(
+    storedCategories.map(category => category.id)
+  );
   const missingCategories = DEFAULT_CATEGORIES.filter(
     category =>
       !storedCategoryIds.has(category.id) &&
@@ -171,5 +174,32 @@ function backfillBundledFields(): void {
 
   if (didBackfill) {
     saveEntries(entries);
+  }
+}
+
+/**
+ * Same idea as backfillBundledFields, for categories: a returning visitor's
+ * stored copy of a bundled category may predate `domain` entirely. Fills in
+ * the bundled domain ONLY where the stored category has none - a domain the
+ * visitor set themselves (via ManageCategoriesModal) is never overwritten.
+ * A stored category with no bundled match is left alone; getCategoryDomain
+ * already treats it as 'Movement'.
+ */
+function backfillBundledCategoryDomains(): void {
+  const defaultsById = new Map(
+    DEFAULT_CATEGORIES.map(category => [category.id, category])
+  );
+
+  let didBackfill = false;
+  const categories = loadCategories().map(category => {
+    const bundled = defaultsById.get(category.id);
+    if (!bundled?.domain || category.domain) return category;
+
+    didBackfill = true;
+    return { ...category, domain: bundled.domain };
+  });
+
+  if (didBackfill) {
+    saveCategories(categories);
   }
 }

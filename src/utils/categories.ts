@@ -13,7 +13,12 @@
  * getting out of sync with what's on disk.
  */
 
-import { Category, DEFAULT_CATEGORIES } from '../types/Category';
+import {
+  Category,
+  DEFAULT_CATEGORIES,
+  DEFAULT_DOMAIN,
+  Domain,
+} from '../types/Category';
 
 /** localStorage key the category list is persisted under. */
 const CATEGORIES_STORAGE_KEY = 'dabble-categories';
@@ -230,14 +235,20 @@ export function getHueRotatedColorOptions(
  * previewNextCategoryColor would show) but can be overridden - e.g. when
  * the user picked an alternative from AddEntryForm's swatch grid (see
  * getCategoryColorOptions) instead of accepting the default suggestion.
+ * `domain` defaults to DEFAULT_DOMAIN ('Movement').
  */
-export function addCategory(name: string, color?: string): Category {
+export function addCategory(
+  name: string,
+  color?: string,
+  domain: Domain = DEFAULT_DOMAIN
+): Category {
   const existingCategories = loadCategories();
 
   const newCategory: Category = {
     id: crypto.randomUUID(),
     name,
     color: color ?? pickColorForNewCategory(existingCategories),
+    domain,
   };
 
   saveCategories([...existingCategories, newCategory]);
@@ -290,9 +301,9 @@ export function deleteCategory(categoryId: string): void {
 }
 
 /**
- * Renames and/or recolors an existing category in place, by id, preserving
- * every other field (including `domain`). Used by ManageCategoriesModal's
- * per-row name input and color swatch picker.
+ * Renames, recolors, and/or re-domains an existing category in place, by
+ * id, preserving every other field. Used by ManageCategoriesModal's
+ * per-row name input, color swatch picker, and domain toggle.
  *
  * RENAME/RECOLOR NEEDS NO ENTRY DATA CHANGES: an Entry references its
  * category via `activityType`, a stable category id - never a name or
@@ -303,7 +314,7 @@ export function deleteCategory(categoryId: string): void {
  */
 export function updateCategory(
   categoryId: string,
-  updates: Partial<Pick<Category, 'name' | 'color'>>
+  updates: Partial<Pick<Category, 'name' | 'color' | 'domain'>>
 ): void {
   const existingCategories = loadCategories();
   saveCategories(
