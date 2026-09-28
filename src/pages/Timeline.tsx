@@ -113,6 +113,8 @@ import SidebarResizeHandle from '../components/SidebarResizeHandle';
 import SidebarSideToggle from '../components/SidebarSideToggle';
 import TimeRangeSelector from '../components/TimeRangeSelector';
 import VizPageHeader from '../components/VizPageHeader';
+import VisibleRangeHeader from '../components/VisibleRangeHeader';
+import { STACK_GAP } from '../utils/topRightTooltipStack';
 import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
@@ -244,6 +246,14 @@ export default function Timeline({
     side: sidebarSide,
     toggleSide: toggleSidebarSide,
   } = useSidebarWidth(containerLayout);
+  // VisibleRangeHeader's live bottom edge - when it's in the top-right
+  // corner (sidebar on the left), the top-right tooltip stack
+  // (EditModeBanner/VizEmptyState) drops below it instead of overlapping.
+  const [rangeHeaderBottom, setRangeHeaderBottom] = useState(0);
+  const tooltipStackTop =
+    sidebarSide === 'left' && rangeHeaderBottom > 0
+      ? rangeHeaderBottom + STACK_GAP
+      : undefined;
   const [topOffset, setTopOffset] = useState(0);
 
   useEffect(() => {
@@ -442,7 +452,18 @@ export default function Timeline({
         topOffset={topOffset}
         domainRange={selectedRange}
         isEditMode={isEditMode}
+        tooltipStackTop={tooltipStackTop}
       />
+
+      {/* Waits for the sidebar's first measurement so it doesn't flash at the top of the viewport. */}
+      {containerLayout.top > 0 && (
+        <VisibleRangeHeader
+          range={selectedRange}
+          top={containerLayout.top}
+          sidebarSide={sidebarSide}
+          onBottomChange={setRangeHeaderBottom}
+        />
+      )}
 
       {/*
        * Rendered after LinearTimeline in source order - see the STAGE 3
@@ -462,7 +483,7 @@ export default function Timeline({
         sidebarSide={sidebarSide}
       />
 
-      {isEditMode && <EditModeBanner />}
+      {isEditMode && <EditModeBanner top={tooltipStackTop} />}
 
       <ResetToast visible={resetPending} />
       <ResetButton onClick={resetAll} />

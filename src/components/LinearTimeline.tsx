@@ -278,6 +278,8 @@ interface LinearTimelineProps {
    * LinearTimeline's own click behavior.
    */
   isEditMode: boolean;
+  /** Top of the top-right tooltip stack - see VizEmptyState.tsx's `stackTop`. */
+  tooltipStackTop?: number;
 }
 
 /** Opacity applied to a point/range whose category is filtered out - same value as StarMap.tsx's FILTERED_OUT_OPACITY. */
@@ -408,6 +410,7 @@ export default function LinearTimeline({
   topOffset,
   domainRange,
   isEditMode,
+  tooltipStackTop,
 }: LinearTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -1266,6 +1269,7 @@ export default function LinearTimeline({
           sidebarWidth={sidebarWidth}
           sidebarSide={sidebarSide}
           editModeBannerVisible={isEditMode}
+          stackTop={tooltipStackTop}
         />
       )}
     </div>

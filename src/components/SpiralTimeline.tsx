@@ -571,6 +571,8 @@ interface SpiralTimelineProps {
    * SpiralTimeline's own click behavior.
    */
   isEditMode: boolean;
+  /** Top of the top-right tooltip stack - see VizEmptyState.tsx's `stackTop`. */
+  tooltipStackTop?: number;
 }
 
 /** Small circle radius (px) for a single-point entry and for a range entry's end caps. */
@@ -944,6 +946,36 @@ const SPIRAL_START_ANGLE = -Math.PI / 2;
 /** Opacity applied to a point/arc whose category is filtered out - same value as StarMap.tsx's/LinearTimeline.tsx's FILTERED_OUT_OPACITY. */
 const FILTERED_OUT_OPACITY = 0.15;
 
+/** Duration (ms) of the domain glide when the selected range changes - see the RANGE TRANSITION comment. Same ballpark as the 650ms CLICK-TO-CENTER pan. */
+const RANGE_TRANSITION_MS = 8000;
+
+/** Fraction of RANGE_TRANSITION_MS an exiting entry takes to fade out (at the start) / an entering one to fade in (at the end). */
+const PRESENCE_FADE_FRACTION = 0.6;
+
+/**
+ * A range change arriving within this many ms of the previous one skips
+ * the glide and snaps - TimeRangeSelector's brush calls
+ * `setSelectedRange` on every drag frame (~16ms apart), and restarting an
+ * eased glide from rest on each of those would leave the spiral all but
+ * frozen until the drag stopped. Discrete changes (glyph clicks, reset,
+ * a brush click-to-clear) are always further apart than this.
+ */
+const RAPID_RANGE_CHANGE_MS = 100;
+
+/**
+ * Mid-transition, an entering/exiting entry can sit outside the tweened
+ * domain (`t` < 0 or > 1). It's held at the center/rim there, and faded
+ * to nothing over this much `t` past the edge so it doesn't read as a
+ * pile-up at the center - see `edgeOpacity`.
+ */
+const OFF_DOMAIN_FADE_T = 0.05;
+
+/** 1 inside `[0, 1]`, falling linearly to 0 by OFF_DOMAIN_FADE_T past either edge. */
+function edgeOpacity(t: number): number {
+  const overshoot = t < 0 ? -t : t > 1 ? t - 1 : 0;
+  return Math.max(0, 1 - overshoot / OFF_DOMAIN_FADE_T);
+}
+
 /**
  * Neutral, bright highlight color for the "opened entry" ring/glow - same
  * color, same reasoning as StarMap.tsx's/LinearTimeline.tsx's own
@@ -1154,6 +1186,7 @@ export default function SpiralTimeline({
   domainRange,
   topOffset,
   isEditMode,
+  tooltipStackTop,
 }: SpiralTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -1239,7 +1272,9 @@ export default function SpiralTimeline({
   const reachesNow =
     domainRange.end.getTime() >= now.getTime() - NOW_PROXIMITY_MS;
 
-  const [minDate, maxDate] = useMemo(() => {
+  // The domain the spiral is HEADING toward - `minDate`/`maxDate` below
+  // are the tweened, on-screen version of this (see RANGE TRANSITION).
+  const targetDomain = useMemo(() => {
     const domain: [Date, Date] = [domainRange.start, domainRange.end];
 
     if (reachesNow && now.getTime() > domain[1].getTime()) {
@@ -1253,6 +1288,168 @@ export default function SpiralTimeline({
 
     return domain;
   }, [domainRange, now, reachesNow]);
+
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * RANGE TRANSITION: TWEENED DOMAIN + CROSS-FADED ENTRIES
+   * ──────────────────────────────────────────────────────────────────────
+   * When `domainRange` changes (a year glyph click, a brush drag, a
+   * reset), the spiral glides to the new domain instead of jumping:
+   * `displayedDomain` is interpolated from wherever it currently is to
+   * `targetDomain` over RANGE_TRANSITION_MS with d3.easeCubicInOut, and
+   * EVERYTHING geometric below (`minDate`/`maxDate` -> spiralParams,
+   * gridline, year glyphs, entry positions, "now" marker) reads it, so
+   * all of it moves together frame by frame. Starting from the in-flight
+   * value (`displayedDomainRef`, not the previous target) means a second
+   * click mid-glide redirects smoothly rather than snapping back first.
+   *
+   * `entries` is already hard-cut to the FINAL range by Spiral.tsx, so
+   * entries leaving the view would vanish on the first frame. The
+   * transition snapshot keeps them (`exiting`, from the last committed
+   * `entries`) rendered until the glide finishes, fading out over the
+   * first part of it; entries new to the final range fade in over the
+   * last part (see `presenceOpacity`). Both still sit on the tweened
+   * curve like everything else - no separate position morph.
+   *
+   * Only the domain + React-rendered geometry is touched: the d3-zoom
+   * transform on `zoomLayerRef` is never written here, so pan/zoom keeps
+   * working mid-glide, and TimeRangeSelector's brush reads
+   * TimeRangeContext directly, so it updates instantly as before.
+   *
+   * BRUSH DRAGS snap instead of gliding - see RAPID_RANGE_CHANGE_MS.
+   *
+   * REDUCED MOTION: with `prefers-reduced-motion: reduce`, the domain is
+   * set straight to its target (checked per change, so toggling the OS
+   * setting takes effect on the next range change without a reload).
+   * `useLayoutEffect` so the snapshot lands before the browser paints the
+   * first post-change frame - otherwise exiting entries would blink out
+   * and entering ones blink in at full opacity for one frame.
+   */
+  const [displayedDomain, setDisplayedDomain] =
+    useState<[Date, Date]>(targetDomain);
+  const displayedDomainRef = useRef(targetDomain);
+  const [transition, setTransition] = useState<{
+    exiting: Entry[];
+    exitingIds: Set<string>;
+    enteringIds: Set<string>;
+    fromReachesNow: boolean;
+    progress: number;
+  } | null>(null);
+  // The last `entries`/`reachesNow` a transition could start FROM - kept
+  // current by the layout effect just after the transition one below.
+  const committedEntriesRef = useRef(entries);
+  const committedReachesNowRef = useRef(reachesNow);
+  const lastTargetChangeAtRef = useRef(-Infinity);
+
+  const targetDomainKey = `${targetDomain[0].getTime()}-${targetDomain[1].getTime()}`;
+  useLayoutEffect(() => {
+    const from = displayedDomainRef.current;
+    const to = targetDomain;
+    if (
+      from[0].getTime() === to[0].getTime() &&
+      from[1].getTime() === to[1].getTime()
+    ) {
+      return;
+    }
+
+    const prefersReducedMotion =
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    const changedAt = performance.now();
+    const isRapidChange =
+      changedAt - lastTargetChangeAtRef.current < RAPID_RANGE_CHANGE_MS;
+    lastTargetChangeAtRef.current = changedAt;
+    if (prefersReducedMotion || isRapidChange) {
+      displayedDomainRef.current = to;
+      setDisplayedDomain(to);
+      setTransition(null);
+      return;
+    }
+
+    const previousEntries = committedEntriesRef.current;
+    const nextIds = new Set(entries.map(entry => entry.id));
+    const previousIds = new Set(previousEntries.map(entry => entry.id));
+    const exiting = previousEntries.filter(entry => !nextIds.has(entry.id));
+    setTransition({
+      exiting,
+      exitingIds: new Set(exiting.map(entry => entry.id)),
+      enteringIds: new Set(
+        entries.filter(entry => !previousIds.has(entry.id)).map(e => e.id)
+      ),
+      fromReachesNow: committedReachesNowRef.current,
+      progress: 0,
+    });
+
+    const interpolateStart = d3.interpolateNumber(
+      from[0].getTime(),
+      to[0].getTime()
+    );
+    const interpolateEnd = d3.interpolateNumber(
+      from[1].getTime(),
+      to[1].getTime()
+    );
+    const timer = d3.timer(elapsed => {
+      const progress = Math.min(1, elapsed / RANGE_TRANSITION_MS);
+      if (progress >= 1) {
+        timer.stop();
+        displayedDomainRef.current = to;
+        setDisplayedDomain(to);
+        setTransition(null);
+        return;
+      }
+      const eased = d3.easeCubicInOut(progress);
+      const domain: [Date, Date] = [
+        new Date(interpolateStart(eased)),
+        new Date(interpolateEnd(eased)),
+      ];
+      displayedDomainRef.current = domain;
+      setDisplayedDomain(domain);
+      setTransition(current => current && { ...current, progress });
+    });
+
+    return () => timer.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the target's VALUE (a fresh-but-equal `domainRange` object shouldn't restart the glide); `entries` is read from the same render as that change
+  }, [targetDomainKey]);
+
+  useLayoutEffect(() => {
+    committedEntriesRef.current = entries;
+    committedReachesNowRef.current = reachesNow;
+  });
+
+  const [minDate, maxDate] = displayedDomain;
+
+  /**
+   * How present an entry currently is, 0-1 - always 1 outside a
+   * transition. Exiting entries fade out over the first
+   * PRESENCE_FADE_FRACTION of the glide and entering ones fade in over
+   * the last, so the two sets mostly trade places while the curve is
+   * mid-move rather than all overlapping at the start/end.
+   */
+  const presenceOpacity = (entryId: string): number => {
+    if (!transition) return 1;
+    const { progress } = transition;
+    if (transition.exitingIds.has(entryId)) {
+      return (
+        1 - d3.easeCubicInOut(Math.min(1, progress / PRESENCE_FADE_FRACTION))
+      );
+    }
+    if (transition.enteringIds.has(entryId)) {
+      return d3.easeCubicInOut(
+        Math.max(
+          0,
+          (progress - (1 - PRESENCE_FADE_FRACTION)) / PRESENCE_FADE_FRACTION
+        )
+      );
+    }
+    return 1;
+  };
+
+  // Everything on screen right now: the final range's entries, plus any
+  // still fading out mid-transition.
+  const displayedEntries = useMemo(
+    () => (transition ? [...entries, ...transition.exiting] : entries),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `transition` changes every frame, but its `exiting` list only once per glide
+    [entries, transition?.exiting]
+  );
 
   const clampT = (t: number): number => Math.max(0, Math.min(1, t));
 
@@ -1431,11 +1628,11 @@ export default function SpiralTimeline({
   // entries draw on top of earlier ones where circles/arcs overlap.
   const sortedEntries = useMemo(
     () =>
-      [...entries].sort(
+      [...displayedEntries].sort(
         (a, b) =>
           new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
       ),
-    [entries]
+    [displayedEntries]
   );
 
   // Set for O(1) membership checks per point/arc - same pattern as
@@ -1506,12 +1703,21 @@ export default function SpiralTimeline({
         // Clamped to [0, 1]: a range entry only partly overlapping the
         // selected window (see isEntryWithinRange) is cut at the spiral's
         // center/rim rather than extrapolated past them.
-        const tStart = clampT(normalize(new Date(entry.timestamp)));
-        const tEnd = clampT(normalize(new Date(entry.endTimestamp as string)));
+        const rawStart = normalize(new Date(entry.timestamp));
+        const rawEnd = normalize(new Date(entry.endTimestamp as string));
+        const tStart = clampT(rawStart);
+        const tEnd = clampT(rawEnd);
         return {
           entry,
           tStart,
           tEnd,
+          // Only nonzero-overshoot when the WHOLE arc is off one edge -
+          // see OFF_DOMAIN_FADE_T.
+          edge: edgeOpacity(
+            Math.min(rawStart, rawEnd) > 1
+              ? Math.min(rawStart, rawEnd)
+              : Math.max(rawStart, rawEnd)
+          ),
           arcStart: tToArcLength(Math.min(tStart, tEnd)),
           arcEnd: tToArcLength(Math.max(tStart, tEnd)),
           color: getActivityColor(entry.activityType),
@@ -1528,8 +1734,11 @@ export default function SpiralTimeline({
     const lanedPoints = sortedEntries
       .filter(entry => !entry.endTimestamp)
       .map(entry => {
-        const t = normalize(new Date(entry.timestamp));
-        const position = tToArcLength(t);
+        const rawT = normalize(new Date(entry.timestamp));
+        // Held at the center rather than wrapping through it (a negative
+        // radius) - only ever < 0 mid-transition, see OFF_DOMAIN_FADE_T.
+        const t = Math.max(0, rawT);
+        const position = tToArcLength(Math.min(1, t));
         const lane = assignLaneAroundRanges(
           position,
           lanedRanges,
@@ -1537,7 +1746,13 @@ export default function SpiralTimeline({
           item => item.arcEnd,
           LANE_GAP_PX
         );
-        return { entry, t, lane, color: getActivityColor(entry.activityType) };
+        return {
+          entry,
+          t,
+          lane,
+          edge: edgeOpacity(rawT),
+          color: getActivityColor(entry.activityType),
+        };
       });
 
     const maxLaneIndex = Math.max(
@@ -1550,45 +1765,49 @@ export default function SpiralTimeline({
       spiralParams
     );
 
-    const ranges = lanedRanges.map(({ entry, tStart, tEnd, color, lane }) => {
-      const radiusOffset = lane * bandThickness;
-      const t0 = Math.min(tStart, tEnd);
-      const t1 = Math.max(tStart, tEnd);
-      const tMid = (t0 + t1) / 2;
+    const ranges = lanedRanges.map(
+      ({ entry, tStart, tEnd, color, lane, edge }) => {
+        const radiusOffset = lane * bandThickness;
+        const t0 = Math.min(tStart, tEnd);
+        const t1 = Math.max(tStart, tEnd);
+        const tMid = (t0 + t1) / 2;
 
-      // This is the ONLY path generated per range entry - the "opened"
-      // glow/ring below (in the render) both STROKE this exact same `d`
-      // string rather than generating their own differently-built
-      // shapes; see that render's own comment for why stroking the one
-      // closed path directly, instead of building separate offset
-      // shapes, is what makes the highlight wrap continuously around the
-      // ENTIRE shape (both long curved edges AND both cut ends).
-      const pathD = buildRangeBandPath(
-        t0,
-        t1,
-        radiusOffset,
-        ARC_BAND_HALF_THICKNESS,
-        spiralParams,
-        RANGE_BAND_SAMPLE_COUNT
-      );
+        // This is the ONLY path generated per range entry - the "opened"
+        // glow/ring below (in the render) both STROKE this exact same `d`
+        // string rather than generating their own differently-built
+        // shapes; see that render's own comment for why stroking the one
+        // closed path directly, instead of building separate offset
+        // shapes, is what makes the highlight wrap continuously around the
+        // ENTIRE shape (both long curved edges AND both cut ends).
+        const pathD = buildRangeBandPath(
+          t0,
+          t1,
+          radiusOffset,
+          ARC_BAND_HALF_THICKNESS,
+          spiralParams,
+          RANGE_BAND_SAMPLE_COUNT
+        );
 
-      return {
-        entry,
-        pathD,
-        start: spiralPoint(t0, spiralParams, radiusOffset),
-        end: spiralPoint(t1, spiralParams, radiusOffset),
-        midpoint: spiralPoint(tMid, spiralParams, radiusOffset),
-        color,
-        lane,
-      };
-    });
+        return {
+          entry,
+          pathD,
+          start: spiralPoint(t0, spiralParams, radiusOffset),
+          end: spiralPoint(t1, spiralParams, radiusOffset),
+          midpoint: spiralPoint(tMid, spiralParams, radiusOffset),
+          color,
+          lane,
+          edge,
+        };
+      }
+    );
 
-    const points = lanedPoints.map(({ entry, t, lane, color }) => {
+    const points = lanedPoints.map(({ entry, t, lane, color, edge }) => {
       const radiusOffset = lane * bandThickness;
       return {
         entry,
         ...spiralPoint(t, spiralParams, radiusOffset),
         color,
+        edge,
       };
     });
 
@@ -1694,16 +1913,37 @@ export default function SpiralTimeline({
   // `domainRange.end` - see the top-of-file comment's "THE DOTTED LINE +
   // GLYPH" section for why.
   const latestEntryDate = useMemo(() => {
-    if (entries.length === 0) return null;
+    if (displayedEntries.length === 0) return null;
 
-    return entries.reduce(
+    return displayedEntries.reduce(
       (latest, entry) => {
         const entryEnd = new Date(entry.endTimestamp ?? entry.timestamp);
         return entryEnd.getTime() > latest.getTime() ? entryEnd : latest;
       },
-      new Date(entries[0].endTimestamp ?? entries[0].timestamp)
+      new Date(
+        displayedEntries[0].endTimestamp ?? displayedEntries[0].timestamp
+      )
     );
-  }, [entries]);
+  }, [displayedEntries]);
+
+  // Mid-transition the marker stays drawn if EITHER end of the glide
+  // reaches today, cross-fading like an entry when only one does.
+  const showNowMarker = reachesNow || (transition?.fromReachesNow ?? false);
+  const nowMarkerPresence =
+    !transition || transition.fromReachesNow === reachesNow
+      ? 1
+      : reachesNow
+        ? d3.easeCubicInOut(
+            Math.max(
+              0,
+              (transition.progress - (1 - PRESENCE_FADE_FRACTION)) /
+                PRESENCE_FADE_FRACTION
+            )
+          )
+        : 1 -
+          d3.easeCubicInOut(
+            Math.min(1, transition.progress / PRESENCE_FADE_FRACTION)
+          );
 
   const nowMarker = useMemo(() => {
     // No entries at all, or (an unusual edge case - a future-dated
@@ -1711,7 +1951,7 @@ export default function SpiralTimeline({
     // either way there's no sensible forward-in-time line to draw.
     // Also nothing to draw when the selection doesn't reach today at all.
     if (
-      !reachesNow ||
+      !showNowMarker ||
       !latestEntryDate ||
       now.getTime() < latestEntryDate.getTime()
     ) {
@@ -1777,7 +2017,7 @@ export default function SpiralTimeline({
   }, [
     latestEntryDate,
     now,
-    reachesNow,
+    showNowMarker,
     spiralParams,
     minDate,
     maxDate,
@@ -2148,7 +2388,7 @@ export default function SpiralTimeline({
                * continuation rather than more of the solid curve.
                */}
               {nowMarker && (
-                <>
+                <g opacity={nowMarkerPresence}>
                   <path
                     d={nowMarker.pathD}
                     fill="none"
@@ -2188,10 +2428,10 @@ export default function SpiralTimeline({
                   >
                     {isDaytime ? '☀' : '☾'}
                   </text>
-                </>
+                </g>
               )}
 
-              {ranges.map(({ entry, pathD, color }) => {
+              {ranges.map(({ entry, pathD, color, edge }) => {
                 const isOpened = openedEntryIdSet.has(entry.id);
                 // FOCUSED ENTRY: the one the sidebar's FocusedEntryView is
                 // showing gets a brighter opened highlight - see
@@ -2212,12 +2452,23 @@ export default function SpiralTimeline({
                   // `centerY` baked in), the same coordinate space
                   // `points` below render directly into - see the
                   // top-of-file "RANGE ENTRIES" comment.
+                  // RANGE TRANSITION: `presenceOpacity`/`edge` fade
+                  // entering/exiting arcs frame by frame, so the CSS
+                  // opacity transition is dropped mid-glide (it'd just
+                  // lag behind them); an exiting arc also stops taking
+                  // hover/clicks since it's on its way out.
                   <g
                     key={entry.id}
                     style={{
-                      opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
+                      opacity:
+                        (isFilteredOut ? FILTERED_OUT_OPACITY : 1) *
+                        presenceOpacity(entry.id) *
+                        edge,
+                      pointerEvents: transition?.exitingIds.has(entry.id)
+                        ? 'none'
+                        : undefined,
                     }}
-                    className="cursor-pointer transition-opacity duration-200"
+                    className={`cursor-pointer ${transition ? '' : 'transition-opacity duration-200'}`}
                     onMouseEnter={event =>
                       setHovered({
                         kind: 'entry',
@@ -2332,7 +2583,7 @@ export default function SpiralTimeline({
                 );
               })}
 
-              {points.map(({ entry, x, y, color }) => {
+              {points.map(({ entry, x, y, color, edge }) => {
                 const isOpened = openedEntryIdSet.has(entry.id);
                 const isFocused = entry.id === expandedEntryId;
                 const isFilteredOut = !activeCategorySet.has(
@@ -2341,12 +2592,21 @@ export default function SpiralTimeline({
                 return (
                   // OPENED-ENTRY HIGHLIGHT: same per-entry <g> + opacity
                   // + glow/ring structure as StarMap.tsx's stars.map().
+                  // Same RANGE TRANSITION fade as the arcs above.
                   <g
                     key={entry.id}
                     style={{
-                      opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
+                      opacity:
+                        (isFilteredOut ? FILTERED_OUT_OPACITY : 1) *
+                        presenceOpacity(entry.id) *
+                        edge,
+                      pointerEvents: transition?.exitingIds.has(entry.id)
+                        ? 'none'
+                        : undefined,
                     }}
-                    className="transition-opacity duration-200"
+                    className={
+                      transition ? undefined : 'transition-opacity duration-200'
+                    }
                   >
                     {isOpened && (
                       <circle
@@ -2510,7 +2770,7 @@ export default function SpiralTimeline({
             label={
               isYearSelected(hovered.year)
                 ? `${hovered.year} · Click to show all years`
-                : String(hovered.year)
+                : `${hovered.year} · Click to show entries from this year`
             }
             x={hovered.x}
             y={hovered.y}
@@ -2537,6 +2797,7 @@ export default function SpiralTimeline({
           sidebarWidth={sidebarWidth}
           sidebarSide={sidebarSide}
           editModeBannerVisible={isEditMode}
+          stackTop={tooltipStackTop}
         />
       )}
     </div>

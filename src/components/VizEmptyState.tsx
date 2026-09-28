@@ -108,6 +108,11 @@ interface VizEmptyStateProps {
    * true` layout. See the EDIT MODE STACKING comment above.
    */
   editModeBannerVisible: boolean;
+  /**
+   * Overrides the stack's top slot - same purpose as EditModeBanner.tsx's
+   * own `top` prop (see its comment).
+   */
+  stackTop?: number;
 }
 
 export default function VizEmptyState({
@@ -116,11 +121,12 @@ export default function VizEmptyState({
   sidebarWidth,
   sidebarSide,
   editModeBannerVisible,
+  stackTop = TOP_SLOT,
 }: VizEmptyStateProps) {
   if (hasAnyEntries) {
     const top = editModeBannerVisible
-      ? TOP_SLOT + EDIT_MODE_HEIGHT_ESTIMATE + STACK_GAP
-      : TOP_SLOT;
+      ? stackTop + EDIT_MODE_HEIGHT_ESTIMATE + STACK_GAP
+      : stackTop;
 
     return (
       <div

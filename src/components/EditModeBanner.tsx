@@ -39,11 +39,22 @@
 
 import { TOP_SLOT } from '../utils/topRightTooltipStack';
 
-export default function EditModeBanner() {
+interface EditModeBannerProps {
+  /**
+   * Overrides the stack's top slot - Spiral.tsx passes this to drop the
+   * banner below its VisibleRangeHeader.tsx, which sits in the same
+   * top-right corner.
+   */
+  top?: number;
+}
+
+export default function EditModeBanner({
+  top = TOP_SLOT,
+}: EditModeBannerProps) {
   return (
     <div
       className="pointer-events-auto fixed right-[var(--chrome-edge-gutter)] z-40 max-w-sm rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm text-[var(--yellow-accent-text)]"
-      style={{ top: TOP_SLOT }}
+      style={{ top }}
       role="status"
     >
       Edit Mode: click any entry to edit it.
