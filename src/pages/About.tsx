@@ -203,6 +203,7 @@ export default function About() {
               'Backend development for real cross-device sync (likely via Cloudflare Workers)',
               'User authentication, potentially replacing the current JSON import/export as the primary way to save and restore your data',
               "Multi-category entries — associate an entry with more than one category (e.g. a trip that involved both shuffle dancing and pole dance & calisthenics training), represented visually maybe with a gradient blending each category's color.",
+              'Material artifacts — objects tied to a practice or era rather than a single date (a pair of shoes, a song, a video that shaped a style), shown as a small gallery rather than a dated entry, with visual connection lines linking them to the events and orbit moments they relate to across the visualizations.',
             ]}
           />
         </div>

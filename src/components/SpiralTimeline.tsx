@@ -457,7 +457,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
-import { Category } from '../types/Category';
+import { Category, isOrbitEntry } from '../types/Category';
 import { DateRange, useTimeRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
 // Same date/time formatting the "now" marker's tooltip uses for its live
@@ -482,12 +482,12 @@ interface SpiralTimelineProps {
   /**
    * The current category list - Spiral.tsx's own `categories` (recomputed
    * off `categoriesVersion`, see EntrySelectionContext.tsx's own comment
-   * on that field). NOT read directly by any rendering here - `ranges`/
-   * `points` still get each entry's color via getActivityColor exactly as
-   * before. It exists purely as a dependency of the `{ ranges, points }`
-   * useMemo below, so a ManageCategoriesModal recolor (which never
-   * touches `entries`) still triggers a recompute of those memoized
-   * colors instead of leaving stale ones on screen.
+   * on that field). Read by the `{ ranges, points, ... }` useMemo below to
+   * split off Orbit-domain entries (isOrbitEntry - see the "ORBIT
+   * ENTRIES" comment); colors still come from getActivityColor. Being a
+   * dependency of that memo is also what makes a ManageCategoriesModal
+   * recolor/re-domain (which never touches `entries`) recompute it
+   * instead of leaving stale colors or shapes on screen.
    */
   categories: Category[];
   /**
@@ -746,6 +746,80 @@ const LANE_EDGE_STROKE_OPACITY = 0.3;
 const LANE_EDGE_STROKE_WIDTH = 1;
 
 /**
+ * ──────────────────────────────────────────────────────────────────────
+ * ORBIT ENTRIES: HOLLOW MARKERS + SINE-WAVE RANGES, OUTSIDE THE LANE SYSTEM
+ * ──────────────────────────────────────────────────────────────────────
+ * Entries whose category is in the 'Orbit' domain (see isOrbitEntry in
+ * types/Category.ts) are context AROUND the practice, not practice
+ * itself, so they get their own shapes and never take part in
+ * `assignLanes`/`assignLaneAroundRanges` - they always sit on the true
+ * curve (radiusOffset 0), independent of the movement lanes and free to
+ * cross them:
+ *   - A single-date orbit entry is a hollow marker: a circle the size of
+ *     a movement point at the same `spiralPoint(t)`, filled with the
+ *     theme's --bg-color (a "cutout") and bordered in the category color.
+ *     Drawn above movement range
+ *     bands (so one dated inside a range isn't buried) but below movement
+ *     points.
+ *   - A range orbit entry is a thin stroked sine wave weaving around the
+ *     curve between its start/end (`buildOrbitWavePath`), instead of a
+ *     filled band. Drawn behind all movement content.
+ * Both use the entry's category color, so two Orbit categories read as
+ * two colors exactly the way Movement categories do.
+ */
+/** Border width (px) of a single-date orbit entry's hollow marker - same radius as a movement point (POINT_RADIUS). */
+const ORBIT_POINT_STROKE_WIDTH = 2;
+
+/** Stroke width (px) of an orbit range's sine wave. */
+const ORBIT_WAVE_STROKE_WIDTH = 1.75;
+/** Opacity of the wave - fully present, just lighter than a solid band; NOT FILTERED_OUT_OPACITY. */
+const ORBIT_OPACITY = 0.8;
+/** The wave's soft same-color glow: a wider, blurred copy of the stroke underneath it. */
+const ORBIT_WAVE_GLOW_STROKE_WIDTH = 5;
+const ORBIT_WAVE_GLOW_OPACITY = 0.45;
+const ORBIT_WAVE_GLOW_BLUR_STD_DEVIATION = 2.5;
+/** Width (px) of the wave's invisible hover/click stroke. */
+const ORBIT_WAVE_HIT_STROKE_WIDTH = 14;
+
+/**
+ * Wave amplitude as a fraction of the year-to-year radial gap
+ * (`maxRadius / totalRotations`), clamped to a px range: the fraction
+ * keeps the wave proportionate to how tightly the loops are packed, the
+ * clamp keeps it from ballooning when only a year or two is selected
+ * (a ~300px gap) or vanishing on a very long domain.
+ */
+const ORBIT_WAVE_AMPLITUDE_FRACTION_OF_YEAR_GAP = 0.4;
+const ORBIT_WAVE_MIN_AMPLITUDE_PX = 2.5;
+const ORBIT_WAVE_MAX_AMPLITUDE_PX = 10;
+
+/**
+ * Oscillation count scales with the SQUARE ROOT of the entry's duration
+ * in months - a 1-month entry gets 5 cycles, 4 months 10, a year ~17 -
+ * so short entries aren't a flat squiggle and long ones don't turn into a
+ * dense zigzag. Tied to the entry's own dates (not its on-screen length),
+ * so the wave doesn't reshape itself while the domain tweens. Rounded to
+ * a half cycle so the wave ends back on the curve.
+ */
+const ORBIT_WAVE_CYCLES_PER_SQRT_MONTH = 5;
+const ORBIT_WAVE_MIN_CYCLES = 3;
+const ORBIT_WAVE_MAX_CYCLES = 24;
+/** Samples per oscillation, bounded to [ORBIT_WAVE_MIN_SAMPLES, ORBIT_WAVE_MAX_SAMPLES] - ~10 per cycle keeps each crest smooth. */
+const ORBIT_WAVE_SAMPLES_PER_CYCLE = 10;
+const ORBIT_WAVE_MIN_SAMPLES = 48;
+const ORBIT_WAVE_MAX_SAMPLES = 240;
+const MS_PER_MONTH = (365.25 / 12) * 24 * 60 * 60 * 1000;
+
+function orbitWaveCycles(durationMs: number): number {
+  const months = Math.max(0, durationMs) / MS_PER_MONTH;
+  const cycles = ORBIT_WAVE_CYCLES_PER_SQRT_MONTH * Math.sqrt(months);
+  const clamped = Math.min(
+    ORBIT_WAVE_MAX_CYCLES,
+    Math.max(ORBIT_WAVE_MIN_CYCLES, cycles)
+  );
+  return Math.round(clamped * 2) / 2;
+}
+
+/**
  * Extra arc-length clearance (px, along the spiral's own path) required
  * between one arc's end and the next arc's start before they're allowed to
  * share a lane - the spiral's equivalent of LinearTimeline.tsx's
@@ -754,6 +828,18 @@ const LANE_EDGE_STROKE_WIDTH = 1;
  * there and along the spiral's curve here.
  */
 const LANE_GAP_PX = 6;
+
+/**
+ * How far (px, along the curve) a movement band's rounded cap reaches past
+ * its own start/end date - the cap is a semicircle of radius
+ * ARC_BAND_HALF_THICKNESS (see `buildRangeBandPath`). Lane assignment
+ * still works from each band's DATE span (`arcStart`/`arcEnd`), so the
+ * clearance it's given is widened by this much per cap involved - two
+ * caps between two bands, one between a band and a point - keeping the
+ * same visible LANE_GAP_PX clearance the flat-ended bands had instead of
+ * letting caps overlap a same-lane neighbor.
+ */
+const RANGE_CAP_EXTENT_PX = ARC_BAND_HALF_THICKNESS;
 
 /**
  * Clearance (px) reserved between the spiral's outermost loop
@@ -1148,7 +1234,8 @@ function buildRangeBandPath(
   radiusOffset: number,
   halfThickness: number,
   params: SpiralParams,
-  sampleCount: number
+  sampleCount: number,
+  roundedCaps = false
 ): string {
   const outerEdge: { x: number; y: number }[] = [];
   const innerEdge: { x: number; y: number }[] = [];
@@ -1168,8 +1255,132 @@ function buildRangeBandPath(
     });
   }
 
-  const boundary = [...outerEdge, ...innerEdge.reverse()];
-  return `${buildPolylinePath(boundary)} Z`;
+  if (!roundedCaps) {
+    const boundary = [...outerEdge, ...innerEdge.reverse()];
+    return `${buildPolylinePath(boundary)} Z`;
+  }
+
+  // ROUNDED CAPS: a semicircle (radius = halfThickness) joins each end's
+  // outer and inner edge points, bulging forward along the curve at the
+  // end and backward at the start - see `roundedCapArc`.
+  const endTangent = spiralTangent(t1, params, radiusOffset);
+  const startTangent = spiralTangent(t0, params, radiusOffset);
+  const outerEnd = outerEdge[outerEdge.length - 1];
+  const innerEnd = innerEdge[innerEdge.length - 1];
+  const innerStart = innerEdge[0];
+  const outerStart = outerEdge[0];
+
+  return [
+    buildPolylinePath(outerEdge),
+    roundedCapArc(outerEnd, innerEnd, endTangent, halfThickness),
+    ...innerEdge
+      .slice(0, -1)
+      .reverse()
+      .map(p => `L${p.x.toFixed(2)},${p.y.toFixed(2)}`),
+    roundedCapArc(
+      innerStart,
+      outerStart,
+      { x: -startTangent.x, y: -startTangent.y },
+      halfThickness
+    ),
+    'Z',
+  ].join(' ');
+}
+
+/**
+ * Unit vector along the spiral's direction of travel (increasing `t`) at
+ * `t` - the same symmetric finite difference `spiralOutwardNormal` uses,
+ * at the same `radiusOffset`. Used to orient `buildRangeBandPath`'s
+ * rounded caps; taken from the curve itself rather than the band's own
+ * samples so a zero-length band (t0 === t1) still gets a well-defined
+ * direction and renders as a round dot.
+ */
+function spiralTangent(
+  t: number,
+  params: SpiralParams,
+  radiusOffset: number
+): { x: number; y: number } {
+  const before = spiralPoint(
+    Math.max(0, t - TANGENT_ESTIMATION_EPSILON_T),
+    params,
+    radiusOffset
+  );
+  const after = spiralPoint(
+    Math.min(1, t + TANGENT_ESTIMATION_EPSILON_T),
+    params,
+    radiusOffset
+  );
+  const dx = after.x - before.x;
+  const dy = after.y - before.y;
+  const length = Math.hypot(dx, dy) || 1;
+  return { x: dx / length, y: dy / length };
+}
+
+/**
+ * SVG arc segment (`A ...`) drawing a semicircle of `radius` from `from`
+ * to `to` (which sit `2 * radius` apart), bulging toward `bulgeDirection`.
+ * Of the two possible semicircles, sweep-flag 1 (clockwise on screen,
+ * since SVG's y axis points down) passes through the midpoint offset
+ * `(-(from - mid).y, (from - mid).x)` from the chord's center; it's kept
+ * when that offset points along `bulgeDirection`, otherwise sweep-flag 0
+ * (the opposite semicircle) is used.
+ */
+function roundedCapArc(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  bulgeDirection: { x: number; y: number },
+  radius: number
+): string {
+  const midX = (from.x + to.x) / 2;
+  const midY = (from.y + to.y) / 2;
+  const clockwiseBulgeX = -(from.y - midY);
+  const clockwiseBulgeY = from.x - midX;
+  const sweep =
+    clockwiseBulgeX * bulgeDirection.x + clockwiseBulgeY * bulgeDirection.y > 0
+      ? 1
+      : 0;
+  return `A${radius},${radius} 0 0 ${sweep} ${to.x.toFixed(2)},${to.y.toFixed(2)}`;
+}
+
+/**
+ * Builds an OPEN polyline path for an orbit range entry's sine wave - see
+ * the "ORBIT ENTRIES" comment. Walks `[t0, t1]` (the part of the entry
+ * inside the current domain) with the same `spiralPoint`/
+ * `spiralOutwardNormal` sampling `buildRangeBandPath` uses, offsetting
+ * each centerline sample along the curve's normal by
+ * `amplitude * sin(2π * cycles * phase)`.
+ *
+ * `phase` runs 0 -> 1 over the entry's FULL, unclamped span (`rawT0` ->
+ * `rawT1`), not the clamped one, so when the domain edge cuts the entry
+ * (or sweeps across it mid-transition) the visible part keeps its crests
+ * pinned to the same dates instead of sliding.
+ */
+function buildOrbitWavePath(
+  t0: number,
+  t1: number,
+  rawT0: number,
+  rawT1: number,
+  amplitude: number,
+  cycles: number,
+  params: SpiralParams,
+  sampleCount: number
+): string {
+  const rawSpan = rawT1 - rawT0;
+  const points: { x: number; y: number }[] = [];
+
+  for (let i = 0; i <= sampleCount; i++) {
+    const t = t0 + ((t1 - t0) * i) / sampleCount;
+    const center = spiralPoint(t, params);
+    const normal = spiralOutwardNormal(t, params, 0, center);
+    const phase = rawSpan === 0 ? 0 : (t - rawT0) / rawSpan;
+    const offset = amplitude * Math.sin(2 * Math.PI * cycles * phase);
+    points.push({
+      x: center.x + normal.x * offset,
+      y: center.y + normal.y * offset,
+    });
+  }
+
+  return buildPolylinePath(points);
 }
 
 export default function SpiralTimeline({
@@ -1696,8 +1907,19 @@ export default function SpiralTimeline({
    * down, and the YEAR GLYPHS collision check, both read these same
    * fields, so they automatically target where the band visually IS.
    */
-  const { ranges, points } = useMemo(() => {
-    const rangeItems = sortedEntries
+  const { ranges, points, orbitRanges, orbitPoints } = useMemo(() => {
+    // ORBIT ENTRIES are split off before any lane assignment - see the
+    // "ORBIT ENTRIES" comment above ORBIT_POINT_STROKE_WIDTH. Everything
+    // below that reads `movementEntries` is unchanged from before orbit
+    // entries existed.
+    const movementEntries = sortedEntries.filter(
+      entry => !isOrbitEntry(entry, categories)
+    );
+    const orbitEntries = sortedEntries.filter(entry =>
+      isOrbitEntry(entry, categories)
+    );
+
+    const rangeItems = movementEntries
       .filter(entry => entry.endTimestamp)
       .map(entry => {
         // Clamped to [0, 1]: a range entry only partly overlapping the
@@ -1728,10 +1950,10 @@ export default function SpiralTimeline({
       rangeItems,
       item => item.arcStart,
       item => item.arcEnd,
-      LANE_GAP_PX
+      LANE_GAP_PX + 2 * RANGE_CAP_EXTENT_PX
     );
 
-    const lanedPoints = sortedEntries
+    const lanedPoints = movementEntries
       .filter(entry => !entry.endTimestamp)
       .map(entry => {
         const rawT = normalize(new Date(entry.timestamp));
@@ -1744,7 +1966,7 @@ export default function SpiralTimeline({
           lanedRanges,
           item => item.arcStart,
           item => item.arcEnd,
-          LANE_GAP_PX
+          LANE_GAP_PX + RANGE_CAP_EXTENT_PX
         );
         return {
           entry,
@@ -1785,7 +2007,8 @@ export default function SpiralTimeline({
           radiusOffset,
           ARC_BAND_HALF_THICKNESS,
           spiralParams,
-          RANGE_BAND_SAMPLE_COUNT
+          RANGE_BAND_SAMPLE_COUNT,
+          true
         );
 
         return {
@@ -1811,7 +2034,73 @@ export default function SpiralTimeline({
       };
     });
 
-    return { ranges, points };
+    // ─── Orbit entries: always on the true curve, no lanes ───
+    const orbitAmplitude = Math.min(
+      ORBIT_WAVE_MAX_AMPLITUDE_PX,
+      Math.max(
+        ORBIT_WAVE_MIN_AMPLITUDE_PX,
+        (spiralParams.maxRadius / spiralParams.totalRotations) *
+          ORBIT_WAVE_AMPLITUDE_FRACTION_OF_YEAR_GAP
+      )
+    );
+
+    const orbitRanges = orbitEntries
+      .filter(entry => entry.endTimestamp)
+      .map(entry => {
+        const startMs = new Date(entry.timestamp).getTime();
+        const endMs = new Date(entry.endTimestamp as string).getTime();
+        const rawStart = normalize(new Date(Math.min(startMs, endMs)));
+        const rawEnd = normalize(new Date(Math.max(startMs, endMs)));
+        const t0 = clampT(rawStart);
+        const t1 = clampT(rawEnd);
+        const cycles = orbitWaveCycles(Math.abs(endMs - startMs));
+        const sampleCount = Math.min(
+          ORBIT_WAVE_MAX_SAMPLES,
+          Math.max(
+            ORBIT_WAVE_MIN_SAMPLES,
+            Math.round(cycles * ORBIT_WAVE_SAMPLES_PER_CYCLE)
+          )
+        );
+        return {
+          entry,
+          pathD: buildOrbitWavePath(
+            t0,
+            t1,
+            rawStart,
+            rawEnd,
+            orbitAmplitude,
+            cycles,
+            spiralParams,
+            sampleCount
+          ),
+          start: spiralPoint(t0, spiralParams),
+          end: spiralPoint(t1, spiralParams),
+          midpoint: spiralPoint((t0 + t1) / 2, spiralParams),
+          color: getActivityColor(entry.activityType),
+          // Only fades when the WHOLE span is off one edge - a range that
+          // merely straddles an edge is clipped by t0/t1 and stays visible.
+          edge:
+            rawStart > 1
+              ? edgeOpacity(rawStart)
+              : rawEnd < 0
+                ? edgeOpacity(rawEnd)
+                : 1,
+        };
+      });
+
+    const orbitPoints = orbitEntries
+      .filter(entry => !entry.endTimestamp)
+      .map(entry => {
+        const rawT = normalize(new Date(entry.timestamp));
+        return {
+          entry,
+          ...spiralPoint(Math.max(0, rawT), spiralParams),
+          color: getActivityColor(entry.activityType),
+          edge: edgeOpacity(rawT),
+        };
+      });
+
+    return { ranges, points, orbitRanges, orbitPoints };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     sortedEntries,
@@ -1829,10 +2118,14 @@ export default function SpiralTimeline({
   // checked against each year glyph's raw position before it's drawn.
   const entryMarkerPositions = useMemo(
     () => [
-      ...points.map(point => ({ x: point.x, y: point.y })),
-      ...ranges.flatMap(range => [range.start, range.end, range.midpoint]),
+      ...[...points, ...orbitPoints].map(point => ({ x: point.x, y: point.y })),
+      ...[...ranges, ...orbitRanges].flatMap(range => [
+        range.start,
+        range.end,
+        range.midpoint,
+      ]),
     ],
-    [points, ranges]
+    [points, ranges, orbitPoints, orbitRanges]
   );
 
   /** Whether a glyph drawn at `candidateT` would sit within `collisionRadius` of any entry marker (or any of `otherGlyphs`). */
@@ -2253,6 +2546,37 @@ export default function SpiralTimeline({
   const isReady =
     size.width > 0 && size.height > 0 && spiralParams.maxRadius > 0;
 
+  /** Hover-tooltip + click wiring for an orbit glyph - identical behavior to the movement points/arcs below. */
+  const orbitEntryHandlers = (entry: Entry) => ({
+    onMouseEnter: (event: React.MouseEvent) =>
+      setHovered({
+        kind: 'entry',
+        entry,
+        x: event.clientX,
+        y: event.clientY,
+      }),
+    onMouseMove: (event: React.MouseEvent) =>
+      setHovered(current =>
+        current && current.kind === 'entry' && current.entry.id === entry.id
+          ? { ...current, x: event.clientX, y: event.clientY }
+          : current
+      ),
+    onMouseLeave: () => setHovered(null),
+    onClick: () => onEntryClick(entry),
+  });
+
+  /** The per-entry <g> style every entry glyph shares: filter dimming, transition presence/edge fade, and no pointer events while exiting. */
+  const entryGroupStyle = (
+    entry: Entry,
+    edge: number
+  ): React.CSSProperties => ({
+    opacity:
+      (activeCategorySet.has(entry.activityType) ? 1 : FILTERED_OUT_OPACITY) *
+      presenceOpacity(entry.id) *
+      edge,
+    pointerEvents: transition?.exitingIds.has(entry.id) ? 'none' : undefined,
+  });
+
   return (
     // `fixed inset-0` (not a layout child) - see the FULL-BLEED CANVAS
     // comment above. z-0, same base layer as StarMap.tsx/LinearTimeline.tsx:
@@ -2326,6 +2650,16 @@ export default function SpiralTimeline({
             <feGaussianBlur
               stdDeviation={YEAR_HIGHLIGHT_GLOW_BLUR_STD_DEVIATION}
             />
+          </filter>
+          {/* Soft same-color glow under an orbit range's sine wave - see the "ORBIT ENTRIES" comment. */}
+          <filter
+            id="orbit-wave-glow"
+            x="-100%"
+            y="-100%"
+            width="300%"
+            height="300%"
+          >
+            <feGaussianBlur stdDeviation={ORBIT_WAVE_GLOW_BLUR_STD_DEVIATION} />
           </filter>
         </defs>
         <g ref={zoomLayerRef}>
@@ -2430,6 +2764,100 @@ export default function SpiralTimeline({
                   </text>
                 </g>
               )}
+
+              {/*
+               * ORBIT WAVES - see the "ORBIT ENTRIES" comment above
+               * ORBIT_POINT_STROKE_WIDTH. Drawn BEFORE the movement
+               * ranges/points so they sit behind them: waves are free to
+               * cross movement content, and where they do, the movement
+               * entry keeps the click (orbit points are the exception -
+               * see ORBIT POINTS below). The opened-entry
+               * highlight follows the same "highlight-colored copy of the
+               * shape, blurred glow + crisp outline, drawn behind the
+               * colored shape" approach as the arc bands below, applied to
+               * the wave's line.
+               */}
+              {orbitRanges.map(({ entry, pathD, color, edge }) => {
+                const isOpened = openedEntryIdSet.has(entry.id);
+                const isFocused = entry.id === expandedEntryId;
+                return (
+                  <g
+                    key={entry.id}
+                    style={entryGroupStyle(entry, edge)}
+                    className={`cursor-pointer ${transition ? '' : 'transition-opacity duration-200'}`}
+                    {...orbitEntryHandlers(entry)}
+                  >
+                    {/* Invisible, wider hit stroke - a 1.75px line is too thin to hover comfortably. */}
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke="transparent"
+                      strokeWidth={ORBIT_WAVE_HIT_STROKE_WIDTH}
+                      strokeLinecap="round"
+                    />
+                    {isOpened && (
+                      <>
+                        <path
+                          d={pathD}
+                          fill="none"
+                          stroke={OPENED_HIGHLIGHT_COLOR}
+                          strokeWidth={
+                            ORBIT_WAVE_STROKE_WIDTH +
+                            (isFocused
+                              ? FOCUSED_GLOW_STROKE_WIDTH
+                              : OPENED_ARC_GLOW_EXTRA_RADIUS) *
+                              2
+                          }
+                          strokeOpacity={
+                            isFocused
+                              ? FOCUSED_GLOW_OPACITY
+                              : OPENED_ARC_GLOW_OPACITY
+                          }
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          filter="url(#opened-arc-glow)"
+                          className="pointer-events-none"
+                        />
+                        <path
+                          d={pathD}
+                          fill="none"
+                          stroke={OPENED_HIGHLIGHT_COLOR}
+                          strokeWidth={
+                            ORBIT_WAVE_STROKE_WIDTH +
+                            (isFocused
+                              ? FOCUSED_RING_STROKE_WIDTH
+                              : ARC_RING_WIDTH) *
+                              2
+                          }
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="pointer-events-none"
+                        />
+                      </>
+                    )}
+                    <g opacity={ORBIT_OPACITY} className="pointer-events-none">
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={color}
+                        strokeWidth={ORBIT_WAVE_GLOW_STROKE_WIDTH}
+                        strokeOpacity={ORBIT_WAVE_GLOW_OPACITY}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        filter="url(#orbit-wave-glow)"
+                      />
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={color}
+                        strokeWidth={ORBIT_WAVE_STROKE_WIDTH}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </g>
+                  </g>
+                );
+              })}
 
               {ranges.map(({ entry, pathD, color, edge }) => {
                 const isOpened = openedEntryIdSet.has(entry.id);
@@ -2579,6 +3007,67 @@ export default function SpiralTimeline({
                       strokeOpacity={LANE_EDGE_STROKE_OPACITY}
                       strokeWidth={LANE_EDGE_STROKE_WIDTH}
                     />
+                  </g>
+                );
+              })}
+
+              {/*
+               * ORBIT POINTS - drawn AFTER the movement range bands (unlike
+               * the orbit waves above, which sit behind them): a single-date
+               * orbit entry is a small point glyph, and one dated inside a
+               * movement range would otherwise be buried under that band
+               * and unclickable. Still drawn before movement points, so a
+               * movement point on top keeps its click.
+               */}
+              {orbitPoints.map(({ entry, x, y, color, edge }) => {
+                const isOpened = openedEntryIdSet.has(entry.id);
+                const isFocused = entry.id === expandedEntryId;
+                return (
+                  // Same opened glow/ring as a movement point (see
+                  // points.map below) - only the marker itself differs.
+                  <g
+                    key={entry.id}
+                    style={entryGroupStyle(entry, edge)}
+                    className={`cursor-pointer ${transition ? '' : 'transition-opacity duration-200'}`}
+                    {...orbitEntryHandlers(entry)}
+                  >
+                    {isOpened && (
+                      <circle
+                        cx={x}
+                        cy={y}
+                        r={POINT_RADIUS + 5}
+                        fill="none"
+                        stroke={OPENED_HIGHLIGHT_COLOR}
+                        strokeWidth={isFocused ? FOCUSED_GLOW_STROKE_WIDTH : 4}
+                        strokeOpacity={
+                          isFocused ? FOCUSED_GLOW_OPACITY : GLOW_OPACITY
+                        }
+                        filter="url(#opened-spiral-glow)"
+                        className="pointer-events-none"
+                      />
+                    )}
+                    {/* Hollow marker: a background-colored "cutout" with a category-colored border. Its opaque fill is also the hover/click target. */}
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r={POINT_RADIUS}
+                      fill="var(--bg-color)"
+                      stroke={color}
+                      strokeWidth={ORBIT_POINT_STROKE_WIDTH}
+                    />
+                    {isOpened && (
+                      <circle
+                        cx={x}
+                        cy={y}
+                        r={POINT_RADIUS + 3}
+                        fill="none"
+                        stroke={OPENED_HIGHLIGHT_COLOR}
+                        strokeWidth={
+                          isFocused ? FOCUSED_RING_STROKE_WIDTH : 1.5
+                        }
+                        className="pointer-events-none"
+                      />
+                    )}
                   </g>
                 );
               })}
