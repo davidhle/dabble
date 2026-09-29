@@ -410,6 +410,26 @@ html[data-sidebar-side='right'] [data-corner-stack] {
   left: var(--chrome-edge-gutter);
 }
 
+/*
+ * Collapsed visualization sidebar (SidebarCollapseToggle.tsx): everything
+ * in the sidebar wrapper except the collapse toggle itself is hidden -
+ * `visibility`, not `display`, so the container keeps its box and the
+ * pages' layout measurements (VisibleRangeHeader's top, topOffset) stay
+ * valid, while hidden elements drop out of hit tests and tab order.
+ */
+[data-sidebar-collapsed] {
+  /* The wrapper itself is still visible - let canvas drags pass through it. */
+  pointer-events: none;
+}
+
+[data-sidebar-collapsed] > :not([data-collapse-toggle]) {
+  visibility: hidden;
+}
+
+[data-sidebar-collapsed] > [data-collapse-toggle] {
+  pointer-events: auto;
+}
+
 body {
   margin: 0;
   min-width: 320px;

@@ -77,6 +77,7 @@ import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
 import SidebarPanelStack from '../components/SidebarPanelStack';
 import SidebarResizeHandle from '../components/SidebarResizeHandle';
+import SidebarCollapseToggle from '../components/SidebarCollapseToggle';
 import SidebarSideToggle from '../components/SidebarSideToggle';
 import SpiralTimeline from '../components/SpiralTimeline';
 import TimeRangeSelector from '../components/TimeRangeSelector';
@@ -171,25 +172,6 @@ export default function Spiral({
 
   const { isEditMode } = useEditMode();
 
-  /**
-   * Composes SpiralTimeline's single `onEntryClick` callback around the
-   * shared `isEditMode` flag - see EditModeContext.tsx's top-of-file "WHY
-   * THIS IS A GLOBAL CLICK-BEHAVIOR OVERRIDE" comment for why this branch
-   * lives here (in the page) rather than inside SpiralTimeline.tsx itself,
-   * and Constellation.tsx's identical `handleCanvasEntryClick` for the
-   * full reasoning (StarMap's version of this same wrapper).
-   */
-  const handleCanvasEntryClick = useCallback(
-    (entry: Entry) => {
-      if (isEditMode) {
-        onEditEntry(entry);
-        return;
-      }
-      handleEntryClick(entry);
-    },
-    [isEditMode, onEditEntry, handleEntryClick]
-  );
-
   // `containerRef`/`headerContentRef`/`containerLayout`/`topOffset` -
   // identical to Constellation.tsx's/Timeline.tsx's own measurement setup
   // for their unified `.bullet-journal-surface` container; see
@@ -212,7 +194,32 @@ export default function Spiral({
     resetWidth: resetSidebarWidth,
     side: sidebarSide,
     toggleSide: toggleSidebarSide,
+    collapsed: sidebarCollapsed,
+    toggleCollapsed: toggleSidebarCollapsed,
+    expand: expandSidebar,
   } = useSidebarWidth(containerLayout);
+
+  /**
+   * Composes SpiralTimeline's single `onEntryClick` callback around the
+   * shared `isEditMode` flag - see EditModeContext.tsx's top-of-file "WHY
+   * THIS IS A GLOBAL CLICK-BEHAVIOR OVERRIDE" comment for why this branch
+   * lives here (in the page) rather than inside SpiralTimeline.tsx itself,
+   * and Constellation.tsx's identical `handleCanvasEntryClick` for the
+   * full reasoning (StarMap's version of this same wrapper).
+   */
+  const handleCanvasEntryClick = useCallback(
+    (entry: Entry) => {
+      if (isEditMode) {
+        onEditEntry(entry);
+        return;
+      }
+      // Reopen a collapsed sidebar so the click visibly does something.
+      expandSidebar();
+      handleEntryClick(entry);
+    },
+    [isEditMode, onEditEntry, handleEntryClick, expandSidebar]
+  );
+
   const [topOffset, setTopOffset] = useState(0);
   // VisibleRangeHeader's live bottom edge - when it's in the top-right
   // corner (sidebar on the left), the top-right tooltip stack
@@ -265,7 +272,9 @@ export default function Spiral({
 
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || !hasSelection) {
+    // A collapsed sidebar covers nothing, so the canvas centers on the
+    // full viewport - same as when there's no selection.
+    if (!el || !hasSelection || sidebarCollapsed) {
       setSidebarWidth(0);
       return;
     }
@@ -290,7 +299,7 @@ export default function Spiral({
       observer.disconnect();
       window.removeEventListener('resize', updateWidth);
     };
-  }, [hasSelection, sidebarSide]);
+  }, [hasSelection, sidebarSide, sidebarCollapsed]);
 
   return (
     // Fragment, not a `space-y-4` div - see Constellation.tsx's identical
@@ -325,6 +334,9 @@ export default function Spiral({
        * left-side anchor gets from `main`'s left padding, mirrored.
        */}
       <div
+        // Collapsed: index.css hides everything in here but the collapse
+        // toggle - see SidebarCollapseToggle.tsx.
+        data-sidebar-collapsed={sidebarCollapsed || undefined}
         className={`relative z-10 w-fit ${
           sidebarSide === 'right' ? 'ml-auto' : ''
         }`}
@@ -402,6 +414,12 @@ export default function Spiral({
         />
 
         <SidebarSideToggle side={sidebarSide} onToggle={toggleSidebarSide} />
+
+        <SidebarCollapseToggle
+          side={sidebarSide}
+          collapsed={sidebarCollapsed}
+          onToggle={toggleSidebarCollapsed}
+        />
 
         {expandedEntryId && (
           <BookmarkRail

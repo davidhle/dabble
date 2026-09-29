@@ -2,7 +2,8 @@
  * useSidebarWidth - the user-chosen width AND side (left/right) of the
  * visualization pages' unified sidebar container (Constellation.tsx/
  * Timeline.tsx/Spiral.tsx), set by dragging SidebarResizeHandle.tsx and
- * clicking SidebarSideToggle.tsx, both persisted to localStorage so they
+ * clicking SidebarSideToggle.tsx, plus whether it's collapsed
+ * (SidebarCollapseToggle.tsx), all persisted to localStorage so they
  * carry across pages and visits.
  *
  * This only decides the container's CSS `width`. It is deliberately NOT a
@@ -25,6 +26,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 /** localStorage keys - same naming convention as useTheme.ts's THEME_STORAGE_KEY. */
 export const SIDEBAR_WIDTH_STORAGE_KEY = 'dabble-sidebar-width';
 export const SIDEBAR_SIDE_STORAGE_KEY = 'dabble-sidebar-side';
+export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'dabble-sidebar-collapsed';
 
 /**
  * Which screen edge the sidebar hugs. Every sidebar-aware consumer
@@ -65,6 +67,11 @@ function loadStoredSide(): SidebarSide {
 export function useSidebarWidth(gaps: { left: number; right: number }) {
   const [userWidth, setUserWidth] = useState<number | null>(loadStoredWidth);
   const [side, setSide] = useState<SidebarSide>(loadStoredSide);
+  // Hidden via SidebarCollapseToggle.tsx - see its comment for how the
+  // pages hide the container without unmounting it.
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true'
+  );
   const edgeOffset = side === 'left' ? gaps.left : gaps.right;
   // Mirrors `userWidth` so `persist` (called on drag end) can save the
   // latest value without being re-created on every drag frame.
@@ -112,6 +119,20 @@ export function useSidebarWidth(gaps: { left: number; right: number }) {
     });
   }, []);
 
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed(current => {
+      const next = !current;
+      localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(next));
+      return next;
+    });
+  }, []);
+
+  /** Un-collapses - e.g. when a canvas click opens an entry the hidden sidebar would show. */
+  const expand = useCallback(() => {
+    setCollapsed(false);
+    localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, 'false');
+  }, []);
+
   // Mirrors `side` onto <html data-sidebar-side> for as long as a
   // visualization page is mounted, so the bottom corner button stack
   // (`[data-corner-stack]` - see index.css) can hop to the opposite corner
@@ -132,5 +153,15 @@ export function useSidebarWidth(gaps: { left: number; right: number }) {
       ? `calc(33vw - ${edgeOffset}px)`
       : `min(max(${SIDEBAR_MIN_WIDTH}px, ${userWidth}px), calc(${SIDEBAR_MAX_VW}vw - ${edgeOffset}px))`;
 
-  return { width, resizeTo, persist, resetWidth, side, toggleSide };
+  return {
+    width,
+    resizeTo,
+    persist,
+    resetWidth,
+    side,
+    toggleSide,
+    collapsed,
+    toggleCollapsed,
+    expand,
+  };
 }
