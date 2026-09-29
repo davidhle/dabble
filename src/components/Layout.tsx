@@ -34,7 +34,7 @@
  */
 
 import { useState } from 'react';
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import AddEntryForm from './AddEntryForm';
 import ManageCategoriesModal from './ManageCategoriesModal';
 import ThemeToggle from './ThemeToggle';
@@ -59,6 +59,21 @@ interface LayoutProps {
 
 /** Routes whose page is a full-bleed canvas + left sidebar - see `main` below. */
 const VIZ_PATHS = new Set(['/constellation', '/linear', '/spiral']);
+
+/**
+ * Center-pill link styling. Active: an accent capsule with
+ * --accent-foreground-color text - the same text-on-accent pairing
+ * FilterBar's active chips and the '+' button use, since --accent-color
+ * flips light/dark per theme (see index.css). NavLink sets
+ * `aria-current="page"` on the active one too.
+ */
+function vizNavLinkClass({ isActive }: { isActive: boolean }) {
+  return `rounded-full px-3.5 py-1 text-sm font-medium transition-colors ${
+    isActive
+      ? 'bg-[var(--accent-color)] text-[var(--accent-foreground-color)] shadow-sm'
+      : 'text-[var(--text-muted-color)] hover:text-[var(--text-color)]'
+  }`;
+}
 
 export default function Layout({
   entries,
@@ -277,29 +292,26 @@ export default function Layout({
             </Link>
           </div>
 
-          {/* CENTER PILL: the three visualization views */}
+          {/*
+           * CENTER PILL: the three visualization views, as a segmented
+           * control - the current page's link gets an inner accent-filled
+           * capsule (`vizNavLinkClass`). Padding moves from the pill onto
+           * each link so the capsule hugs just its own label while the
+           * pill keeps its old overall size.
+           */}
           <div
-            className="pointer-events-auto flex items-center gap-6 justify-self-center rounded-full border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] px-5 py-2.5 shadow-lg backdrop-blur"
+            className="pointer-events-auto flex items-center gap-1 justify-self-center rounded-full border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] p-1.5 shadow-lg backdrop-blur"
             aria-label="Visualization views"
           >
-            <Link
-              to="/constellation"
-              className="text-sm font-medium text-[var(--text-muted-color)] transition-colors hover:text-[var(--text-color)]"
-            >
+            <NavLink to="/constellation" className={vizNavLinkClass}>
               Constellation
-            </Link>
-            <Link
-              to="/linear"
-              className="text-sm font-medium text-[var(--text-muted-color)] transition-colors hover:text-[var(--text-color)]"
-            >
+            </NavLink>
+            <NavLink to="/linear" className={vizNavLinkClass}>
               Linear Timeline
-            </Link>
-            <Link
-              to="/spiral"
-              className="text-sm font-medium text-[var(--text-muted-color)] transition-colors hover:text-[var(--text-color)]"
-            >
+            </NavLink>
+            <NavLink to="/spiral" className={vizNavLinkClass}>
               Spiral Timeline
-            </Link>
+            </NavLink>
           </div>
 
           {/* RIGHT PILL: '+' add-entry button alone */}
