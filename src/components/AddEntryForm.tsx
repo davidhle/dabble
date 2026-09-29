@@ -114,6 +114,7 @@ import {
   previewCategoryColorOptions,
 } from '../utils/categories';
 import { COUNTRIES } from '../data/countries';
+import CategoryColorPicker from './CategoryColorPicker';
 import MoodPicker from './MoodPicker';
 import MediaLinksInput from './MediaLinksInput';
 
@@ -190,13 +191,14 @@ export default function AddEntryForm({
   // `newCategoryColorPreview` is whichever color is CURRENTLY selected -
   // the default (colorOptions[0]) until the user clicks a different swatch
   // in the override grid below, at which point it tracks that pick
-  // instead. `colorOptions` is the fixed set of choices shown in that
-  // grid: the next several colors in the golden-angle sequence (see
-  // getCategoryColorOptions's own comment in utils/categories.ts) - a
-  // small, distinct alternative-swatches picker, not an arbitrary
-  // RGB/hex color input.
+  // instead. `colorOptions` is the picker's "Suggestions" row: the next
+  // several colors in the golden-angle sequence (see
+  // getCategoryColorOptions's own comment in utils/categories.ts).
   const [newCategoryColorPreview, setNewCategoryColorPreview] = useState('');
   const [colorOptions, setColorOptions] = useState<string[]>([]);
+  // Whether the expanded CategoryColorPicker is open - toggled by clicking
+  // the swatch, same as ManageCategoriesModal's per-row picker.
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
   // Which of DOMAINS the new category will be saved under - reset to
   // DEFAULT_DOMAIN every time the sub-form opens (see
   // handleActivityTypeChange).
@@ -437,6 +439,7 @@ export default function AddEntryForm({
       setColorOptions(options);
       setNewCategoryColorPreview(options[0]);
       setNewCategoryDomain(DEFAULT_DOMAIN);
+      setIsColorPickerOpen(false);
       setIsAddingCategory(true);
       return;
     }
@@ -1003,14 +1006,20 @@ export default function AddEntryForm({
                             New category name
                           </label>
                           <div className="mt-1 flex items-center gap-2">
-                            {/* Color swatch preview - the color this category
-                              will be assigned, shown before it's created. */}
-                            <span
-                              className="h-6 w-6 flex-shrink-0 rounded-full border border-[var(--field-border-strong)]"
+                            {/* Color swatch - the color this category will be
+                              assigned; click reveals the expanded picker below. */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setIsColorPickerOpen(open => !open)
+                              }
+                              aria-label="Change color for new category"
+                              aria-expanded={isColorPickerOpen}
+                              title="Change color"
+                              className="h-7 w-7 flex-shrink-0 rounded-full border-2 border-[var(--field-border-strong)] transition-transform hover:scale-110"
                               style={{
                                 backgroundColor: newCategoryColorPreview,
                               }}
-                              aria-hidden="true"
                             />
                             <input
                               type="text"
@@ -1043,39 +1052,35 @@ export default function AddEntryForm({
                           </div>
 
                           {/*
-                           * Manual color override: a small grid of the next
-                           * few colors in the golden-angle sequence (see
+                           * Expanded color picker - the same panel
+                           * ManageCategoriesModal uses to recolor a
+                           * category: golden-angle suggestions (see
                            * getCategoryColorOptions in utils/categories.ts),
-                           * not an arbitrary RGB/hex picker - clicking one
-                           * just swaps which procedurally-generated color is
-                           * selected. The swatch preview above always
-                           * reflects the current pick, so this grid's
-                           * highlighted cell and that preview never disagree.
+                           * the colors other categories already use, and a
+                           * native custom color input. A preset pick closes
+                           * it; a custom change doesn't (see
+                           * CategoryColorPicker's own comment).
                            */}
-                          {colorOptions.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {colorOptions.map(colorOption => (
-                                <button
-                                  key={colorOption}
-                                  type="button"
-                                  onClick={() =>
-                                    setNewCategoryColorPreview(colorOption)
-                                  }
-                                  aria-label={`Use color ${colorOption}`}
-                                  aria-pressed={
-                                    newCategoryColorPreview === colorOption
-                                  }
-                                  className="h-6 w-6 flex-shrink-0 rounded-full border-2 transition-transform hover:scale-110"
-                                  style={{
-                                    backgroundColor: colorOption,
-                                    borderColor:
-                                      newCategoryColorPreview === colorOption
-                                        ? 'var(--text-color)'
-                                        : 'transparent',
-                                  }}
-                                />
-                              ))}
-                            </div>
+                          {isColorPickerOpen && (
+                            <CategoryColorPicker
+                              className="mt-2"
+                              groups={[
+                                { label: 'Suggestions', colors: colorOptions },
+                                {
+                                  label: 'In use',
+                                  colors: Array.from(
+                                    new Set(categories.map(c => c.color))
+                                  ),
+                                },
+                              ]}
+                              selectedColor={newCategoryColorPreview}
+                              onPick={color => {
+                                setNewCategoryColorPreview(color);
+                                setIsColorPickerOpen(false);
+                              }}
+                              onCustomChange={setNewCategoryColorPreview}
+                              customAriaLabel="Pick a custom color for the new category"
+                            />
                           )}
 
                           {/*

@@ -77,6 +77,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Entry } from '../types/Entry';
+import CategoryColorPicker from './CategoryColorPicker';
 import {
   Category,
   DOMAINS,
@@ -543,73 +544,20 @@ export default function ManageCategoriesModal({
                       </div>
 
                       {isSwatchOpen && (
-                        <div className="ml-9 space-y-2.5 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] p-3">
-                          <ColorSwatchGroup
-                            label="Current"
-                            colors={[category.color]}
-                            selectedColor={draft.color}
-                            onPick={color =>
-                              handleColorPick(category.id, color)
-                            }
-                          />
-
-                          {inUseColors.length > 0 && (
-                            <ColorSwatchGroup
-                              label="In use"
-                              colors={inUseColors}
-                              selectedColor={draft.color}
-                              onPick={color =>
-                                handleColorPick(category.id, color)
-                              }
-                            />
-                          )}
-
-                          <ColorSwatchGroup
-                            label="Suggestions"
-                            colors={suggestedColors}
-                            selectedColor={draft.color}
-                            onPick={color =>
-                              handleColorPick(category.id, color)
-                            }
-                          />
-
-                          <div>
-                            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-                              Custom
-                            </p>
-                            {/*
-                             * Full-freedom escape hatch beyond the curated
-                             * options above - a native <input type="color">
-                             * stacked (opacity-0) over a conic-gradient
-                             * "color wheel" icon, so the swatch READS as
-                             * "pick anything" rather than one more solid
-                             * color option. Gradient/multi-color category
-                             * appearance is intentionally NOT offered here -
-                             * see the top-of-file comment.
-                             */}
-                            <label
-                              className="relative block h-6 w-6 cursor-pointer rounded-full border-2 border-[var(--field-border-strong)] transition-transform hover:scale-110"
-                              style={{
-                                backgroundImage:
-                                  'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)',
-                              }}
-                              title="Pick a custom color"
-                            >
-                              <input
-                                type="color"
-                                value={draft.color}
-                                onChange={e =>
-                                  handleCustomColorChange(
-                                    category.id,
-                                    e.target.value
-                                  )
-                                }
-                                aria-label={`Pick a custom color for ${category.name}`}
-                                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                              />
-                            </label>
-                          </div>
-                        </div>
+                        <CategoryColorPicker
+                          className="ml-9"
+                          groups={[
+                            { label: 'Current', colors: [category.color] },
+                            { label: 'In use', colors: inUseColors },
+                            { label: 'Suggestions', colors: suggestedColors },
+                          ]}
+                          selectedColor={draft.color}
+                          onPick={color => handleColorPick(category.id, color)}
+                          onCustomChange={color =>
+                            handleCustomColorChange(category.id, color)
+                          }
+                          customAriaLabel={`Pick a custom color for ${category.name}`}
+                        />
                       )}
                     </div>
                   );
@@ -628,56 +576,6 @@ export default function ManageCategoriesModal({
             </button>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * One labeled row of color swatches within the expanded picker - "Current"
- * (the category's own saved color, always exactly one swatch), "In use"
- * (every other category's color), or "Suggestions" (golden-angle
- * alternatives) all render through this same small helper so the three
- * groups stay visually consistent. `selectedColor` is the category's
- * DRAFT color (not its persisted one) - see ManageCategoriesModal's own
- * top-of-file DRAFT STATE comment - so the pressed/outlined swatch always
- * reflects whatever's currently staged, even mid-preview across groups.
- */
-function ColorSwatchGroup({
-  label,
-  colors,
-  selectedColor,
-  onPick,
-}: {
-  label: string;
-  colors: string[];
-  selectedColor: string;
-  onPick: (color: string) => void;
-}) {
-  return (
-    <div>
-      <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-        {label}
-      </p>
-      <div className="flex flex-wrap gap-2">
-        {colors.map((color, index) => (
-          <button
-            // Colors within a group aren't guaranteed unique (e.g. two
-            // categories could already share a color before dedup catches
-            // it elsewhere) - index keeps React's keys stable regardless.
-            key={`${color}-${index}`}
-            type="button"
-            onClick={() => onPick(color)}
-            aria-label={`Use color ${color}`}
-            aria-pressed={selectedColor === color}
-            className="h-6 w-6 flex-shrink-0 rounded-full border-2 transition-transform hover:scale-110"
-            style={{
-              backgroundColor: color,
-              borderColor:
-                selectedColor === color ? 'var(--text-color)' : 'transparent',
-            }}
-          />
-        ))}
       </div>
     </div>
   );
