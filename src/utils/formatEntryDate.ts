@@ -52,8 +52,7 @@ export function formatSingleDate(date: Date, includeTime: boolean): string {
  * Formats a start/end pair as a range like "Jun 30 – Jul 2, 2023".
  * Drops the weekday (unlike the single-date format) since two weekdays
  * for a range reads as clutter; includes the year on both ends only
- * when the range crosses a year boundary. Also used by
- * VisibleRangeHeader.tsx for the viz pages' selected time range.
+ * when the range crosses a year boundary.
  */
 export function formatDateRange(start: Date, end: Date): string {
   const startMonth = start.toLocaleDateString(undefined, { month: 'short' });

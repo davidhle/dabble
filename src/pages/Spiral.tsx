@@ -82,8 +82,6 @@ import SidebarSideToggle from '../components/SidebarSideToggle';
 import SpiralTimeline from '../components/SpiralTimeline';
 import TimeRangeSelector from '../components/TimeRangeSelector';
 import VizPageHeader from '../components/VizPageHeader';
-import VisibleRangeHeader from '../components/VisibleRangeHeader';
-import { STACK_GAP } from '../utils/topRightTooltipStack';
 import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
@@ -221,14 +219,6 @@ export default function Spiral({
   );
 
   const [topOffset, setTopOffset] = useState(0);
-  // VisibleRangeHeader's live bottom edge - when it's in the top-right
-  // corner (sidebar on the left), the top-right tooltip stack
-  // (EditModeBanner/VizEmptyState) drops below it instead of overlapping.
-  const [rangeHeaderBottom, setRangeHeaderBottom] = useState(0);
-  const tooltipStackTop =
-    sidebarSide === 'left' && rangeHeaderBottom > 0
-      ? rangeHeaderBottom + STACK_GAP
-      : undefined;
 
   useEffect(() => {
     const containerEl = containerRef.current;
@@ -445,18 +435,7 @@ export default function Spiral({
         domainRange={selectedRange}
         topOffset={topOffset}
         isEditMode={isEditMode}
-        tooltipStackTop={tooltipStackTop}
       />
-
-      {/* Waits for the sidebar's first measurement so it doesn't flash at the top of the viewport. */}
-      {containerLayout.top > 0 && (
-        <VisibleRangeHeader
-          range={selectedRange}
-          top={containerLayout.top}
-          sidebarSide={sidebarSide}
-          onBottomChange={setRangeHeaderBottom}
-        />
-      )}
 
       {/*
        * Same component, same props shape, and same fixed-bottom
@@ -477,7 +456,7 @@ export default function Spiral({
         caption="✦ marks a year along the spiral."
       />
 
-      {isEditMode && <EditModeBanner top={tooltipStackTop} />}
+      {isEditMode && <EditModeBanner />}
 
       <ResetToast visible={resetPending} />
       <ResetButton onClick={resetAll} />

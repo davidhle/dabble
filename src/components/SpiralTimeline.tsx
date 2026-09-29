@@ -571,8 +571,6 @@ interface SpiralTimelineProps {
    * SpiralTimeline's own click behavior.
    */
   isEditMode: boolean;
-  /** Top of the top-right tooltip stack - see VizEmptyState.tsx's `stackTop`. */
-  tooltipStackTop?: number;
 }
 
 /** Small circle radius (px) for a single-point entry and for a range entry's end caps. */
@@ -1397,7 +1395,6 @@ export default function SpiralTimeline({
   domainRange,
   topOffset,
   isEditMode,
-  tooltipStackTop,
 }: SpiralTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -3292,7 +3289,6 @@ export default function SpiralTimeline({
           sidebarWidth={sidebarWidth}
           sidebarSide={sidebarSide}
           editModeBannerVisible={isEditMode}
-          stackTop={tooltipStackTop}
         />
       )}
     </div>

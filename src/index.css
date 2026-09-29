@@ -414,7 +414,7 @@ html[data-sidebar-side='right'] [data-corner-stack] {
  * Collapsed visualization sidebar (SidebarCollapseToggle.tsx): everything
  * in the sidebar wrapper except the collapse toggle itself is hidden -
  * `visibility`, not `display`, so the container keeps its box and the
- * pages' layout measurements (VisibleRangeHeader's top, topOffset) stay
+ * pages' layout measurements (containerLayout, topOffset) stay
  * valid, while hidden elements drop out of hit tests and tab order.
  */
 [data-sidebar-collapsed] {

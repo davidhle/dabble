@@ -241,8 +241,6 @@ interface StarMapProps {
    * `topOffset`/`sidebarWidth` purely to hand them to VizEmptyState.
    */
   isEditMode: boolean;
-  /** Top of the top-right tooltip stack - see VizEmptyState.tsx's `stackTop`. */
-  tooltipStackTop?: number;
 }
 
 /** Opacity applied to a star whose category is filtered out. */
@@ -330,7 +328,6 @@ export default function StarMap({
   resetViewSignal,
   topOffset,
   isEditMode,
-  tooltipStackTop,
 }: StarMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -941,7 +938,6 @@ export default function StarMap({
           sidebarWidth={sidebarWidth}
           sidebarSide={sidebarSide}
           editModeBannerVisible={isEditMode}
-          stackTop={tooltipStackTop}
         />
       )}
     </div>
