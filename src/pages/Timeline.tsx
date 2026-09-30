@@ -117,6 +117,7 @@ import VizPageHeader from '../components/VizPageHeader';
 import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
+import { layoutEdges } from '../utils/layoutEdges';
 import { useEntrySelection } from '../hooks/useEntrySelection';
 import { useSidebarWidth } from '../hooks/useSidebarWidth';
 import { useTimeRange } from '../context/TimeRangeContext';
@@ -258,12 +259,12 @@ export default function Timeline({
     if (!containerEl || !headerEl) return;
 
     const updateLayout = () => {
-      const containerRect = containerEl.getBoundingClientRect();
+      // left/right via layoutEdges, not the rect: a collapsed sidebar is
+      // slid off-screen by a transform the gutter math must ignore.
       const headerRect = headerEl.getBoundingClientRect();
       setContainerLayout({
-        top: containerRect.top,
-        left: containerRect.left,
-        right: document.documentElement.clientWidth - containerRect.right,
+        top: containerEl.getBoundingClientRect().top,
+        ...layoutEdges(containerEl),
       });
       setTopOffset(headerRect.bottom);
     };
@@ -304,12 +305,11 @@ export default function Timeline({
     // The width of the screen band the sidebar occupies, measured from its
     // own edge - see useSidebarWidth.ts's SidebarSide comment.
     const updateWidth = () => {
-      const rect = el.getBoundingClientRect();
-      setSidebarWidth(
-        sidebarSide === 'left'
-          ? rect.right
-          : document.documentElement.clientWidth - rect.left
-      );
+      // layoutEdges, not the rect: right after expanding, the sidebar is
+      // still mid-slide back in (see index.css's COLLAPSED SIDEBAR).
+      const { left, right } = layoutEdges(el);
+      const vw = document.documentElement.clientWidth;
+      setSidebarWidth(sidebarSide === 'left' ? vw - right : vw - left);
     };
     updateWidth();
     // A window resize can move the container without resizing it (a
@@ -349,15 +349,17 @@ export default function Timeline({
        * left-side anchor gets from `main`'s left padding, mirrored.
        */}
       <div
-        // Collapsed: index.css hides everything in here but the collapse
-        // toggle - see SidebarCollapseToggle.tsx.
-        data-sidebar-collapsed={sidebarCollapsed || undefined}
-        className={`relative z-10 w-fit ${
+        // Collapsed: index.css slides this whole wrapper toward its screen
+        // edge, leaving a sliver of the surface peeking out - see its
+        // COLLAPSED SIDEBAR rules and SidebarCollapseToggle.tsx.
+        data-sidebar-collapsed={sidebarCollapsed ? sidebarSide : undefined}
+        className={`sidebar-slide relative z-10 w-fit ${
           sidebarSide === 'right' ? 'ml-auto' : ''
         }`}
       >
         <div
           ref={containerRef}
+          data-sidebar-surface
           className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
           style={{
             width: containerWidth,
@@ -441,7 +443,12 @@ export default function Timeline({
             side={sidebarSide}
             selectedEntries={selectedEntries}
             focusedEntryId={expandedEntryId}
-            onSelect={handleExpandPanel}
+            onSelect={entryId => {
+              // A tab still pokes out of a collapsed sidebar - picking one
+              // brings the sidebar back to show that entry.
+              expandSidebar();
+              handleExpandPanel(entryId);
+            }}
           />
         )}
       </div>

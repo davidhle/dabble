@@ -411,23 +411,67 @@ html[data-sidebar-side='right'] [data-corner-stack] {
 }
 
 /*
- * Collapsed visualization sidebar (SidebarCollapseToggle.tsx): everything
- * in the sidebar wrapper except the collapse toggle itself is hidden -
- * `visibility`, not `display`, so the container keeps its box and the
- * pages' layout measurements (containerLayout, topOffset) stay
- * valid, while hidden elements drop out of hit tests and tab order.
+ * COLLAPSED SIDEBAR (SidebarCollapseToggle.tsx)
+ *
+ * The viz pages' sidebar wrapper (`.sidebar-slide`) gets
+ * `data-sidebar-collapsed="left"|"right"` - the edge it's anchored to -
+ * and slides toward that edge until only --sidebar-peek of its surface
+ * is left on screen: -100% moves it its own width, --edge-gutter covers
+ * the gap to the screen edge, and --sidebar-peek pulls that sliver back.
+ * The transform applies ONLY while collapsed (never an identity
+ * `translateX(0)` while open), since any transform would re-anchor the
+ * sidebar's `position: fixed` descendants to the wrapper.
+ *
+ * The surface itself stays visible (that's the sliver, paper texture
+ * and all), but its contents - plus the resize handle and side toggle -
+ * go `visibility: hidden` so nothing in the tucked-away part is
+ * focusable or clickable. BookmarkRail (`data-bookmark-rail`) is exempt:
+ * it pokes out past the canvas-facing edge, so its tabs ride along with
+ * the sliver and stay on screen and clickable. That hide is delayed by the slide's
+ * duration so the content rides out with the surface rather than
+ * blanking first; expanding shows it instantly.
  */
+:root {
+  --sidebar-peek: 24px;
+  --sidebar-slide-duration: 300ms;
+}
+
+.sidebar-slide {
+  transition: transform var(--sidebar-slide-duration)
+    cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-sidebar-collapsed='left'] {
+  transform: translateX(calc(-100% - var(--edge-gutter) + var(--sidebar-peek)));
+}
+
+[data-sidebar-collapsed='right'] {
+  transform: translateX(calc(100% + var(--edge-gutter) - var(--sidebar-peek)));
+}
+
 [data-sidebar-collapsed] {
-  /* The wrapper itself is still visible - let canvas drags pass through it. */
+  /* Only the collapse toggle and bookmark tabs take clicks. */
   pointer-events: none;
 }
 
-[data-sidebar-collapsed] > :not([data-collapse-toggle]) {
+[data-sidebar-collapsed]
+  > :not([data-sidebar-surface]):not([data-collapse-toggle]):not(
+    [data-bookmark-rail]
+  ),
+[data-sidebar-collapsed] > [data-sidebar-surface] > * {
   visibility: hidden;
+  transition: visibility 0s var(--sidebar-slide-duration);
 }
 
-[data-sidebar-collapsed] > [data-collapse-toggle] {
+[data-sidebar-collapsed] > [data-collapse-toggle],
+[data-sidebar-collapsed] > [data-bookmark-rail] {
   pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sidebar-slide-duration: 0ms;
+  }
 }
 
 body {

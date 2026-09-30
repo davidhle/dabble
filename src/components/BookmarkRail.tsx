@@ -97,6 +97,9 @@ export default function BookmarkRail({
 
   return (
     <nav
+      // Keeps the rail visible and clickable while the sidebar is
+      // collapsed - see index.css's COLLAPSED SIDEBAR rules.
+      data-bookmark-rail
       aria-label="Other selected entries"
       // `top-5`: starts near the sidebar's top, level with its Back row.
       // Height capped to the sidebar's own height (the wrapper's), so a

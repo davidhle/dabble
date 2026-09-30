@@ -391,7 +391,10 @@ export default function Layout({
       <main
         className={
           isVizPage
-            ? 'px-[var(--edge-gutter)] pb-8 pt-24'
+            ? // overflow-x-clip: a right-side sidebar slid mostly off-screen
+              // when collapsed (index.css's COLLAPSED SIDEBAR) would
+              // otherwise add a horizontal scrollbar.
+              'overflow-x-clip px-[var(--edge-gutter)] pb-8 pt-24'
             : 'mx-auto max-w-7xl px-4 pb-8 pt-24 sm:px-6 lg:px-8'
         }
       >
