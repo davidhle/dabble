@@ -457,7 +457,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
-import { Category, isOrbitEntry } from '../types/Category';
+import { Category, getVisualStyle } from '../types/Category';
 import { DateRange, useTimeRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
 // Same date/time formatting the "now" marker's tooltip uses for its live
@@ -483,7 +483,7 @@ interface SpiralTimelineProps {
    * The current category list - Spiral.tsx's own `categories` (recomputed
    * off `categoriesVersion`, see EntrySelectionContext.tsx's own comment
    * on that field). Read by the `{ ranges, points, ... }` useMemo below to
-   * split off Orbit-domain entries (isOrbitEntry - see the "ORBIT
+   * split off hollow-style entries (getVisualStyle - see the "ORBIT
    * ENTRIES" comment); colors still come from getActivityColor. Being a
    * dependency of that memo is also what makes a ManageCategoriesModal
    * recolor/re-domain (which never touches `entries`) recompute it
@@ -747,8 +747,9 @@ const LANE_EDGE_STROKE_WIDTH = 1;
  * ──────────────────────────────────────────────────────────────────────
  * ORBIT ENTRIES: HOLLOW MARKERS + SINE-WAVE RANGES, OUTSIDE THE LANE SYSTEM
  * ──────────────────────────────────────────────────────────────────────
- * Entries whose category is in the 'Orbit' domain (see isOrbitEntry in
- * types/Category.ts) are context AROUND the practice, not practice
+ * Entries drawn 'hollow' (getVisualStyle in types/Category.ts - an
+ * entry's own override, else hollow for an 'Orbit'-domain category) are
+ * typically context AROUND the practice, not practice
  * itself, so they get their own shapes and never take part in
  * `assignLanes`/`assignLaneAroundRanges` - they always sit on the true
  * curve (radiusOffset 0), independent of the movement lanes and free to
@@ -1906,14 +1907,17 @@ export default function SpiralTimeline({
    */
   const { ranges, points, orbitRanges, orbitPoints } = useMemo(() => {
     // ORBIT ENTRIES are split off before any lane assignment - see the
-    // "ORBIT ENTRIES" comment above ORBIT_POINT_STROKE_WIDTH. Everything
-    // below that reads `movementEntries` is unchanged from before orbit
-    // entries existed.
+    // "ORBIT ENTRIES" comment above ORBIT_POINT_STROKE_WIDTH. The split is
+    // by VISUAL STYLE, not domain: getVisualStyle honors an entry's
+    // explicit `visualStyle` override and otherwise falls back to its
+    // category's domain (Orbit -> hollow), so "orbit" below means "drawn
+    // hollow". Everything below that reads `movementEntries` is unchanged
+    // from before orbit entries existed.
     const movementEntries = sortedEntries.filter(
-      entry => !isOrbitEntry(entry, categories)
+      entry => getVisualStyle(entry, categories) === 'solid'
     );
-    const orbitEntries = sortedEntries.filter(entry =>
-      isOrbitEntry(entry, categories)
+    const orbitEntries = sortedEntries.filter(
+      entry => getVisualStyle(entry, categories) === 'hollow'
     );
 
     const rangeItems = movementEntries

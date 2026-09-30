@@ -11,6 +11,8 @@
  * the type system.
  */
 
+import type { Entry, VisualStyle } from './Entry';
+
 /**
  * Category
  *
@@ -30,8 +32,8 @@
  *   treats a missing (or unrecognized) value as 'Movement'. Entries carry
  *   no domain of their own - it's always derived from their category (see
  *   isOrbitEntry), so changing a category's domain needs no entry
- *   migration. No visualization reads this yet; orbit entries still render
- *   exactly like movement entries. Deliberately separate from `color`,
+ *   migration. The domain also sets an entry's DEFAULT visual style
+ *   (see getVisualStyle), which an entry can override. Deliberately separate from `color`,
  *   which is assigned independently per category (see
  *   utils/categories.ts) and has no notion of domain at all.
  */
@@ -100,6 +102,34 @@ export function isOrbitEntry(
     candidate => candidate.id === entry.activityType
   );
   return category !== undefined && getCategoryDomain(category) === 'Orbit';
+}
+
+/**
+ * The visual style an entry in `activityType`'s category gets when it has
+ * no explicit override: 'hollow' for Orbit-domain categories, 'solid'
+ * otherwise (including a category that can't be found - see
+ * isOrbitEntry).
+ */
+export function getDefaultVisualStyle(
+  activityType: string,
+  categories: Category[]
+): VisualStyle {
+  return isOrbitEntry({ activityType }, categories) ? 'hollow' : 'solid';
+}
+
+/**
+ * Resolves an entry's visual style: its explicit `visualStyle` override if
+ * set, otherwise its category's domain-derived default - the same
+ * backward-compatible "optional field, derived fallback" pattern as
+ * getCategoryDomain. Every solid-vs-hollow read should go through this.
+ */
+export function getVisualStyle(
+  entry: Pick<Entry, 'activityType' | 'visualStyle'>,
+  categories: Category[]
+): VisualStyle {
+  return entry.visualStyle === 'solid' || entry.visualStyle === 'hollow'
+    ? entry.visualStyle
+    : getDefaultVisualStyle(entry.activityType, categories);
 }
 
 /**

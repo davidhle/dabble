@@ -97,7 +97,13 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Entry, MediaLink, SUGGESTED_TAGS, createEntry } from '../types/Entry';
+import {
+  Entry,
+  MediaLink,
+  SUGGESTED_TAGS,
+  VisualStyle,
+  createEntry,
+} from '../types/Entry';
 import {
   Category,
   DEFAULT_CATEGORIES,
@@ -105,6 +111,8 @@ import {
   DOMAINS,
   Domain,
   getCategoryDomain,
+  getDefaultVisualStyle,
+  getVisualStyle,
 } from '../types/Category';
 import {
   loadCategories,
@@ -113,6 +121,7 @@ import {
   getCategoryName,
   previewCategoryColorOptions,
 } from '../utils/categories';
+import { getActivityColor } from '../utils/colors';
 import { COUNTRIES } from '../data/countries';
 import CategoryColorPicker from './CategoryColorPicker';
 import MoodPicker from './MoodPicker';
@@ -231,6 +240,11 @@ export default function AddEntryForm({
   // Independent of the hasSpecificTime toggle above - either can be on,
   // off, or both, without affecting the other's UI or state.
   const [isMultiDay, setIsMultiDay] = useState(false);
+  // Solid (dot/capsule) vs. hollow (ring/wave) - see Entry.visualStyle.
+  // Reset to the category's domain default on EVERY category change (see
+  // selectCategory), but freely overridable after that; handleSubmit only
+  // stores it on the entry when it differs from that default.
+  const [visualStyle, setVisualStyle] = useState<VisualStyle>('solid');
   // Date-only (YYYY-MM-DD, from an <input type="date">) - a multi-day span
   // is about which days it covers, not a time of day on the end date.
   const [endDate, setEndDate] = useState('');
@@ -296,6 +310,7 @@ export default function AddEntryForm({
     if (editingEntry) {
       // ─── EDIT MODE: pre-fill every field from the entry being edited ───
       setActivityType(editingEntry.activityType);
+      setVisualStyle(getVisualStyle(editingEntry, freshCategories));
       setTitle(editingEntry.title);
       setDescription(editingEntry.description);
       setTags(editingEntry.tags);
@@ -353,7 +368,10 @@ export default function AddEntryForm({
       }
     } else {
       // ─── ADD MODE: blank form, defaulting the date/time to now ───
-      setActivityType(freshCategories[0]?.id ?? DEFAULT_CATEGORIES[0].id);
+      selectCategory(
+        freshCategories[0]?.id ?? DEFAULT_CATEGORIES[0].id,
+        freshCategories
+      );
       setTitle('');
       setDescription('');
       setTags([]);
@@ -420,6 +438,20 @@ export default function AddEntryForm({
   };
 
   /**
+   * Sets the entry's category AND resets the Solid/Hollow toggle to that
+   * category's domain default - every category change goes through here.
+   * Takes the category list explicitly since callers that just created or
+   * reloaded categories have a fresher list than `categories` state.
+   * A plain function (not useCallback), so resetForm's own useCallback
+   * deliberately leaves it out of its deps - it only reads setters and
+   * its arguments.
+   */
+  const selectCategory = (categoryId: string, categoryList: Category[]) => {
+    setActivityType(categoryId);
+    setVisualStyle(getDefaultVisualStyle(categoryId, categoryList));
+  };
+
+  /**
    * Handles a selection on the Activity Type dropdown.
    *
    * The trailing "+ Add new category" option is a sentinel, not a real
@@ -443,7 +475,7 @@ export default function AddEntryForm({
       setIsAddingCategory(true);
       return;
     }
-    setActivityType(value);
+    selectCategory(value, categories);
   };
 
   /**
@@ -463,8 +495,9 @@ export default function AddEntryForm({
       newCategoryColorPreview,
       newCategoryDomain
     );
-    setCategories(loadCategories());
-    setActivityType(newCategory.id);
+    const freshCategories = loadCategories();
+    setCategories(freshCategories);
+    selectCategory(newCategory.id, freshCategories);
     setIsAddingCategory(false);
     setNewCategoryName('');
   };
@@ -555,6 +588,11 @@ export default function AddEntryForm({
         isMultiDay && endDate
           ? new Date(`${endDate}T00:00:00`).toISOString()
           : undefined,
+      // Only an actual override is stored - see Entry.visualStyle.
+      visualStyle:
+        visualStyle !== getDefaultVisualStyle(activityType, categories)
+          ? visualStyle
+          : undefined,
     };
 
     if (isEditMode && editingEntry) {
@@ -586,7 +624,7 @@ export default function AddEntryForm({
   const resetForm = useCallback(() => {
     setCurrentStep(1);
     setSlideDirection('forward');
-    setActivityType(categories[0]?.id ?? DEFAULT_CATEGORIES[0].id);
+    selectCategory(categories[0]?.id ?? DEFAULT_CATEGORIES[0].id, categories);
     setIsAddingCategory(false);
     setNewCategoryName('');
     setTitle('');
@@ -981,6 +1019,62 @@ export default function AddEntryForm({
                             + Add new category
                           </option>
                         </select>
+                      </div>
+
+                      {/*
+                       * Solid/Hollow toggle - same track/pill styling as
+                       * FocusedEntryView's Original Entry/Reflections
+                       * toggle. Each option previews its point + range
+                       * shape in the category's color, and the domain
+                       * default is marked so an override reads as one.
+                       */}
+                      <div>
+                        <p
+                          id="visualStyleLabel"
+                          className="block text-sm font-medium text-[var(--text-secondary-color)]"
+                        >
+                          Style
+                        </p>
+                        <div
+                          role="group"
+                          aria-labelledby="visualStyleLabel"
+                          className="mt-1 flex gap-1 rounded-lg bg-[var(--field-tint-1)] p-1"
+                        >
+                          {(['solid', 'hollow'] as const).map(style => {
+                            const isDefault =
+                              style ===
+                              getDefaultVisualStyle(activityType, categories);
+                            return (
+                              <button
+                                key={style}
+                                type="button"
+                                onClick={() => setVisualStyle(style)}
+                                aria-pressed={visualStyle === style}
+                                className={`flex flex-1 items-center justify-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium transition-colors ${
+                                  visualStyle === style
+                                    ? 'bg-[var(--accent-color)] text-[var(--accent-foreground-color)]'
+                                    : 'text-[var(--text-muted-color)] hover:text-[var(--text-color)]'
+                                }`}
+                              >
+                                <VisualStylePreview
+                                  style={style}
+                                  color={getActivityColor(activityType)}
+                                />
+                                {style === 'solid' ? 'Solid' : 'Hollow'}
+                                {isDefault && (
+                                  <span className="text-xs font-normal opacity-70">
+                                    (default)
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="mt-1 text-xs text-[var(--text-muted-color)]">
+                          Solid draws a dot (a capsule for multi-day entries);
+                          hollow draws a ring (a wave). Defaults to the
+                          category's domain.
+                        </p>
                       </div>
 
                       {/*
@@ -1679,5 +1773,47 @@ export default function AddEntryForm({
         }
       `}</style>
     </div>
+  );
+}
+
+/**
+ * Mini preview of a visual style's two shapes in `color`: a point marker
+ * and a range mark - solid dot + capsule, or hollow ring + wave (the ring
+ * cut out with --bg-color, like SpiralTimeline's own hollow markers).
+ */
+function VisualStylePreview({
+  style,
+  color,
+}: {
+  style: VisualStyle;
+  color: string;
+}) {
+  return (
+    <svg width={36} height={14} viewBox="0 0 36 14" aria-hidden="true">
+      {style === 'solid' ? (
+        <>
+          <circle cx={6} cy={7} r={4.5} fill={color} />
+          <rect x={14} y={3} width={20} height={8} rx={4} fill={color} />
+        </>
+      ) : (
+        <>
+          <circle
+            cx={6}
+            cy={7}
+            r={4}
+            fill="var(--bg-color)"
+            stroke={color}
+            strokeWidth={1.75}
+          />
+          <path
+            d="M14 7q2.5-4 5 0t5 0t5 0t5 0"
+            fill="none"
+            stroke={color}
+            strokeWidth={1.75}
+            strokeLinecap="round"
+          />
+        </>
+      )}
+    </svg>
   );
 }
