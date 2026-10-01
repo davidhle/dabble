@@ -157,6 +157,7 @@ import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
 import { layoutEdges } from '../utils/layoutEdges';
 import { useEntrySelection } from '../hooks/useEntrySelection';
+import { useRevealEntryInRange } from '../hooks/useRevealEntryInRange';
 import { useSidebarWidth } from '../hooks/useSidebarWidth';
 import { useTimeRange } from '../context/TimeRangeContext';
 import { useEditMode } from '../context/EditModeContext';
@@ -241,6 +242,10 @@ export default function Constellation({
       resetToFullRange();
     },
   });
+
+  // Opening an entry that's outside the selected time window slides the
+  // window to it - see useRevealEntryInRange.ts.
+  useRevealEntryInRange(expandedEntryId, entries);
 
   // The dynamic category list - recomputed whenever entries change, since
   // that's exactly when a new category could have appeared (a fresh "+

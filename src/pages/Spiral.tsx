@@ -87,6 +87,7 @@ import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
 import { layoutEdges } from '../utils/layoutEdges';
 import { useEntrySelection } from '../hooks/useEntrySelection';
+import { useRevealEntryInRange } from '../hooks/useRevealEntryInRange';
 import { useSidebarWidth } from '../hooks/useSidebarWidth';
 import { useTimeRange } from '../context/TimeRangeContext';
 import { useEditMode } from '../context/EditModeContext';
@@ -159,6 +160,10 @@ export default function Spiral({
       resetToFullRange();
     },
   });
+
+  // Opening an entry that's outside the selected time window slides the
+  // window to it - see useRevealEntryInRange.ts.
+  useRevealEntryInRange(expandedEntryId, entries);
 
   // The dynamic category list - see Constellation.tsx's identical
   // `categories` useMemo (including the `categoriesVersion` dependency's

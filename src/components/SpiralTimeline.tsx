@@ -458,6 +458,19 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
 import { Category, getVisualStyle } from '../types/Category';
+import {
+  HOLLOW_POINT_STROKE_WIDTH,
+  HOLLOW_WAVE_GLOW_BLUR_STD_DEVIATION,
+  HOLLOW_WAVE_GLOW_OPACITY,
+  HOLLOW_WAVE_GLOW_STROKE_WIDTH,
+  HOLLOW_WAVE_HIT_STROKE_WIDTH,
+  HOLLOW_WAVE_OPACITY,
+  HOLLOW_WAVE_STROKE_WIDTH,
+  buildPolylinePath,
+  clampHollowWaveAmplitude,
+  hollowWaveCycles,
+  hollowWaveSampleCount,
+} from '../utils/hollowGlyphs';
 import { DateRange, useTimeRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
 // Same date/time formatting the "now" marker's tooltip uses for its live
@@ -766,57 +779,20 @@ const LANE_EDGE_STROKE_WIDTH = 1;
  * Both use the entry's category color, so two Orbit categories read as
  * two colors exactly the way Movement categories do.
  */
-/** Border width (px) of a single-date orbit entry's hollow marker - same radius as a movement point (POINT_RADIUS). */
-const ORBIT_POINT_STROKE_WIDTH = 2;
-
-/** Stroke width (px) of an orbit range's sine wave. */
-const ORBIT_WAVE_STROKE_WIDTH = 1.75;
-/** Opacity of the wave - fully present, just lighter than a solid band; NOT FILTERED_OUT_OPACITY. */
-const ORBIT_OPACITY = 0.8;
-/** The wave's soft same-color glow: a wider, blurred copy of the stroke underneath it. */
-const ORBIT_WAVE_GLOW_STROKE_WIDTH = 5;
-const ORBIT_WAVE_GLOW_OPACITY = 0.45;
-const ORBIT_WAVE_GLOW_BLUR_STD_DEVIATION = 2.5;
-/** Width (px) of the wave's invisible hover/click stroke. */
-const ORBIT_WAVE_HIT_STROKE_WIDTH = 14;
+/*
+ * Stroke/glow/opacity/oscillation-count constants live in
+ * utils/hollowGlyphs.ts, shared with LinearTimeline.tsx's hollow entries.
+ * Only the amplitude rule below is Spiral-specific.
+ */
 
 /**
  * Wave amplitude as a fraction of the year-to-year radial gap
- * (`maxRadius / totalRotations`), clamped to a px range: the fraction
- * keeps the wave proportionate to how tightly the loops are packed, the
- * clamp keeps it from ballooning when only a year or two is selected
- * (a ~300px gap) or vanishing on a very long domain.
+ * (`maxRadius / totalRotations`), clamped (clampHollowWaveAmplitude): the
+ * fraction keeps the wave proportionate to how tightly the loops are
+ * packed, the clamp keeps it from ballooning when only a year or two is
+ * selected (a ~300px gap) or vanishing on a very long domain.
  */
 const ORBIT_WAVE_AMPLITUDE_FRACTION_OF_YEAR_GAP = 0.4;
-const ORBIT_WAVE_MIN_AMPLITUDE_PX = 2.5;
-const ORBIT_WAVE_MAX_AMPLITUDE_PX = 10;
-
-/**
- * Oscillation count scales with the SQUARE ROOT of the entry's duration
- * in months - a 1-month entry gets 5 cycles, 4 months 10, a year ~17 -
- * so short entries aren't a flat squiggle and long ones don't turn into a
- * dense zigzag. Tied to the entry's own dates (not its on-screen length),
- * so the wave doesn't reshape itself while the domain tweens. Rounded to
- * a half cycle so the wave ends back on the curve.
- */
-const ORBIT_WAVE_CYCLES_PER_SQRT_MONTH = 5;
-const ORBIT_WAVE_MIN_CYCLES = 3;
-const ORBIT_WAVE_MAX_CYCLES = 24;
-/** Samples per oscillation, bounded to [ORBIT_WAVE_MIN_SAMPLES, ORBIT_WAVE_MAX_SAMPLES] - ~10 per cycle keeps each crest smooth. */
-const ORBIT_WAVE_SAMPLES_PER_CYCLE = 10;
-const ORBIT_WAVE_MIN_SAMPLES = 48;
-const ORBIT_WAVE_MAX_SAMPLES = 240;
-const MS_PER_MONTH = (365.25 / 12) * 24 * 60 * 60 * 1000;
-
-function orbitWaveCycles(durationMs: number): number {
-  const months = Math.max(0, durationMs) / MS_PER_MONTH;
-  const cycles = ORBIT_WAVE_CYCLES_PER_SQRT_MONTH * Math.sqrt(months);
-  const clamped = Math.min(
-    ORBIT_WAVE_MAX_CYCLES,
-    Math.max(ORBIT_WAVE_MIN_CYCLES, cycles)
-  );
-  return Math.round(clamped * 2) / 2;
-}
 
 /**
  * Extra arc-length clearance (px, along the spiral's own path) required
@@ -1118,14 +1094,6 @@ function spiralPoint(
     x: centerX + radius * Math.cos(theta),
     y: centerY + radius * Math.sin(theta),
   };
-}
-
-/** Stitches a list of points into one straight-segmented SVG path `d` string. */
-function buildPolylinePath(points: { x: number; y: number }[]): string {
-  if (points.length === 0) return '';
-  return points
-    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
-    .join(' ');
 }
 
 /**
@@ -1907,7 +1875,7 @@ export default function SpiralTimeline({
    */
   const { ranges, points, orbitRanges, orbitPoints } = useMemo(() => {
     // ORBIT ENTRIES are split off before any lane assignment - see the
-    // "ORBIT ENTRIES" comment above ORBIT_POINT_STROKE_WIDTH. The split is
+    // "ORBIT ENTRIES" comment. The split is
     // by VISUAL STYLE, not domain: getVisualStyle honors an entry's
     // explicit `visualStyle` override and otherwise falls back to its
     // category's domain (Orbit -> hollow), so "orbit" below means "drawn
@@ -2036,13 +2004,9 @@ export default function SpiralTimeline({
     });
 
     // ─── Orbit entries: always on the true curve, no lanes ───
-    const orbitAmplitude = Math.min(
-      ORBIT_WAVE_MAX_AMPLITUDE_PX,
-      Math.max(
-        ORBIT_WAVE_MIN_AMPLITUDE_PX,
-        (spiralParams.maxRadius / spiralParams.totalRotations) *
-          ORBIT_WAVE_AMPLITUDE_FRACTION_OF_YEAR_GAP
-      )
+    const orbitAmplitude = clampHollowWaveAmplitude(
+      (spiralParams.maxRadius / spiralParams.totalRotations) *
+        ORBIT_WAVE_AMPLITUDE_FRACTION_OF_YEAR_GAP
     );
 
     const orbitRanges = orbitEntries
@@ -2054,14 +2018,8 @@ export default function SpiralTimeline({
         const rawEnd = normalize(new Date(Math.max(startMs, endMs)));
         const t0 = clampT(rawStart);
         const t1 = clampT(rawEnd);
-        const cycles = orbitWaveCycles(Math.abs(endMs - startMs));
-        const sampleCount = Math.min(
-          ORBIT_WAVE_MAX_SAMPLES,
-          Math.max(
-            ORBIT_WAVE_MIN_SAMPLES,
-            Math.round(cycles * ORBIT_WAVE_SAMPLES_PER_CYCLE)
-          )
-        );
+        const cycles = hollowWaveCycles(Math.abs(endMs - startMs));
+        const sampleCount = hollowWaveSampleCount(cycles);
         return {
           entry,
           pathD: buildOrbitWavePath(
@@ -2666,7 +2624,9 @@ export default function SpiralTimeline({
             width="300%"
             height="300%"
           >
-            <feGaussianBlur stdDeviation={ORBIT_WAVE_GLOW_BLUR_STD_DEVIATION} />
+            <feGaussianBlur
+              stdDeviation={HOLLOW_WAVE_GLOW_BLUR_STD_DEVIATION}
+            />
           </filter>
         </defs>
         <g ref={zoomLayerRef}>
@@ -2773,8 +2733,7 @@ export default function SpiralTimeline({
               )}
 
               {/*
-               * ORBIT WAVES - see the "ORBIT ENTRIES" comment above
-               * ORBIT_POINT_STROKE_WIDTH. Drawn BEFORE the movement
+               * ORBIT WAVES - see the "ORBIT ENTRIES" comment. Drawn BEFORE the movement
                * ranges/points so they sit behind them: waves are free to
                * cross movement content, and where they do, the movement
                * entry keeps the click (orbit points are the exception -
@@ -2799,7 +2758,7 @@ export default function SpiralTimeline({
                       d={pathD}
                       fill="none"
                       stroke="transparent"
-                      strokeWidth={ORBIT_WAVE_HIT_STROKE_WIDTH}
+                      strokeWidth={HOLLOW_WAVE_HIT_STROKE_WIDTH}
                       strokeLinecap="round"
                     />
                     {isOpened && (
@@ -2809,7 +2768,7 @@ export default function SpiralTimeline({
                           fill="none"
                           stroke={OPENED_HIGHLIGHT_COLOR}
                           strokeWidth={
-                            ORBIT_WAVE_STROKE_WIDTH +
+                            HOLLOW_WAVE_STROKE_WIDTH +
                             (isFocused
                               ? FOCUSED_GLOW_STROKE_WIDTH
                               : OPENED_ARC_GLOW_EXTRA_RADIUS) *
@@ -2830,7 +2789,7 @@ export default function SpiralTimeline({
                           fill="none"
                           stroke={OPENED_HIGHLIGHT_COLOR}
                           strokeWidth={
-                            ORBIT_WAVE_STROKE_WIDTH +
+                            HOLLOW_WAVE_STROKE_WIDTH +
                             (isFocused
                               ? FOCUSED_RING_STROKE_WIDTH
                               : ARC_RING_WIDTH) *
@@ -2842,13 +2801,16 @@ export default function SpiralTimeline({
                         />
                       </>
                     )}
-                    <g opacity={ORBIT_OPACITY} className="pointer-events-none">
+                    <g
+                      opacity={HOLLOW_WAVE_OPACITY}
+                      className="pointer-events-none"
+                    >
                       <path
                         d={pathD}
                         fill="none"
                         stroke={color}
-                        strokeWidth={ORBIT_WAVE_GLOW_STROKE_WIDTH}
-                        strokeOpacity={ORBIT_WAVE_GLOW_OPACITY}
+                        strokeWidth={HOLLOW_WAVE_GLOW_STROKE_WIDTH}
+                        strokeOpacity={HOLLOW_WAVE_GLOW_OPACITY}
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         filter="url(#orbit-wave-glow)"
@@ -2857,7 +2819,7 @@ export default function SpiralTimeline({
                         d={pathD}
                         fill="none"
                         stroke={color}
-                        strokeWidth={ORBIT_WAVE_STROKE_WIDTH}
+                        strokeWidth={HOLLOW_WAVE_STROKE_WIDTH}
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       />
@@ -3060,7 +3022,7 @@ export default function SpiralTimeline({
                       r={POINT_RADIUS}
                       fill="var(--bg-color)"
                       stroke={color}
-                      strokeWidth={ORBIT_POINT_STROKE_WIDTH}
+                      strokeWidth={HOLLOW_POINT_STROKE_WIDTH}
                     />
                     {isOpened && (
                       <circle
