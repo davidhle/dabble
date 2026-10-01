@@ -200,4 +200,10 @@ export const DEFAULT_CATEGORIES: Category[] = [
     color: '#4cf0a5',
     domain: 'Movement',
   },
+  {
+    id: 'Health',
+    name: 'Health',
+    color: '#ca4970',
+    domain: 'Orbit',
+  },
 ];

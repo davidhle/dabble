@@ -103,7 +103,9 @@
     "location": {
       "country": "Germany",
       "city": "Weimar"
-    }
+    },
+    "hasTime": true,
+    "visualStyle": "hollow"
   },
   {
     "id": "91c8ddd8-31f9-4995-99dd-c4c5c48a8883",
@@ -621,11 +623,13 @@
       "country": "Germany",
       "city": "Berlin"
     },
-    "endTimestamp": "2025-10-13T22:00:00.000Z",
+    "endTimestamp": "2025-10-12T22:00:00.000Z",
     "mood": [
       "Accomplished",
       "Humbled"
-    ]
+    ],
+    "hasTime": true,
+    "visualStyle": "hollow"
   },
   {
     "id": "ef66c64a-6d47-4a10-8ff2-36194727e152",
@@ -808,5 +812,40 @@
       }
     ],
     "notes": "An honor especially since Francis is an OG\n\nSadly not much had come really from this, I think I really thrive better from in person community feelings more honestly"
+  },
+  {
+    "id": "9af5e875-2499-4fb2-90d6-12a1f32d60c1",
+    "timestamp": "2026-09-30T00:00:00.000Z",
+    "activityType": "PoleDance",
+    "title": "First time trying a dislocator",
+    "description": "I came back to the intermediate class after a month or so since I started taking flexibility classes which are on the same day. Did a little choreo entry into a dislocator, then a brass monkey (I did via princess grip? shoulder mount) and finishign with a plane",
+    "tags": [
+      "static"
+    ],
+    "mediaLinks": [],
+    "notes": "Really enjoy the classes Louise teaches with getting spins/rotations on static pole :) it's super fun",
+    "location": {
+      "country": "Germany",
+      "city": "Berlin",
+      "place": "Boogaloo"
+    },
+    "mood": [
+      "Happy",
+      "Excited",
+      "Accomplished"
+    ],
+    "hasTime": false
+  },
+  {
+    "id": "e0db107f-6399-4fa7-95a3-d355aa251765",
+    "timestamp": "2022-11-21T00:00:00.000Z",
+    "activityType": "Health",
+    "title": "Rough NDPH Period",
+    "description": "Got a daily headache, later to be diagnosed as NDPH.\n\nEnded the range for when I began a medication that brought the headache to the lowest pain threshold thusfar.",
+    "tags": [],
+    "mediaLinks": [],
+    "notes": "",
+    "endTimestamp": "2025-01-30T23:00:00.000Z",
+    "hasTime": false
   }
 ]
