@@ -611,6 +611,7 @@ export default function Constellation({
        */}
       <StarMap
         entries={timeFilteredEntries}
+        allEntries={entries}
         hasAnyEntries={entries.length > 0}
         categories={categories}
         onStarClick={handleCanvasEntryClick}
