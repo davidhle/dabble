@@ -373,14 +373,23 @@ const ZOOM_SCALE_EXTENT: [number, number] = [0.5, 40];
 
 /**
  * ──────────────────────────────────────────────────────────────────────
- * HOLLOW ENTRIES: RINGS + SINE WAVES, OUTSIDE THE LANE SYSTEM
+ * HOLLOW ENTRIES: RINGS + SINE WAVES, IN THEIR OWN ORBIT TRACK
  * ──────────────────────────────────────────────────────────────────────
  * The flat-axis version of SpiralTimeline.tsx's "ORBIT ENTRIES": entries
  * whose getVisualStyle is 'hollow' (an explicit per-entry override, else
  * hollow for an 'Orbit'-domain category) skip `points`/`ranges` and never
- * take part in `assignLanes`, so they don't push capsules down or count
- * toward `laneCount`. Both sit on the BASELINE row, where solid points
- * live:
+ * share the movement lanes - they don't push capsules down or count
+ * toward `laneCount`. Instead they get a separate ORBIT TRACK below all
+ * the movement content, ORBIT_TRACK_GAP further down (see ORBIT TRACK,
+ * just above `axisY`):
+ *   - one row for hollow rings (if there are any), like the movement
+ *     baseline row for points - rings need no lanes;
+ *   - then one row per ORBIT LANE: hollow ranges go through the very same
+ *     `assignLanes` as the capsules (longest first, first lane that
+ *     doesn't overlap), but as their own independent pass, so overlapping
+ *     waves stack among themselves instead of colliding.
+ * The track grows a row per lane needed, and the axis moves down with it.
+ * The shapes:
  *   - A single-date hollow entry is a ring: a POINT_RADIUS circle filled
  *     with --bg-color (a "cutout") and bordered in the category color.
  *   - A hollow range is a thin stroked sine wave from its start x to its
@@ -391,11 +400,18 @@ const ZOOM_SCALE_EXTENT: [number, number] = [0.5, 40];
  *     but capped here by HOLLOW_WAVE_MIN_WAVELENGTH_PX, since this axis
  *     can give an entry far less room. Amplitude is a fraction of
  *     LANE_HEIGHT (below), clamped to the same px range Spiral uses.
- * Drawn waves first (behind everything, like Spiral's), then capsules,
- * then hollow rings, then solid points - so a solid point on top of a
- * ring or wave keeps the click.
+ * Since the track never shares a row with movement content, draw order
+ * (waves, capsules, rings, solid points) no longer decides any clicks.
  */
 const HOLLOW_WAVE_AMPLITUDE_FRACTION_OF_LANE = 0.3;
+
+/**
+ * Distance (px) from the last movement row to the first orbit-track row -
+ * a full lane plus extra room, so the track reads as clearly separate.
+ * Rows within the track are LANE_HEIGHT apart, like the movement lanes
+ * (a wave's amplitude, 0.3 of that, keeps neighbors from touching).
+ */
+const ORBIT_TRACK_GAP = LANE_HEIGHT + 18;
 
 /**
  * Shortest wavelength (px) a hollow wave may have at the selected range's
@@ -944,7 +960,8 @@ export default function LinearTimeline({
     [solidEntries, xScale]
   );
 
-  // HOLLOW ENTRIES - see that comment above. Rings on the baseline.
+  // HOLLOW ENTRIES - see that comment above. Rings, on the orbit track's
+  // ring row (`orbitRingY`).
   const hollowPoints = useMemo(
     () =>
       hollowEntries
@@ -957,14 +974,17 @@ export default function LinearTimeline({
     [hollowEntries, xScale]
   );
 
-  // HOLLOW ENTRIES - sine waves along the baseline. Rebuilt on zoom (via
-  // `xScale`), but the cycle count comes from the entry's own dates, so
-  // zooming stretches the wave rather than adding crests.
+  // HOLLOW ENTRIES - sine waves, lane-assigned among themselves (see the
+  // HOLLOW ENTRIES comment). Each path is built around y = 0 and placed at
+  // its lane's row when drawn, since the row also depends on how many
+  // movement lanes sit above the track (`orbitLayout`). Rebuilt on zoom
+  // (via `xScale`), but the cycle count comes from the entry's own dates,
+  // so zooming stretches the wave rather than adding crests.
   const hollowRanges = useMemo(() => {
     const amplitude = clampHollowWaveAmplitude(
       LANE_HEIGHT * HOLLOW_WAVE_AMPLITUDE_FRACTION_OF_LANE
     );
-    return hollowEntries
+    const waves = hollowEntries
       .filter(entry => entry.endTimestamp)
       .map(entry => {
         const startMs = new Date(entry.timestamp).getTime();
@@ -990,15 +1010,26 @@ export default function LinearTimeline({
           const phase = i / sampleCount;
           samples.push({
             x: x0 + (x1 - x0) * phase,
-            y: BASELINE_Y + amplitude * Math.sin(2 * Math.PI * cycles * phase),
+            y: amplitude * Math.sin(2 * Math.PI * cycles * phase),
           });
         }
         return {
           entry,
+          x0,
+          x1,
           pathD: buildPolylinePath(samples),
           color: getActivityColor(entry.activityType),
         };
       });
+
+    // ORBIT LANES: same algorithm and gap as the capsules' lanes, run over
+    // the waves alone.
+    return assignLanes(
+      waves,
+      wave => wave.x0,
+      wave => wave.x1,
+      LANE_GAP_PX
+    );
   }, [hollowEntries, xScale, baseXScale]);
 
   /**
@@ -1074,10 +1105,30 @@ export default function LinearTimeline({
     0
   );
 
-  // The axis line sits `AXIS_CLEARANCE` below the lowest occupied lane
-  // (or the baseline itself, if there are no capsules at all - laneCount
-  // is 0 in that case).
-  const axisY = BASELINE_Y + laneCount * LANE_HEIGHT + AXIS_CLEARANCE;
+  // ORBIT TRACK (see the HOLLOW ENTRIES comment): starts ORBIT_TRACK_GAP
+  // below the last movement row - a ring row first if there are rings,
+  // then one row per orbit lane. Collapses to nothing (no gap either)
+  // when there are no hollow entries.
+  const movementBottomY = BASELINE_Y + laneCount * LANE_HEIGHT;
+  const orbitLaneCount = hollowRanges.reduce(
+    (max, wave) => Math.max(max, wave.lane + 1),
+    0
+  );
+  const orbitRingRows = hollowPoints.length > 0 ? 1 : 0;
+  const orbitRowCount = orbitRingRows + orbitLaneCount;
+  const orbitTopY = movementBottomY + ORBIT_TRACK_GAP;
+  const orbitRingY = orbitTopY;
+  const orbitLaneY = (lane: number) =>
+    orbitTopY + (orbitRingRows + lane) * LANE_HEIGHT;
+  const contentBottomY =
+    orbitRowCount > 0
+      ? orbitTopY + (orbitRowCount - 1) * LANE_HEIGHT
+      : movementBottomY;
+
+  // The axis line sits `AXIS_CLEARANCE` below the lowest occupied row -
+  // the orbit track's last row, else the last movement lane, else the
+  // baseline itself.
+  const axisY = contentBottomY + AXIS_CLEARANCE;
 
   /**
    * ──────────────────────────────────────────────────────────────────────
@@ -1209,13 +1260,16 @@ export default function LinearTimeline({
            * glow values (the capsules' +4px / 0.6 / opened-point-glow).
            */}
           {isReady &&
-            hollowRanges.map(({ entry, pathD, color }) => {
+            hollowRanges.map(({ entry, pathD, color, lane }) => {
               const isOpened = openedEntryIdSet.has(entry.id);
               const isFocused = entry.id === expandedEntryId;
               const isFilteredOut = !activeCategorySet.has(entry.activityType);
               return (
+                // Moved down to its orbit lane's row - the path itself is
+                // built around y = 0 (see `hollowRanges`).
                 <g
                   key={entry.id}
+                  transform={`translate(0,${orbitLaneY(lane)})`}
                   style={{
                     opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
                   }}
@@ -1429,7 +1483,7 @@ export default function LinearTimeline({
                   {isOpened && (
                     <circle
                       cx={cx}
-                      cy={BASELINE_Y}
+                      cy={orbitRingY}
                       r={POINT_RADIUS + 5}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}
@@ -1442,7 +1496,7 @@ export default function LinearTimeline({
                   {/* Hollow ring: a background-colored "cutout" with a category-colored border. Its opaque fill is also the hover/click target. */}
                   <circle
                     cx={cx}
-                    cy={BASELINE_Y}
+                    cy={orbitRingY}
                     r={POINT_RADIUS}
                     fill="var(--bg-color)"
                     stroke={color}
@@ -1453,7 +1507,7 @@ export default function LinearTimeline({
                   {isOpened && (
                     <circle
                       cx={cx}
-                      cy={BASELINE_Y}
+                      cy={orbitRingY}
                       r={POINT_RADIUS + 3}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}
