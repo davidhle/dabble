@@ -108,10 +108,8 @@ interface TimeRangeSelectorProps {
   /** Which screen edge `sidebarWidth`'s band is on - the wrapper insets from that side instead. */
   sidebarSide: SidebarSide;
   /**
-   * Optional one-line caption rendered just above the card, centered on
-   * it (Spiral.tsx's year-glyph footnote). Lives inside the card so it
-   * follows STACK-AWARE CENTERING for free, rather than the page
-   * re-deriving the card's position.
+   * Optional one-line caption rendered inside the card, centered above
+   * the track (Spiral.tsx's year-glyph footnote).
    */
   caption?: ReactNode;
 }
@@ -125,7 +123,12 @@ const TRACK_HEIGHT = 20;
 /** Width (px) of each drag handle - passed to the brush's own `.handleSize()` so the generated `.handle--w`/`.handle--e` rects match the width this file also styles them to. */
 const HANDLE_WIDTH = 8;
 
-/** `%b %d, %Y` - e.g. "Mar 17, 2023" - used for the start/end labels flanking the track. */
+/**
+ * `%b %d, %Y` - e.g. "Mar 17, 2023" - used for the start/end labels under
+ * the track. These labels are the ONLY on-screen readout of the selected
+ * range (there's no separate header card for it), hence their full-
+ * strength text rather than muted chrome styling.
+ */
 const formatDate = d3.timeFormat('%b %d, %Y');
 
 /**
@@ -359,12 +362,9 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
       // SidebarPanelStack.tsx, nothing here depends on the page's own
       // measured header layout). Centered rather than pinned to a corner
       // (there's no natural corner for a horizontal track the way a round
-      // button has one), and given the SAME opaque "floating chrome" surface
-      // (--panel-bg-color-solid + --panel-border-color + backdrop-blur +
-      // shadow-lg) ResetButton/ResetToast use - this is a floating
-      // CONTROL, not header content, so it follows their visual language
-      // rather than the header's own fully-transparent "text over the
-      // starfield" treatment.
+      // button has one). The card itself uses the sidebar container's
+      // `.bullet-journal-surface` paper grain + dot grid (index.css), so the
+      // two persistent surfaces on each viz page read as one set.
       // z-40: same tier as ResetButton/ResetToast, above the canvas (z-0)
       // and header (z-10), below the AddEntryForm modal (z-50).
       //
@@ -386,14 +386,17 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
         className="fixed bottom-6 z-40 flex justify-center px-3"
         style={{ left: leftInset, right: rightInset }}
       >
+        {/*
+         * `isolate`: gives the card its own stacking context, so the
+         * surface's `z-index: -1` texture layers paint above the card's
+         * background instead of escaping behind it.
+         */}
         <div
           ref={cardRef}
-          className="relative w-full max-w-xl rounded-2xl border border-[var(--panel-border-color)] bg-[var(--panel-bg-color-solid)] px-4 py-3 shadow-lg backdrop-blur"
+          className="bullet-journal-surface isolate w-full max-w-xl rounded-2xl border border-[var(--panel-border-color)] px-4 py-3 shadow-lg backdrop-blur-sm"
         >
           {caption && (
-            // `pointer-events-none`: read-only text that shouldn't
-            // intercept clicks meant for the canvas behind it.
-            <p className="pointer-events-none absolute inset-x-0 bottom-full mb-2 text-center text-xs text-[var(--text-muted-color)]">
+            <p className="mb-1.5 text-center text-xs text-[var(--text-muted-color)]">
               {caption}
             </p>
           )}
@@ -448,7 +451,8 @@ const TimeRangeSelector = forwardRef<HTMLDivElement, TimeRangeSelectorProps>(
             </svg>
           </div>
 
-          <div className="mt-1 flex justify-between text-xs text-[var(--text-muted-color)]">
+          {/* The selected range's one readout - see `formatDate` above. */}
+          <div className="mt-1.5 flex justify-between text-sm font-semibold tabular-nums text-[var(--text-color)]">
             <span>{formatDate(selectedRange.start)}</span>
             <span>{formatDate(selectedRange.end)}</span>
           </div>

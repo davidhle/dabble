@@ -77,16 +77,17 @@ import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
 import SidebarPanelStack from '../components/SidebarPanelStack';
 import SidebarResizeHandle from '../components/SidebarResizeHandle';
+import SidebarCollapseToggle from '../components/SidebarCollapseToggle';
 import SidebarSideToggle from '../components/SidebarSideToggle';
 import SpiralTimeline from '../components/SpiralTimeline';
 import TimeRangeSelector from '../components/TimeRangeSelector';
 import VizPageHeader from '../components/VizPageHeader';
-import VisibleRangeHeader from '../components/VisibleRangeHeader';
-import { STACK_GAP } from '../utils/topRightTooltipStack';
 import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
+import { layoutEdges } from '../utils/layoutEdges';
 import { useEntrySelection } from '../hooks/useEntrySelection';
+import { useRevealEntryInRange } from '../hooks/useRevealEntryInRange';
 import { useSidebarWidth } from '../hooks/useSidebarWidth';
 import { useTimeRange } from '../context/TimeRangeContext';
 import { useEditMode } from '../context/EditModeContext';
@@ -160,6 +161,10 @@ export default function Spiral({
     },
   });
 
+  // Opening an entry that's outside the selected time window slides the
+  // window to it - see useRevealEntryInRange.ts.
+  useRevealEntryInRange(expandedEntryId, entries);
+
   // The dynamic category list - see Constellation.tsx's identical
   // `categories` useMemo (including the `categoriesVersion` dependency's
   // own comment there) for why this is recomputed off both `entries` and
@@ -170,25 +175,6 @@ export default function Spiral({
   );
 
   const { isEditMode } = useEditMode();
-
-  /**
-   * Composes SpiralTimeline's single `onEntryClick` callback around the
-   * shared `isEditMode` flag - see EditModeContext.tsx's top-of-file "WHY
-   * THIS IS A GLOBAL CLICK-BEHAVIOR OVERRIDE" comment for why this branch
-   * lives here (in the page) rather than inside SpiralTimeline.tsx itself,
-   * and Constellation.tsx's identical `handleCanvasEntryClick` for the
-   * full reasoning (StarMap's version of this same wrapper).
-   */
-  const handleCanvasEntryClick = useCallback(
-    (entry: Entry) => {
-      if (isEditMode) {
-        onEditEntry(entry);
-        return;
-      }
-      handleEntryClick(entry);
-    },
-    [isEditMode, onEditEntry, handleEntryClick]
-  );
 
   // `containerRef`/`headerContentRef`/`containerLayout`/`topOffset` -
   // identical to Constellation.tsx's/Timeline.tsx's own measurement setup
@@ -212,16 +198,33 @@ export default function Spiral({
     resetWidth: resetSidebarWidth,
     side: sidebarSide,
     toggleSide: toggleSidebarSide,
+    collapsed: sidebarCollapsed,
+    toggleCollapsed: toggleSidebarCollapsed,
+    expand: expandSidebar,
   } = useSidebarWidth(containerLayout);
+
+  /**
+   * Composes SpiralTimeline's single `onEntryClick` callback around the
+   * shared `isEditMode` flag - see EditModeContext.tsx's top-of-file "WHY
+   * THIS IS A GLOBAL CLICK-BEHAVIOR OVERRIDE" comment for why this branch
+   * lives here (in the page) rather than inside SpiralTimeline.tsx itself,
+   * and Constellation.tsx's identical `handleCanvasEntryClick` for the
+   * full reasoning (StarMap's version of this same wrapper).
+   */
+  const handleCanvasEntryClick = useCallback(
+    (entry: Entry) => {
+      if (isEditMode) {
+        onEditEntry(entry);
+        return;
+      }
+      // Reopen a collapsed sidebar so the click visibly does something.
+      expandSidebar();
+      handleEntryClick(entry);
+    },
+    [isEditMode, onEditEntry, handleEntryClick, expandSidebar]
+  );
+
   const [topOffset, setTopOffset] = useState(0);
-  // VisibleRangeHeader's live bottom edge - when it's in the top-right
-  // corner (sidebar on the left), the top-right tooltip stack
-  // (EditModeBanner/VizEmptyState) drops below it instead of overlapping.
-  const [rangeHeaderBottom, setRangeHeaderBottom] = useState(0);
-  const tooltipStackTop =
-    sidebarSide === 'left' && rangeHeaderBottom > 0
-      ? rangeHeaderBottom + STACK_GAP
-      : undefined;
 
   useEffect(() => {
     const containerEl = containerRef.current;
@@ -229,12 +232,12 @@ export default function Spiral({
     if (!containerEl || !headerEl) return;
 
     const updateLayout = () => {
-      const containerRect = containerEl.getBoundingClientRect();
+      // left/right via layoutEdges, not the rect: a collapsed sidebar is
+      // slid off-screen by a transform the gutter math must ignore.
       const headerRect = headerEl.getBoundingClientRect();
       setContainerLayout({
-        top: containerRect.top,
-        left: containerRect.left,
-        right: document.documentElement.clientWidth - containerRect.right,
+        top: containerEl.getBoundingClientRect().top,
+        ...layoutEdges(containerEl),
       });
       setTopOffset(headerRect.bottom);
     };
@@ -265,7 +268,9 @@ export default function Spiral({
 
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || !hasSelection) {
+    // A collapsed sidebar covers nothing, so the canvas centers on the
+    // full viewport - same as when there's no selection.
+    if (!el || !hasSelection || sidebarCollapsed) {
       setSidebarWidth(0);
       return;
     }
@@ -273,12 +278,11 @@ export default function Spiral({
     // The width of the screen band the sidebar occupies, measured from its
     // own edge - see useSidebarWidth.ts's SidebarSide comment.
     const updateWidth = () => {
-      const rect = el.getBoundingClientRect();
-      setSidebarWidth(
-        sidebarSide === 'left'
-          ? rect.right
-          : document.documentElement.clientWidth - rect.left
-      );
+      // layoutEdges, not the rect: right after expanding, the sidebar is
+      // still mid-slide back in (see index.css's COLLAPSED SIDEBAR).
+      const { left, right } = layoutEdges(el);
+      const vw = document.documentElement.clientWidth;
+      setSidebarWidth(sidebarSide === 'left' ? vw - right : vw - left);
     };
     updateWidth();
     // A window resize can move the container without resizing it (a
@@ -290,7 +294,7 @@ export default function Spiral({
       observer.disconnect();
       window.removeEventListener('resize', updateWidth);
     };
-  }, [hasSelection, sidebarSide]);
+  }, [hasSelection, sidebarSide, sidebarCollapsed]);
 
   return (
     // Fragment, not a `space-y-4` div - see Constellation.tsx's identical
@@ -325,12 +329,17 @@ export default function Spiral({
        * left-side anchor gets from `main`'s left padding, mirrored.
        */}
       <div
-        className={`relative z-10 w-fit ${
+        // Collapsed: index.css slides this whole wrapper toward its screen
+        // edge, leaving a sliver of the surface peeking out - see its
+        // COLLAPSED SIDEBAR rules and SidebarCollapseToggle.tsx.
+        data-sidebar-collapsed={sidebarCollapsed ? sidebarSide : undefined}
+        className={`sidebar-slide relative z-10 w-fit ${
           sidebarSide === 'right' ? 'ml-auto' : ''
         }`}
       >
         <div
           ref={containerRef}
+          data-sidebar-surface
           className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
           style={{
             width: containerWidth,
@@ -403,12 +412,23 @@ export default function Spiral({
 
         <SidebarSideToggle side={sidebarSide} onToggle={toggleSidebarSide} />
 
+        <SidebarCollapseToggle
+          side={sidebarSide}
+          collapsed={sidebarCollapsed}
+          onToggle={toggleSidebarCollapsed}
+        />
+
         {expandedEntryId && (
           <BookmarkRail
             side={sidebarSide}
             selectedEntries={selectedEntries}
             focusedEntryId={expandedEntryId}
-            onSelect={handleExpandPanel}
+            onSelect={entryId => {
+              // A tab still pokes out of a collapsed sidebar - picking one
+              // brings the sidebar back to show that entry.
+              expandSidebar();
+              handleExpandPanel(entryId);
+            }}
           />
         )}
       </div>
@@ -427,18 +447,7 @@ export default function Spiral({
         domainRange={selectedRange}
         topOffset={topOffset}
         isEditMode={isEditMode}
-        tooltipStackTop={tooltipStackTop}
       />
-
-      {/* Waits for the sidebar's first measurement so it doesn't flash at the top of the viewport. */}
-      {containerLayout.top > 0 && (
-        <VisibleRangeHeader
-          range={selectedRange}
-          top={containerLayout.top}
-          sidebarSide={sidebarSide}
-          onBottomChange={setRangeHeaderBottom}
-        />
-      )}
 
       {/*
        * Same component, same props shape, and same fixed-bottom
@@ -459,7 +468,7 @@ export default function Spiral({
         caption="✦ marks a year along the spiral."
       />
 
-      {isEditMode && <EditModeBanner top={tooltipStackTop} />}
+      {isEditMode && <EditModeBanner />}
 
       <ResetToast visible={resetPending} />
       <ResetButton onClick={resetAll} />

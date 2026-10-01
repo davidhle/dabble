@@ -250,7 +250,24 @@ export interface Entry {
    * treated the same as an empty array everywhere it's read.
    */
   reflections?: Reflection[];
+
+  /**
+   * How this entry is drawn: 'solid' (dot / capsule) or 'hollow' (ring /
+   * wave) - see SpiralTimeline.tsx's ORBIT ENTRIES comment for the shapes.
+   *
+   * OPTIONAL & BACKWARD-COMPATIBLE: an explicit per-entry OVERRIDE. When
+   * absent - every entry created before this field existed, and any entry
+   * whose style matches its category's default - the style follows the
+   * category's domain instead (Movement -> solid, Orbit -> hollow), so
+   * re-domaining a category still restyles its non-overridden entries.
+   * ALWAYS read it through getVisualStyle() in types/Category.ts, never
+   * directly.
+   */
+  visualStyle?: VisualStyle;
 }
+
+/** See Entry.visualStyle. */
+export type VisualStyle = 'solid' | 'hollow';
 
 /**
  * Reflection Interface

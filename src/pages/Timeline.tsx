@@ -52,15 +52,13 @@
  * wiring that a first pass skipped:
  *
  *   - `sidebarWidth` is measured off the unified container's own rendered
- *     DOM node the exact same way Constellation.tsx measures it for
- *     StarMap - LinearTimeline's own AUTO-RECENTER effect (see its header
- *     comment) needs it for the same "exclude the sidebar's band when
- *     centering" math StarMap's CLICK-TO-CENTER effect uses.
+ *     DOM node, like Constellation.tsx does for StarMap - LinearTimeline
+ *     starts its axis just past it (see its CANVAS ORIGIN SHIFT comment).
  *   - `openedEntryIds`/`expandedEntryId` (both already returned by
  *     useEntrySelection.ts, just not consumed here yet) are passed to
  *     LinearTimeline so it can render the SAME opened-entry highlight
- *     ring/glow StarMap renders for its stars, and drive that same
- *     AUTO-RECENTER effect.
+ *     ring/glow StarMap renders for its stars. (Unlike StarMap, it does
+ *     NOT recenter on the expanded entry - see LinearTimeline.tsx.)
  *   - `topOffset` (this page's own measured header-content bottom edge) is
  *     new - LinearTimeline needs it to vertically center its content
  *     BELOW the header, unlike StarMap's starfield which has no
@@ -99,7 +97,14 @@
  * change just because the visible time window did.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import BookmarkRail from '../components/BookmarkRail';
 import EditModeBanner from '../components/EditModeBanner';
 import EditModeToggle from '../components/EditModeToggle';
@@ -110,15 +115,16 @@ import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
 import SidebarPanelStack from '../components/SidebarPanelStack';
 import SidebarResizeHandle from '../components/SidebarResizeHandle';
+import SidebarCollapseToggle from '../components/SidebarCollapseToggle';
 import SidebarSideToggle from '../components/SidebarSideToggle';
 import TimeRangeSelector from '../components/TimeRangeSelector';
 import VizPageHeader from '../components/VizPageHeader';
-import VisibleRangeHeader from '../components/VisibleRangeHeader';
-import { STACK_GAP } from '../utils/topRightTooltipStack';
 import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
+import { layoutEdges } from '../utils/layoutEdges';
 import { useEntrySelection } from '../hooks/useEntrySelection';
+import { useRevealEntryInRange } from '../hooks/useRevealEntryInRange';
 import { useSidebarWidth } from '../hooks/useSidebarWidth';
 import { useTimeRange } from '../context/TimeRangeContext';
 import { useEditMode } from '../context/EditModeContext';
@@ -139,8 +145,8 @@ export default function Timeline({
   // See the STAGE 3 comment above: `selectedRange` is the shared,
   // cross-page time filter; `timeFilteredEntries` is `entries` hard-cut
   // down to only what's `isEntryWithinRange` of it - this (not `entries`)
-  // is what actually reaches LinearTimeline and its AUTO-RECENTER/
-  // click-highlight machinery below.
+  // is what actually reaches LinearTimeline and its click-highlight
+  // machinery below.
   const { selectedRange, resetToFullRange } = useTimeRange();
   const timeFilteredEntries = useMemo(
     () => entries.filter(entry => isEntryWithinRange(entry, selectedRange)),
@@ -191,6 +197,10 @@ export default function Timeline({
     onFullReset: resetToFullRange,
   });
 
+  // Opening an entry that's outside the selected time window slides the
+  // window to it - see useRevealEntryInRange.ts.
+  useRevealEntryInRange(expandedEntryId, entries);
+
   // The dynamic category list - see Constellation.tsx's identical
   // `categories` useMemo (including the `categoriesVersion` dependency's
   // own comment there) for why this is recomputed off both `entries` and
@@ -203,25 +213,6 @@ export default function Timeline({
   );
 
   const { isEditMode } = useEditMode();
-
-  /**
-   * Composes LinearTimeline's single `onEntryClick` callback around the
-   * shared `isEditMode` flag - see EditModeContext.tsx's top-of-file "WHY
-   * THIS IS A GLOBAL CLICK-BEHAVIOR OVERRIDE" comment for why this branch
-   * lives here (in the page) rather than inside LinearTimeline.tsx itself,
-   * and Constellation.tsx's identical `handleCanvasEntryClick` for the
-   * full reasoning (StarMap's version of this same wrapper).
-   */
-  const handleCanvasEntryClick = useCallback(
-    (entry: Entry) => {
-      if (isEditMode) {
-        onEditEntry(entry);
-        return;
-      }
-      handleEntryClick(entry);
-    },
-    [isEditMode, onEditEntry, handleEntryClick]
-  );
 
   // `containerRef`/`headerContentRef`/`containerLayout`/`topOffset` -
   // identical to Constellation.tsx's own measurement setup; see its
@@ -245,16 +236,53 @@ export default function Timeline({
     resetWidth: resetSidebarWidth,
     side: sidebarSide,
     toggleSide: toggleSidebarSide,
+    collapsed: sidebarCollapsed,
+    toggleCollapsed: toggleSidebarCollapsed,
+    expand: expandSidebar,
   } = useSidebarWidth(containerLayout);
-  // VisibleRangeHeader's live bottom edge - when it's in the top-right
-  // corner (sidebar on the left), the top-right tooltip stack
-  // (EditModeBanner/VizEmptyState) drops below it instead of overlapping.
-  const [rangeHeaderBottom, setRangeHeaderBottom] = useState(0);
-  const tooltipStackTop =
-    sidebarSide === 'left' && rangeHeaderBottom > 0
-      ? rangeHeaderBottom + STACK_GAP
-      : undefined;
+
+  /**
+   * Composes LinearTimeline's single `onEntryClick` callback around the
+   * shared `isEditMode` flag - see EditModeContext.tsx's top-of-file "WHY
+   * THIS IS A GLOBAL CLICK-BEHAVIOR OVERRIDE" comment for why this branch
+   * lives here (in the page) rather than inside LinearTimeline.tsx itself,
+   * and Constellation.tsx's identical `handleCanvasEntryClick` for the
+   * full reasoning (StarMap's version of this same wrapper).
+   */
+  const handleCanvasEntryClick = useCallback(
+    (entry: Entry) => {
+      if (isEditMode) {
+        onEditEntry(entry);
+        return;
+      }
+      // Reopen a collapsed sidebar so the click visibly does something.
+      expandSidebar();
+      handleEntryClick(entry);
+    },
+    [isEditMode, onEditEntry, handleEntryClick, expandSidebar]
+  );
   const [topOffset, setTopOffset] = useState(0);
+
+  // TimeRangeSelector's card top (viewport px) - the bottom of the band
+  // LinearTimeline centers its plot in (see its VERTICAL CENTERING
+  // comment). The card is `fixed bottom-*`, so its top only moves when
+  // its own height or the window's changes.
+  const rangeSelectorRef = useRef<HTMLDivElement>(null);
+  const [rangeSelectorTop, setRangeSelectorTop] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = rangeSelectorRef.current;
+    if (!el) return;
+    const update = () => setRangeSelectorTop(el.getBoundingClientRect().top);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    window.addEventListener('resize', update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, []);
 
   useEffect(() => {
     const containerEl = containerRef.current;
@@ -262,12 +290,12 @@ export default function Timeline({
     if (!containerEl || !headerEl) return;
 
     const updateLayout = () => {
-      const containerRect = containerEl.getBoundingClientRect();
+      // left/right via layoutEdges, not the rect: a collapsed sidebar is
+      // slid off-screen by a transform the gutter math must ignore.
       const headerRect = headerEl.getBoundingClientRect();
       setContainerLayout({
-        top: containerRect.top,
-        left: containerRect.left,
-        right: document.documentElement.clientWidth - containerRect.right,
+        top: containerEl.getBoundingClientRect().top,
+        ...layoutEdges(containerEl),
       });
       setTopOffset(headerRect.bottom);
     };
@@ -288,30 +316,37 @@ export default function Timeline({
     // resizing, which the ResizeObserver above wouldn't report.
   }, [isFocused, sidebarSide]);
 
-  // The unified container's live rendered width, passed to LinearTimeline
-  // so its AUTO-RECENTER effect can keep its horizontal-centering math
-  // accurate - identical to Constellation.tsx's own `sidebarWidth`
-  // measurement for StarMap, including the `hasSelection` gate; see its
-  // comment for why this stays 0 unless there's an actual panel open, even
-  // though the container itself is always mounted now.
+  // The screen band the sidebar covers, passed to LinearTimeline (whose
+  // axis starts just past it - see its CANVAS ORIGIN SHIFT comment) and
+  // TimeRangeSelector. Unlike Constellation.tsx/Spiral.tsx, deliberately
+  // NOT gated on `hasSelection`: the sidebar's header and filters are
+  // always on screen, and a time axis running underneath them would hide
+  // its start. Collapsed, the band is just the sliver still peeking out
+  // (index.css's --sidebar-peek).
   const [sidebarWidth, setSidebarWidth] = useState(0);
 
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || !hasSelection) {
-      setSidebarWidth(0);
+    if (!el) return;
+    if (sidebarCollapsed) {
+      setSidebarWidth(
+        parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue(
+            '--sidebar-peek'
+          )
+        ) || 0
+      );
       return;
     }
 
     // The width of the screen band the sidebar occupies, measured from its
     // own edge - see useSidebarWidth.ts's SidebarSide comment.
     const updateWidth = () => {
-      const rect = el.getBoundingClientRect();
-      setSidebarWidth(
-        sidebarSide === 'left'
-          ? rect.right
-          : document.documentElement.clientWidth - rect.left
-      );
+      // layoutEdges, not the rect: right after expanding, the sidebar is
+      // still mid-slide back in (see index.css's COLLAPSED SIDEBAR).
+      const { left, right } = layoutEdges(el);
+      const vw = document.documentElement.clientWidth;
+      setSidebarWidth(sidebarSide === 'left' ? vw - right : vw - left);
     };
     updateWidth();
     // A window resize can move the container without resizing it (a
@@ -323,7 +358,7 @@ export default function Timeline({
       observer.disconnect();
       window.removeEventListener('resize', updateWidth);
     };
-  }, [hasSelection, sidebarSide]);
+  }, [sidebarSide, sidebarCollapsed]);
 
   return (
     // Fragment, not a `space-y-4` div - see Constellation.tsx's identical
@@ -351,12 +386,17 @@ export default function Timeline({
        * left-side anchor gets from `main`'s left padding, mirrored.
        */}
       <div
-        className={`relative z-10 w-fit ${
+        // Collapsed: index.css slides this whole wrapper toward its screen
+        // edge, leaving a sliver of the surface peeking out - see its
+        // COLLAPSED SIDEBAR rules and SidebarCollapseToggle.tsx.
+        data-sidebar-collapsed={sidebarCollapsed ? sidebarSide : undefined}
+        className={`sidebar-slide relative z-10 w-fit ${
           sidebarSide === 'right' ? 'ml-auto' : ''
         }`}
       >
         <div
           ref={containerRef}
+          data-sidebar-surface
           className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
           style={{
             width: containerWidth,
@@ -429,12 +469,23 @@ export default function Timeline({
 
         <SidebarSideToggle side={sidebarSide} onToggle={toggleSidebarSide} />
 
+        <SidebarCollapseToggle
+          side={sidebarSide}
+          collapsed={sidebarCollapsed}
+          onToggle={toggleSidebarCollapsed}
+        />
+
         {expandedEntryId && (
           <BookmarkRail
             side={sidebarSide}
             selectedEntries={selectedEntries}
             focusedEntryId={expandedEntryId}
-            onSelect={handleExpandPanel}
+            onSelect={entryId => {
+              // A tab still pokes out of a collapsed sidebar - picking one
+              // brings the sidebar back to show that entry.
+              expandSidebar();
+              handleExpandPanel(entryId);
+            }}
           />
         )}
       </div>
@@ -450,20 +501,10 @@ export default function Timeline({
         sidebarWidth={sidebarWidth}
         sidebarSide={sidebarSide}
         topOffset={topOffset}
+        plotBand={{ top: containerLayout.top, bottom: rangeSelectorTop }}
         domainRange={selectedRange}
         isEditMode={isEditMode}
-        tooltipStackTop={tooltipStackTop}
       />
-
-      {/* Waits for the sidebar's first measurement so it doesn't flash at the top of the viewport. */}
-      {containerLayout.top > 0 && (
-        <VisibleRangeHeader
-          range={selectedRange}
-          top={containerLayout.top}
-          sidebarSide={sidebarSide}
-          onBottomChange={setRangeHeaderBottom}
-        />
-      )}
 
       {/*
        * Rendered after LinearTimeline in source order - see the STAGE 3
@@ -478,12 +519,13 @@ export default function Timeline({
        * their respective (different) sidebar-aware layout mechanisms.
        */}
       <TimeRangeSelector
+        ref={rangeSelectorRef}
         entries={entries}
         sidebarWidth={sidebarWidth}
         sidebarSide={sidebarSide}
       />
 
-      {isEditMode && <EditModeBanner top={tooltipStackTop} />}
+      {isEditMode && <EditModeBanner />}
 
       <ResetToast visible={resetPending} />
       <ResetButton onClick={resetAll} />

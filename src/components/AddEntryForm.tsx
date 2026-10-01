@@ -97,8 +97,23 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Entry, MediaLink, SUGGESTED_TAGS, createEntry } from '../types/Entry';
-import { Category, DEFAULT_CATEGORIES } from '../types/Category';
+import {
+  Entry,
+  MediaLink,
+  SUGGESTED_TAGS,
+  VisualStyle,
+  createEntry,
+} from '../types/Entry';
+import {
+  Category,
+  DEFAULT_CATEGORIES,
+  DEFAULT_DOMAIN,
+  DOMAINS,
+  Domain,
+  getCategoryDomain,
+  getDefaultVisualStyle,
+  getVisualStyle,
+} from '../types/Category';
 import {
   loadCategories,
   addCategory,
@@ -106,7 +121,9 @@ import {
   getCategoryName,
   previewCategoryColorOptions,
 } from '../utils/categories';
+import { getActivityColor } from '../utils/colors';
 import { COUNTRIES } from '../data/countries';
+import CategoryColorPicker from './CategoryColorPicker';
 import MoodPicker from './MoodPicker';
 import MediaLinksInput from './MediaLinksInput';
 
@@ -183,13 +200,19 @@ export default function AddEntryForm({
   // `newCategoryColorPreview` is whichever color is CURRENTLY selected -
   // the default (colorOptions[0]) until the user clicks a different swatch
   // in the override grid below, at which point it tracks that pick
-  // instead. `colorOptions` is the fixed set of choices shown in that
-  // grid: the next several colors in the golden-angle sequence (see
-  // getCategoryColorOptions's own comment in utils/categories.ts) - a
-  // small, distinct alternative-swatches picker, not an arbitrary
-  // RGB/hex color input.
+  // instead. `colorOptions` is the picker's "Suggestions" row: the next
+  // several colors in the golden-angle sequence (see
+  // getCategoryColorOptions's own comment in utils/categories.ts).
   const [newCategoryColorPreview, setNewCategoryColorPreview] = useState('');
   const [colorOptions, setColorOptions] = useState<string[]>([]);
+  // Whether the expanded CategoryColorPicker is open - toggled by clicking
+  // the swatch, same as ManageCategoriesModal's per-row picker.
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
+  // Which of DOMAINS the new category will be saved under - reset to
+  // DEFAULT_DOMAIN every time the sub-form opens (see
+  // handleActivityTypeChange).
+  const [newCategoryDomain, setNewCategoryDomain] =
+    useState<Domain>(DEFAULT_DOMAIN);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -217,6 +240,11 @@ export default function AddEntryForm({
   // Independent of the hasSpecificTime toggle above - either can be on,
   // off, or both, without affecting the other's UI or state.
   const [isMultiDay, setIsMultiDay] = useState(false);
+  // Solid (dot/capsule) vs. hollow (ring/wave) - see Entry.visualStyle.
+  // Reset to the category's domain default on EVERY category change (see
+  // selectCategory), but freely overridable after that; handleSubmit only
+  // stores it on the entry when it differs from that default.
+  const [visualStyle, setVisualStyle] = useState<VisualStyle>('solid');
   // Date-only (YYYY-MM-DD, from an <input type="date">) - a multi-day span
   // is about which days it covers, not a time of day on the end date.
   const [endDate, setEndDate] = useState('');
@@ -282,6 +310,7 @@ export default function AddEntryForm({
     if (editingEntry) {
       // ─── EDIT MODE: pre-fill every field from the entry being edited ───
       setActivityType(editingEntry.activityType);
+      setVisualStyle(getVisualStyle(editingEntry, freshCategories));
       setTitle(editingEntry.title);
       setDescription(editingEntry.description);
       setTags(editingEntry.tags);
@@ -339,7 +368,10 @@ export default function AddEntryForm({
       }
     } else {
       // ─── ADD MODE: blank form, defaulting the date/time to now ───
-      setActivityType(freshCategories[0]?.id ?? DEFAULT_CATEGORIES[0].id);
+      selectCategory(
+        freshCategories[0]?.id ?? DEFAULT_CATEGORIES[0].id,
+        freshCategories
+      );
       setTitle('');
       setDescription('');
       setTags([]);
@@ -406,6 +438,20 @@ export default function AddEntryForm({
   };
 
   /**
+   * Sets the entry's category AND resets the Solid/Hollow toggle to that
+   * category's domain default - every category change goes through here.
+   * Takes the category list explicitly since callers that just created or
+   * reloaded categories have a fresher list than `categories` state.
+   * A plain function (not useCallback), so resetForm's own useCallback
+   * deliberately leaves it out of its deps - it only reads setters and
+   * its arguments.
+   */
+  const selectCategory = (categoryId: string, categoryList: Category[]) => {
+    setActivityType(categoryId);
+    setVisualStyle(getDefaultVisualStyle(categoryId, categoryList));
+  };
+
+  /**
    * Handles a selection on the Activity Type dropdown.
    *
    * The trailing "+ Add new category" option is a sentinel, not a real
@@ -424,10 +470,12 @@ export default function AddEntryForm({
       const options = previewCategoryColorOptions(6);
       setColorOptions(options);
       setNewCategoryColorPreview(options[0]);
+      setNewCategoryDomain(DEFAULT_DOMAIN);
+      setIsColorPickerOpen(false);
       setIsAddingCategory(true);
       return;
     }
-    setActivityType(value);
+    selectCategory(value, categories);
   };
 
   /**
@@ -442,9 +490,14 @@ export default function AddEntryForm({
     const trimmedName = newCategoryName.trim();
     if (!trimmedName) return;
 
-    const newCategory = addCategory(trimmedName, newCategoryColorPreview);
-    setCategories(loadCategories());
-    setActivityType(newCategory.id);
+    const newCategory = addCategory(
+      trimmedName,
+      newCategoryColorPreview,
+      newCategoryDomain
+    );
+    const freshCategories = loadCategories();
+    setCategories(freshCategories);
+    selectCategory(newCategory.id, freshCategories);
     setIsAddingCategory(false);
     setNewCategoryName('');
   };
@@ -535,6 +588,11 @@ export default function AddEntryForm({
         isMultiDay && endDate
           ? new Date(`${endDate}T00:00:00`).toISOString()
           : undefined,
+      // Only an actual override is stored - see Entry.visualStyle.
+      visualStyle:
+        visualStyle !== getDefaultVisualStyle(activityType, categories)
+          ? visualStyle
+          : undefined,
     };
 
     if (isEditMode && editingEntry) {
@@ -566,7 +624,7 @@ export default function AddEntryForm({
   const resetForm = useCallback(() => {
     setCurrentStep(1);
     setSlideDirection('forward');
-    setActivityType(categories[0]?.id ?? DEFAULT_CATEGORIES[0].id);
+    selectCategory(categories[0]?.id ?? DEFAULT_CATEGORIES[0].id, categories);
     setIsAddingCategory(false);
     setNewCategoryName('');
     setTitle('');
@@ -926,11 +984,28 @@ export default function AddEntryForm({
                           }
                           className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                         >
-                          {categories.map(category => (
-                            <option key={category.id} value={category.id}>
-                              {category.name}
-                            </option>
-                          ))}
+                          {/*
+                           * One <optgroup> per domain (see DOMAINS in
+                           * types/Category.ts), in DOMAINS order - an empty
+                           * domain's group is skipped rather than rendered
+                           * as a bare heading with nothing under it.
+                           */}
+                          {DOMAINS.map(domain => {
+                            const domainCategories = categories.filter(
+                              category =>
+                                getCategoryDomain(category) === domain.id
+                            );
+                            if (domainCategories.length === 0) return null;
+                            return (
+                              <optgroup key={domain.id} label={domain.label}>
+                                {domainCategories.map(category => (
+                                  <option key={category.id} value={category.id}>
+                                    {category.name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            );
+                          })}
                           {/*
                            * Trailing sentinel option - visually set apart
                            * (italic + a leading "+") from the real
@@ -944,6 +1019,62 @@ export default function AddEntryForm({
                             + Add new category
                           </option>
                         </select>
+                      </div>
+
+                      {/*
+                       * Solid/Hollow toggle - same track/pill styling as
+                       * FocusedEntryView's Original Entry/Reflections
+                       * toggle. Each option previews its point + range
+                       * shape in the category's color, and the domain
+                       * default is marked so an override reads as one.
+                       */}
+                      <div>
+                        <p
+                          id="visualStyleLabel"
+                          className="block text-sm font-medium text-[var(--text-secondary-color)]"
+                        >
+                          Style
+                        </p>
+                        <div
+                          role="group"
+                          aria-labelledby="visualStyleLabel"
+                          className="mt-1 flex gap-1 rounded-lg bg-[var(--field-tint-1)] p-1"
+                        >
+                          {(['solid', 'hollow'] as const).map(style => {
+                            const isDefault =
+                              style ===
+                              getDefaultVisualStyle(activityType, categories);
+                            return (
+                              <button
+                                key={style}
+                                type="button"
+                                onClick={() => setVisualStyle(style)}
+                                aria-pressed={visualStyle === style}
+                                className={`flex flex-1 items-center justify-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium transition-colors ${
+                                  visualStyle === style
+                                    ? 'bg-[var(--accent-color)] text-[var(--accent-foreground-color)]'
+                                    : 'text-[var(--text-muted-color)] hover:text-[var(--text-color)]'
+                                }`}
+                              >
+                                <VisualStylePreview
+                                  style={style}
+                                  color={getActivityColor(activityType)}
+                                />
+                                {style === 'solid' ? 'Solid' : 'Hollow'}
+                                {isDefault && (
+                                  <span className="text-xs font-normal opacity-70">
+                                    (default)
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="mt-1 text-xs text-[var(--text-muted-color)]">
+                          Solid draws a dot (a capsule for multi-day entries);
+                          hollow draws a ring (a wave). Defaults to the
+                          category's domain.
+                        </p>
                       </div>
 
                       {/*
@@ -969,14 +1100,20 @@ export default function AddEntryForm({
                             New category name
                           </label>
                           <div className="mt-1 flex items-center gap-2">
-                            {/* Color swatch preview - the color this category
-                              will be assigned, shown before it's created. */}
-                            <span
-                              className="h-6 w-6 flex-shrink-0 rounded-full border border-[var(--field-border-strong)]"
+                            {/* Color swatch - the color this category will be
+                              assigned; click reveals the expanded picker below. */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setIsColorPickerOpen(open => !open)
+                              }
+                              aria-label="Change color for new category"
+                              aria-expanded={isColorPickerOpen}
+                              title="Change color"
+                              className="h-7 w-7 flex-shrink-0 rounded-full border-2 border-[var(--field-border-strong)] transition-transform hover:scale-110"
                               style={{
                                 backgroundColor: newCategoryColorPreview,
                               }}
-                              aria-hidden="true"
                             />
                             <input
                               type="text"
@@ -1009,41 +1146,85 @@ export default function AddEntryForm({
                           </div>
 
                           {/*
-                           * Manual color override: a small grid of the next
-                           * few colors in the golden-angle sequence (see
+                           * Expanded color picker - the same panel
+                           * ManageCategoriesModal uses to recolor a
+                           * category: golden-angle suggestions (see
                            * getCategoryColorOptions in utils/categories.ts),
-                           * not an arbitrary RGB/hex picker - clicking one
-                           * just swaps which procedurally-generated color is
-                           * selected. The swatch preview above always
-                           * reflects the current pick, so this grid's
-                           * highlighted cell and that preview never disagree.
+                           * the colors other categories already use, and a
+                           * native custom color input. A preset pick closes
+                           * it; a custom change doesn't (see
+                           * CategoryColorPicker's own comment).
                            */}
-                          {colorOptions.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {colorOptions.map(colorOption => (
-                                <button
-                                  key={colorOption}
-                                  type="button"
-                                  onClick={() =>
-                                    setNewCategoryColorPreview(colorOption)
-                                  }
-                                  aria-label={`Use color ${colorOption}`}
-                                  aria-pressed={
-                                    newCategoryColorPreview === colorOption
-                                  }
-                                  className="h-6 w-6 flex-shrink-0 rounded-full border-2 transition-transform hover:scale-110"
-                                  style={{
-                                    backgroundColor: colorOption,
-                                    borderColor:
-                                      newCategoryColorPreview === colorOption
-                                        ? 'var(--text-color)'
-                                        : 'transparent',
-                                  }}
-                                />
-                              ))}
-                            </div>
+                          {isColorPickerOpen && (
+                            <CategoryColorPicker
+                              className="mt-2"
+                              groups={[
+                                { label: 'Suggestions', colors: colorOptions },
+                                {
+                                  label: 'In use',
+                                  colors: Array.from(
+                                    new Set(categories.map(c => c.color))
+                                  ),
+                                },
+                              ]}
+                              selectedColor={newCategoryColorPreview}
+                              onPick={color => {
+                                setNewCategoryColorPreview(color);
+                                setIsColorPickerOpen(false);
+                              }}
+                              onCustomChange={setNewCategoryColorPreview}
+                              customAriaLabel="Pick a custom color for the new category"
+                            />
                           )}
-                          <div className="mt-2 flex justify-end gap-2">
+
+                          {/*
+                           * Domain picker - radio-style cards, one per
+                           * DOMAINS entry, showing its label + one-line
+                           * description. Defaults to Movement each time the
+                           * sub-form opens.
+                           */}
+                          <fieldset className="mt-3">
+                            <legend className="block text-sm font-medium text-[var(--text-secondary-color)]">
+                              Domain
+                            </legend>
+                            <div className="mt-1 grid gap-2 sm:grid-cols-2">
+                              {DOMAINS.map(domain => {
+                                const isSelected =
+                                  newCategoryDomain === domain.id;
+                                return (
+                                  <label
+                                    key={domain.id}
+                                    className={`flex cursor-pointer gap-2 rounded-md border px-3 py-2 transition-colors ${
+                                      isSelected
+                                        ? 'border-[var(--accent-color)] bg-[var(--field-tint-2)]'
+                                        : 'border-[var(--panel-border-color)] bg-[var(--field-tint-1)] hover:bg-[var(--field-tint-2)]'
+                                    }`}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name="newCategoryDomain"
+                                      value={domain.id}
+                                      checked={isSelected}
+                                      onChange={() =>
+                                        setNewCategoryDomain(domain.id)
+                                      }
+                                      className="mt-0.5 flex-shrink-0 accent-[var(--accent-color)]"
+                                    />
+                                    <span>
+                                      <span className="block text-sm font-medium text-[var(--text-color)]">
+                                        {domain.label}
+                                      </span>
+                                      <span className="block text-xs text-[var(--text-muted-color)]">
+                                        {domain.description}
+                                      </span>
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </fieldset>
+
+                          <div className="mt-3 flex justify-end gap-2">
                             <button
                               type="button"
                               onClick={handleCancelAddCategory}
@@ -1592,5 +1773,47 @@ export default function AddEntryForm({
         }
       `}</style>
     </div>
+  );
+}
+
+/**
+ * Mini preview of a visual style's two shapes in `color`: a point marker
+ * and a range mark - solid dot + capsule, or hollow ring + wave (the ring
+ * cut out with --bg-color, like SpiralTimeline's own hollow markers).
+ */
+function VisualStylePreview({
+  style,
+  color,
+}: {
+  style: VisualStyle;
+  color: string;
+}) {
+  return (
+    <svg width={36} height={14} viewBox="0 0 36 14" aria-hidden="true">
+      {style === 'solid' ? (
+        <>
+          <circle cx={6} cy={7} r={4.5} fill={color} />
+          <rect x={14} y={3} width={20} height={8} rx={4} fill={color} />
+        </>
+      ) : (
+        <>
+          <circle
+            cx={6}
+            cy={7}
+            r={4}
+            fill="var(--bg-color)"
+            stroke={color}
+            strokeWidth={1.75}
+          />
+          <path
+            d="M14 7q2.5-4 5 0t5 0t5 0t5 0"
+            fill="none"
+            stroke={color}
+            strokeWidth={1.75}
+            strokeLinecap="round"
+          />
+        </>
+      )}
+    </svg>
   );
 }

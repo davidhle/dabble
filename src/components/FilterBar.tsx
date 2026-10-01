@@ -3,7 +3,8 @@
  *
  * Renders, top to bottom: a "Categories" collapse/expand toggle row (plus
  * the always-visible "Manage Categories"/"Show All" controls), the
- * collapsible per-activityType filter chip grid, then the sort-mode toggle
+ * collapsible per-activityType filter chip grid (one labeled section per
+ * domain - Movement, then Orbit), then the sort-mode toggle
  * ("By Date" / "By Category") -
  * category filters first since they always render, sort toggle last
  * since it only shows once there's a sidebar stack to sort (see
@@ -69,7 +70,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Category } from '../types/Category';
+import { Category, DOMAINS, getCategoryDomain } from '../types/Category';
 import { useEntrySelectionContext } from '../context/EntrySelectionContext';
 
 export type SortMode = 'date' | 'category';
@@ -210,41 +211,69 @@ export default function FilterBar({
        * see the COLLAPSE/EXPAND section of the header comment above.
        */}
       {!collapsed && (
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5">
-          {categories.map(category => {
-            const isActive = filterCategories.includes(category.id);
+        // One labeled section per domain (see DOMAINS in types/Category.ts),
+        // in DOMAINS order, so Movement and Orbit categories read as
+        // separate groups. A domain with no categories is skipped rather
+        // than rendered as an empty heading. Filtering behavior is the same
+        // for every chip regardless of section.
+        <div className="flex flex-shrink-0 flex-col gap-2">
+          {DOMAINS.map(domain => {
+            const domainCategories = categories.filter(
+              category => getCategoryDomain(category) === domain.id
+            );
+            if (domainCategories.length === 0) return null;
             return (
-              <button
-                key={category.id}
-                type="button"
-                onClick={() => onToggleFilterCategory(category.id)}
-                aria-pressed={isActive}
-                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                  // text-gray-900 (active) is deliberately unchanged across
-                  // themes - it's dark text against category.color itself
-                  // (a data-identity color, not a theme color), so it needs
-                  // to stay dark regardless of light/dark mode. The inactive
-                  // case now uses the themed primary text color instead of a
-                  // fixed text-gray-200, which would go near-invisible
-                  // against the light theme's own light background tint.
-                  isActive ? 'text-gray-900' : 'text-[var(--text-color)]'
-                }`}
-                style={{
-                  // Inactive buttons still get a subtle background of their
-                  // own (rather than fully transparent) - see the
-                  // "PARTIALLY-OPAQUE CONTENT ON A SEMI-OPAQUE SURFACE"
-                  // comment above: this button needs to read clearly
-                  // regardless of what's behind it. Themed (was a fixed
-                  // white tint) so it stays a subtle LIFT in either theme,
-                  // not a bright wash in light mode.
-                  backgroundColor: isActive
-                    ? category.color
-                    : 'var(--field-tint-1)',
-                  borderColor: category.color,
-                }}
+              <section
+                key={domain.id}
+                aria-label={`${domain.label} categories`}
               >
-                {category.name}
-              </button>
+                <h3
+                  className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted-color)]"
+                  title={domain.description}
+                >
+                  {domain.label}
+                </h3>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {domainCategories.map(category => {
+                    const isActive = filterCategories.includes(category.id);
+                    return (
+                      <button
+                        key={category.id}
+                        type="button"
+                        onClick={() => onToggleFilterCategory(category.id)}
+                        aria-pressed={isActive}
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                          // text-gray-900 (active) is deliberately unchanged across
+                          // themes - it's dark text against category.color itself
+                          // (a data-identity color, not a theme color), so it needs
+                          // to stay dark regardless of light/dark mode. The inactive
+                          // case now uses the themed primary text color instead of a
+                          // fixed text-gray-200, which would go near-invisible
+                          // against the light theme's own light background tint.
+                          isActive
+                            ? 'text-gray-900'
+                            : 'text-[var(--text-color)]'
+                        }`}
+                        style={{
+                          // Inactive buttons still get a subtle background of their
+                          // own (rather than fully transparent) - see the
+                          // "PARTIALLY-OPAQUE CONTENT ON A SEMI-OPAQUE SURFACE"
+                          // comment above: this button needs to read clearly
+                          // regardless of what's behind it. Themed (was a fixed
+                          // white tint) so it stays a subtle LIFT in either theme,
+                          // not a bright wash in light mode.
+                          backgroundColor: isActive
+                            ? category.color
+                            : 'var(--field-tint-1)',
+                          borderColor: category.color,
+                        }}
+                      >
+                        {category.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
             );
           })}
         </div>

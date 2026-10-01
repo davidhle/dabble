@@ -67,12 +67,6 @@
  * user from panning/zooming past the edges of whatever window they've
  * selected.
  *
- * This "bake the transform into every position" approach (rather than
- * StarMap's "transform one group") is also why the AUTO-RECENTER effect
- * below has to compute a *new zoom transform* from scratch instead of
- * just reading a star's fixed world (x, y) the way StarMap's
- * CLICK-TO-CENTER does - see that effect's own comment for the math.
- *
  * ──────────────────────────────────────────────────────────────────────
  * FULL-BLEED CANVAS: `fixed inset-0`, SAME AS StarMap
  * ──────────────────────────────────────────────────────────────────────
@@ -107,12 +101,8 @@
  * expand-minimized / deselect-expanded behavior StarMap's stars have -
  * see useEntrySelection.ts's CLICK OUTCOMES comment for the full
  * breakdown. In particular, re-clicking an already-expanded point or
- * capsule closes its panel (case 3) instead of doing nothing or
- * re-centering on it again - `expandedEntryId` goes back to `null` in
- * that case, which is exactly what the AUTO-RECENTER effect below
- * already guards on (`!expandedEntryId`), so that "don't recenter on a
- * deselect" exception falls out of the existing guard for free, with no
- * extra branching needed in this file. This completes parity with
+ * capsule closes its panel (case 3) instead of doing nothing. This
+ * completes parity with
  * StarMap's click behavior - neither view has to re-implement any of
  * this decision on its own anymore, both just forward clicks to the one
  * shared hook function.
@@ -162,8 +152,21 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
-import { Category } from '../types/Category';
-import { DateRange } from '../context/TimeRangeContext';
+import { Category, getVisualStyle } from '../types/Category';
+import {
+  HOLLOW_POINT_STROKE_WIDTH,
+  HOLLOW_WAVE_GLOW_BLUR_STD_DEVIATION,
+  HOLLOW_WAVE_GLOW_OPACITY,
+  HOLLOW_WAVE_GLOW_STROKE_WIDTH,
+  HOLLOW_WAVE_HIT_STROKE_WIDTH,
+  HOLLOW_WAVE_OPACITY,
+  HOLLOW_WAVE_STROKE_WIDTH,
+  buildPolylinePath,
+  clampHollowWaveAmplitude,
+  hollowWaveCycles,
+  hollowWaveSampleCount,
+} from '../utils/hollowGlyphs';
+import { DateRange, useTimeRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
 // Shared with StarMap.tsx's own hover tooltip - see EntryTooltip.tsx's
 // header comment for why this was pulled out into one component instead
@@ -183,13 +186,13 @@ interface LinearTimelineProps {
   /**
    * The current category list - Timeline.tsx's own `categories` (already
    * recomputed off `categoriesVersion`, see EntrySelectionContext.tsx's own
-   * comment on that field). NOT read directly by any rendering here -
-   * `points`/`ranges` still get each entry's color via getActivityColor,
-   * exactly as before. It exists purely as a `points`/`ranges` useMemo
-   * DEPENDENCY, so a ManageCategoriesModal recolor (which never touches
-   * `entries`) still triggers a recompute of those memoized colors instead
-   * of leaving stale ones on screen until something else (a filter toggle,
-   * a resize) happens to force a re-render.
+   * comment on that field). Read to split entries into solid vs. hollow
+   * (getVisualStyle - see the HOLLOW ENTRIES comment), which falls back to
+   * each category's domain; colors still come from getActivityColor.
+   * Being a dependency of the `points`/`ranges`/hollow useMemos is also
+   * what makes a ManageCategoriesModal recolor/re-domain (which never
+   * touches `entries`) recompute them instead of leaving stale colors or
+   * shapes on screen.
    */
   categories: Category[];
   /**
@@ -226,18 +229,16 @@ interface LinearTimelineProps {
   openedEntryIds: string[];
   /**
    * The id of the entry whose panel is currently expanded (not
-   * minimized), or `null` - same prop, same source, and same purpose as
-   * StarMap.tsx's `expandedEntryId`: this is what the AUTO-RECENTER
-   * effect below keys off, exactly like StarMap's CLICK-TO-CENTER effect.
+   * minimized), or `null` - same prop and source as StarMap.tsx's
+   * `expandedEntryId`. Only used for the brighter FOCUSED highlight here;
+   * this view deliberately doesn't recenter on it (see the "No
+   * auto-recenter" note after the hover handlers).
    */
   expandedEntryId: string | null;
   /**
-   * The sidebar overlay's current rendered width in pixels (0 when it
-   * isn't rendered) - same prop, same source (Timeline.tsx's measured
-   * `sidebarWidth`), and same purpose as StarMap.tsx's `sidebarWidth`:
-   * the AUTO-RECENTER effect below excludes this band when computing
-   * the horizontal centering target, exactly like StarMap's
-   * CLICK-TO-CENTER effect does.
+   * The screen band the sidebar covers, in pixels (Timeline.tsx's
+   * measured `sidebarWidth`) - the axis starts SIDEBAR_GUTTER past it;
+   * see the CANVAS ORIGIN SHIFT comment.
    */
   sidebarWidth: number;
   /** Which screen edge `sidebarWidth`'s band is on - see useSidebarWidth.ts's SidebarSide comment. */
@@ -254,6 +255,14 @@ interface LinearTimelineProps {
    * for the bug this fixes.
    */
   topOffset: number;
+  /**
+   * The free vertical band (viewport px) the plot centers itself in - see
+   * the VERTICAL CENTERING comment. `top` is just under the navbar (the
+   * sidebar container's own top), `bottom` is TimeRangeSelector's card
+   * top; either is 0 until Timeline.tsx has measured it, in which case
+   * the canvas's own edge stands in.
+   */
+  plotBand: { top: number; bottom: number };
   /**
    * The visible axis window - Timeline.tsx's TimeRangeContext
    * `selectedRange`. `baseXScale`'s domain is built from THIS now,
@@ -278,8 +287,6 @@ interface LinearTimelineProps {
    * LinearTimeline's own click behavior.
    */
   isEditMode: boolean;
-  /** Top of the top-right tooltip stack - see VizEmptyState.tsx's `stackTop`. */
-  tooltipStackTop?: number;
 }
 
 /** Opacity applied to a point/range whose category is filtered out - same value as StarMap.tsx's FILTERED_OUT_OPACITY. */
@@ -299,11 +306,10 @@ const OPENED_HIGHLIGHT_COLOR = 'var(--star-highlight-color)';
 const MARGIN = { top: 24, right: 24, bottom: 40, left: 24 };
 
 /**
- * Gap (px) between the sidebar overlay's right edge and where the canvas's
- * drawing origin starts, when a panel is open - see the CANVAS ORIGIN
- * SHIFT comment below.
+ * Gap (px) between the sidebar's canvas-facing edge and where the axis
+ * starts - see the CANVAS ORIGIN SHIFT comment below.
  */
-const SIDEBAR_GUTTER = 10;
+const SIDEBAR_GUTTER = 20;
 
 /** Hint passed to d3's axis tick generator - see the AXIS EFFECT comment above. */
 const TICK_COUNT = 7;
@@ -366,6 +372,91 @@ const AXIS_LABEL_ROOM = 24;
 const ZOOM_SCALE_EXTENT: [number, number] = [0.5, 40];
 
 /**
+ * ──────────────────────────────────────────────────────────────────────
+ * HOLLOW ENTRIES: RINGS + SINE WAVES, IN THEIR OWN ORBIT TRACK
+ * ──────────────────────────────────────────────────────────────────────
+ * The flat-axis version of SpiralTimeline.tsx's "ORBIT ENTRIES": entries
+ * whose getVisualStyle is 'hollow' (an explicit per-entry override, else
+ * hollow for an 'Orbit'-domain category) skip `points`/`ranges` and never
+ * share the movement lanes - they don't push capsules down or count
+ * toward `laneCount`. Instead they get a separate ORBIT TRACK below all
+ * the movement content, ORBIT_TRACK_GAP further down (see ORBIT TRACK,
+ * just above `axisY`):
+ *   - one row for hollow rings (if there are any), like the movement
+ *     baseline row for points - rings need no lanes;
+ *   - then one row per ORBIT LANE: hollow ranges go through the very same
+ *     `assignLanes` as the capsules (longest first, first lane that
+ *     doesn't overlap), but as their own independent pass, so overlapping
+ *     waves stack among themselves instead of colliding.
+ * The track grows a row per lane needed, and the axis moves down with it.
+ * The shapes:
+ *   - A single-date hollow entry is a ring: a POINT_RADIUS circle filled
+ *     with --bg-color (a "cutout") and bordered in the category color.
+ *   - A hollow range is a thin stroked sine wave from its start x to its
+ *     end x, offset vertically (the axis is horizontal, so "perpendicular"
+ *     is straight up/down) by `amplitude * sin(2π * cycles * phase)`.
+ *     Stroke, glow and opacity are shared with Spiral via
+ *     utils/hollowGlyphs.ts, as is the duration-based oscillation count -
+ *     but capped here by HOLLOW_WAVE_MIN_WAVELENGTH_PX, since this axis
+ *     can give an entry far less room. Amplitude is a fraction of
+ *     LANE_HEIGHT (below), clamped to the same px range Spiral uses.
+ * Since the track never shares a row with movement content, draw order
+ * (waves, capsules, rings, solid points) no longer decides any clicks.
+ */
+const HOLLOW_WAVE_AMPLITUDE_FRACTION_OF_LANE = 0.3;
+
+/**
+ * Distance (px) from the last movement row to the first orbit-track row -
+ * a full lane plus extra room, so the track reads as clearly separate.
+ * Rows within the track are LANE_HEIGHT apart, like the movement lanes
+ * (a wave's amplitude, 0.3 of that, keeps neighbors from touching).
+ */
+const ORBIT_TRACK_GAP = LANE_HEIGHT + 18;
+
+/**
+ * Shortest wavelength (px) a hollow wave may have at the selected range's
+ * UNZOOMED width. The shared duration-based cycle count (hollowWaveCycles)
+ * suits Spiral, whose outer loops give an entry lots of room, but on this
+ * flat axis a months-long entry across a years-wide window can be only a
+ * few dozen px - e.g. a 6-month entry over the full ~17-year range is
+ * ~29px, where its 12 cycles would be ~2.4px apart and read as a solid
+ * line. So the count is capped to what fits at this wavelength (down to a
+ * single cycle). Measured on `baseXScale`, not the zoomed `xScale`, so
+ * zooming in stretches the wave instead of adding crests - same as before.
+ */
+const HOLLOW_WAVE_MIN_WAVELENGTH_PX = 16;
+
+/** How far (px) a drag must move before it starts sliding the selected range - see DRAG SLIDES A SUB-RANGE THROUGH TIME. */
+const SLIDE_DEAD_ZONE_PX = 3;
+
+/** A range's duration in ms. */
+function rangeSpan(range: DateRange): number {
+  return range.end.getTime() - range.start.getTime();
+}
+
+/**
+ * The x of a drag's pointer, from d3-zoom's `sourceEvent` - null for
+ * anything that isn't a single-pointer mouse/touch drag (wheel, dblclick,
+ * a programmatic transform, a two-finger pinch).
+ */
+function pointerClientX(sourceEvent: unknown): number | null {
+  if (
+    sourceEvent instanceof MouseEvent &&
+    !(sourceEvent instanceof WheelEvent)
+  ) {
+    return sourceEvent.type === 'dblclick' ? null : sourceEvent.clientX;
+  }
+  if (
+    typeof TouchEvent !== 'undefined' &&
+    sourceEvent instanceof TouchEvent &&
+    sourceEvent.touches.length === 1
+  ) {
+    return sourceEvent.touches[0].clientX;
+  }
+  return null;
+}
+
+/**
  * Geometry for a `<rect>` that traces a capsule (range entry) shape -
  * `x`/`y`/`width`/`height` plus `rx` equal to half the height, which is
  * what turns a plain rounded-rect into a true stadium/pill (full
@@ -408,17 +499,17 @@ export default function LinearTimeline({
   sidebarWidth,
   sidebarSide,
   topOffset,
+  plotBand,
   domainRange,
   isEditMode,
-  tooltipStackTop,
 }: LinearTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const axisRef = useRef<SVGGElement>(null);
   // Holds the same zoom *behavior* instance attached to the <svg> below,
-  // so AUTO-RECENTER (see below) can programmatically drive it later,
-  // outside of the 'zoom' event handler that normally drives it - same
-  // role as StarMap.tsx's own `zoomBehaviorRef`.
+  // so the translateExtent and domain-reset effects can drive it outside
+  // the 'zoom' event handler - same role as StarMap.tsx's own
+  // `zoomBehaviorRef`.
   const zoomBehaviorRef = useRef<d3.ZoomBehavior<
     SVGSVGElement,
     unknown
@@ -493,15 +584,6 @@ export default function LinearTimeline({
    * right edge instead of fitting it into the smaller visible area.
    * `sidebarWidth === 0` (no panel open) falls back to the plain
    * `MARGIN.left` origin this always used, unchanged.
-   *
-   * This ALSO simplifies AUTO-RECENTER below: since g-local coordinate
-   * space (everything drawn inside `<g transform="translate(contentOriginX, ...)">`)
-   * now excludes the sidebar's band by construction, centering an entry
-   * within the visible area is just `innerWidth / 2` - no need to
-   * separately account for `sidebarWidth` in that math anymore, unlike
-   * StarMap's own centering target (`sidebarWidth + (width - sidebarWidth) / 2`),
-   * which still has to exclude the sidebar's band itself since StarMap's
-   * own coordinate space is NOT shifted the way this one now is.
    */
   //
   // Mirrored when the sidebar is on the right: the content band starts at
@@ -593,6 +675,47 @@ export default function LinearTimeline({
     [zoomTransform, baseXScale]
   );
 
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * DRAG SLIDES A SUB-RANGE THROUGH TIME
+   * ──────────────────────────────────────────────────────────────────────
+   * While a sub-range is selected (`selectedRange` shorter than
+   * `fullRange`), dragging the canvas doesn't pan within that window - it
+   * SLIDES the window itself: the pointer's x-delta since the drag began
+   * is converted to a time shift at the current zoom (so the content under
+   * the cursor follows it) and written straight to TimeRangeContext, so
+   * TimeRangeSelector's brush moves live. The window keeps its duration
+   * and is clamped to `fullRange` at both ends.
+   *
+   * d3-zoom still runs the gesture (it owns click-vs-drag detection, and
+   * wheel/pinch zoom are untouched), but a sliding drag's own translate is
+   * discarded: the rendered `zoomTransform` stays at the drag's starting
+   * transform, and on 'end' d3's internal node-level transform is put
+   * back to it too, so the next wheel zoom continues from where the user
+   * actually is. The x-delta comes from the raw pointer event rather than
+   * `event.transform`, since `translateExtent` (PAN/ZOOM CONSTRAINED TO
+   * domainRange, below) clamps the latter to zero at 1x zoom.
+   *
+   * Handlers are attached once, so they read the latest ranges/width via
+   * `slideInputsRef`. `slidRangeRef` marks the range this component set
+   * itself, so RESET PAN/ZOOM WHEN domainRange CHANGES can tell a slide
+   * (keep the zoom) from a brush drag or reset (start fresh).
+   */
+  const { fullRange, selectedRange, setSelectedRange } = useTimeRange();
+  const slideInputsRef = useRef({
+    fullRange,
+    selectedRange,
+    setSelectedRange,
+    innerWidth: 0,
+  });
+  slideInputsRef.current = {
+    fullRange,
+    selectedRange,
+    setSelectedRange,
+    innerWidth,
+  };
+  const slidRangeRef = useRef<DateRange | null>(null);
+
   // ─── Pan/zoom behavior ───
   // Attached once (empty deps), same as StarMap's zoom effect, so the
   // behavior instance - and the user's current pan/zoom position - isn't
@@ -604,10 +727,72 @@ export default function LinearTimeline({
     if (!svgRef.current) return;
 
     const svg = d3.select(svgRef.current);
+
+    // See DRAG SLIDES A SUB-RANGE THROUGH TIME above.
+    let slide: {
+      startClientX: number;
+      startRange: DateRange;
+      startTransform: d3.ZoomTransform;
+      moved: boolean;
+    } | null = null;
+
     const zoomBehavior = d3
       .zoom<SVGSVGElement, unknown>()
       .scaleExtent(ZOOM_SCALE_EXTENT)
-      .on('zoom', event => setZoomTransform(event.transform));
+      .on('start', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+        slide = null;
+        const clientX = pointerClientX(event.sourceEvent);
+        const { fullRange: full, selectedRange: selected } =
+          slideInputsRef.current;
+        if (clientX === null || rangeSpan(selected) >= rangeSpan(full)) {
+          return;
+        }
+        slide = {
+          startClientX: clientX,
+          startRange: selected,
+          startTransform: event.transform,
+          moved: false,
+        };
+      })
+      .on('zoom', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+        const clientX = pointerClientX(event.sourceEvent);
+        // Only a one-pointer drag at the starting zoom slides - a pinch
+        // (scale changing mid-gesture) zooms as usual.
+        if (
+          slide &&
+          clientX !== null &&
+          event.transform.k === slide.startTransform.k
+        ) {
+          const {
+            fullRange: full,
+            innerWidth: width,
+            setSelectedRange: setRange,
+          } = slideInputsRef.current;
+          const dx = clientX - slide.startClientX;
+          // Dead zone, so a click's jitter doesn't nudge the range.
+          if (!slide.moved && Math.abs(dx) < SLIDE_DEAD_ZONE_PX) return;
+          const span = rangeSpan(slide.startRange);
+          const msPerPx = span / (Math.max(1, width) * slide.startTransform.k);
+          const unclampedStart =
+            slide.startRange.start.getTime() - dx * msPerPx;
+          const start = Math.min(
+            Math.max(unclampedStart, full.start.getTime()),
+            full.end.getTime() - span
+          );
+          const next = { start: new Date(start), end: new Date(start + span) };
+          slide.moved = true;
+          slidRangeRef.current = next;
+          setRange(next);
+          return;
+        }
+        setZoomTransform(event.transform);
+      })
+      .on('end', () => {
+        if (slide?.moved && svgRef.current) {
+          d3.select(svgRef.current).property('__zoom', slide.startTransform);
+        }
+        slide = null;
+      });
 
     svg.call(zoomBehavior);
     zoomBehaviorRef.current = zoomBehavior;
@@ -687,6 +872,11 @@ export default function LinearTimeline({
       return;
     }
 
+    // A drag-slide (DRAG SLIDES A SUB-RANGE THROUGH TIME) moves the
+    // window on purpose and keeps the user's zoom - only other range
+    // changes (the brush, a reset, a year glyph) start fresh.
+    if (domainRange === slidRangeRef.current) return;
+
     const svgNode = svgRef.current;
     const zoomBehavior = zoomBehaviorRef.current;
     if (!svgNode || !zoomBehavior) return;
@@ -744,20 +934,103 @@ export default function LinearTimeline({
   // below) rather than one combined list, since the two need different
   // SVG shapes and different vertical placement rules - see the
   // endTimestamp field comment in types/Entry.ts.
+  //
+  // Both lists hold SOLID entries only - hollow ones get their own
+  // `hollowPoints`/`hollowRanges` below (see the HOLLOW ENTRIES comment).
+  const { solidEntries, hollowEntries } = useMemo(() => {
+    const solid: Entry[] = [];
+    const hollow: Entry[] = [];
+    for (const entry of entries) {
+      (getVisualStyle(entry, categories) === 'hollow' ? hollow : solid).push(
+        entry
+      );
+    }
+    return { solidEntries: solid, hollowEntries: hollow };
+  }, [entries, categories]);
+
   const points = useMemo(
     () =>
-      entries
+      solidEntries
         .filter(entry => !entry.endTimestamp)
         .map(entry => ({
           entry,
           cx: xScale(new Date(entry.timestamp)),
           color: getActivityColor(entry.activityType),
         })),
-    // `categories` is otherwise unused here - see this component's own
-    // `categories` prop comment for why it's still a dependency.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entries, xScale, categories]
+    [solidEntries, xScale]
   );
+
+  // HOLLOW ENTRIES - see that comment above. Rings, on the orbit track's
+  // ring row (`orbitRingY`).
+  const hollowPoints = useMemo(
+    () =>
+      hollowEntries
+        .filter(entry => !entry.endTimestamp)
+        .map(entry => ({
+          entry,
+          cx: xScale(new Date(entry.timestamp)),
+          color: getActivityColor(entry.activityType),
+        })),
+    [hollowEntries, xScale]
+  );
+
+  // HOLLOW ENTRIES - sine waves, lane-assigned among themselves (see the
+  // HOLLOW ENTRIES comment). Each path is built around y = 0 and placed at
+  // its lane's row when drawn, since the row also depends on how many
+  // movement lanes sit above the track (`orbitLayout`). Rebuilt on zoom
+  // (via `xScale`), but the cycle count comes from the entry's own dates,
+  // so zooming stretches the wave rather than adding crests.
+  const hollowRanges = useMemo(() => {
+    const amplitude = clampHollowWaveAmplitude(
+      LANE_HEIGHT * HOLLOW_WAVE_AMPLITUDE_FRACTION_OF_LANE
+    );
+    const waves = hollowEntries
+      .filter(entry => entry.endTimestamp)
+      .map(entry => {
+        const startMs = new Date(entry.timestamp).getTime();
+        const endMs = new Date(entry.endTimestamp as string).getTime();
+        const x0 = xScale(new Date(Math.min(startMs, endMs)));
+        const x1 = xScale(new Date(Math.max(startMs, endMs)));
+        const baseLength = Math.abs(
+          baseXScale(new Date(endMs)) - baseXScale(new Date(startMs))
+        );
+        // Capped so each wavelength stays legible - see
+        // HOLLOW_WAVE_MIN_WAVELENGTH_PX. Rounded to a half cycle like
+        // hollowWaveCycles, so the wave still ends on the baseline.
+        const cycles = Math.max(
+          1,
+          Math.min(
+            hollowWaveCycles(Math.abs(endMs - startMs)),
+            Math.round((baseLength / HOLLOW_WAVE_MIN_WAVELENGTH_PX) * 2) / 2
+          )
+        );
+        const sampleCount = hollowWaveSampleCount(cycles);
+        const samples: { x: number; y: number }[] = [];
+        for (let i = 0; i <= sampleCount; i++) {
+          const phase = i / sampleCount;
+          samples.push({
+            x: x0 + (x1 - x0) * phase,
+            y: amplitude * Math.sin(2 * Math.PI * cycles * phase),
+          });
+        }
+        return {
+          entry,
+          x0,
+          x1,
+          pathD: buildPolylinePath(samples),
+          color: getActivityColor(entry.activityType),
+        };
+      });
+
+    // ORBIT LANES: same algorithm and gap as the capsules' lanes, run over
+    // the waves alone.
+    return assignLanes(
+      waves,
+      wave => wave.x0,
+      wave => wave.x1,
+      LANE_GAP_PX
+    );
+  }, [hollowEntries, xScale, baseXScale]);
 
   /**
    * ──────────────────────────────────────────────────────────────────────
@@ -807,7 +1080,7 @@ export default function LinearTimeline({
    * "lane" is offset BY visually.
    */
   const ranges = useMemo(() => {
-    const items = entries
+    const items = solidEntries
       .filter(entry => entry.endTimestamp)
       .map(entry => ({
         entry,
@@ -822,9 +1095,7 @@ export default function LinearTimeline({
       item => item.cxEnd,
       LANE_GAP_PX
     );
-    // See the `points` useMemo's identical comment on the `categories` dependency.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, xScale, categories]);
+  }, [solidEntries, xScale]);
 
   // How many lanes are actually in use - drives the y-position of the
   // lowest capsule (and therefore the axis line below it). Zero when
@@ -834,51 +1105,58 @@ export default function LinearTimeline({
     0
   );
 
-  // The axis line sits `AXIS_CLEARANCE` below the lowest occupied lane
-  // (or the baseline itself, if there are no capsules at all - laneCount
-  // is 0 in that case).
-  const axisY = BASELINE_Y + laneCount * LANE_HEIGHT + AXIS_CLEARANCE;
+  // ORBIT TRACK (see the HOLLOW ENTRIES comment): starts ORBIT_TRACK_GAP
+  // below the last movement row - a ring row first if there are rings,
+  // then one row per orbit lane. Collapses to nothing (no gap either)
+  // when there are no hollow entries.
+  const movementBottomY = BASELINE_Y + laneCount * LANE_HEIGHT;
+  const orbitLaneCount = hollowRanges.reduce(
+    (max, wave) => Math.max(max, wave.lane + 1),
+    0
+  );
+  const orbitRingRows = hollowPoints.length > 0 ? 1 : 0;
+  const orbitRowCount = orbitRingRows + orbitLaneCount;
+  const orbitTopY = movementBottomY + ORBIT_TRACK_GAP;
+  const orbitRingY = orbitTopY;
+  const orbitLaneY = (lane: number) =>
+    orbitTopY + (orbitRingRows + lane) * LANE_HEIGHT;
+  const contentBottomY =
+    orbitRowCount > 0
+      ? orbitTopY + (orbitRowCount - 1) * LANE_HEIGHT
+      : movementBottomY;
+
+  // The axis line sits `AXIS_CLEARANCE` below the lowest occupied row -
+  // the orbit track's last row, else the last movement lane, else the
+  // baseline itself.
+  const axisY = contentBottomY + AXIS_CLEARANCE;
 
   /**
    * ──────────────────────────────────────────────────────────────────────
-   * VERTICAL CENTERING (accounting for the floating header)
+   * VERTICAL CENTERING (within the band the chrome leaves free)
    * ──────────────────────────────────────────────────────────────────────
-   * Unlike StarMap - whose starfield is diffuse and deliberately allowed
-   * to render underneath the semi-transparent floating header (see
-   * Constellation.tsx's "TRANSPARENT CONTAINER, CONTRASTED CONTENT"
-   * comment: StarMap's title/subtitle text is legible directly over the
-   * stars) - this plot's axis + points are structured, readable content
-   * that must NOT render underneath the header: FilterBar's category
-   * toggles and sort-mode toggle both have real, non-transparent
-   * backgrounds, so anything painted beneath them is fully hidden, not
-   * just visually busy. That mismatch was the dominant cause of the
-   * MISSING DATA POINTS bug described at the top of this file.
+   * The plot centers its VISIBLE footprint - from half a lane above the
+   * baseline row (room for points, rings and hollow waves) down to the
+   * bottom of the axis tick labels - within `plotBand`: below the navbar
+   * and above TimeRangeSelector's card, the vertical space the canvas
+   * actually has. Horizontally the sidebar is already handled by
+   * `contentOriginX`/`innerWidth` (the CANVAS ORIGIN SHIFT), so it needs no
+   * vertical exclusion now that it sits beside the plot rather than above
+   * it. Centering the footprint (not the axis line alone) keeps the
+   * baseline row and the tick labels equally far from the band's edges
+   * at any lane count.
    *
-   * `plotContentHeight` is the plot's own total vertical footprint - top
-   * margin, down through the lowest occupied lane, the axis line, its
-   * tick-label text, and a matching bottom margin - all as one number, so
-   * it can be centered as a single block rather than centering just the
-   * axis line and leaving the label text to hang wherever.
-   *
-   * `topOffset` (from Timeline.tsx's measured `headerLayout.top`, the
-   * exact same value Constellation.tsx measures for SidebarPanelStack's
-   * `top`) marks where the header stack actually ends. The plot is
-   * centered within `[topOffset, size.height]` - the vertical band the
-   * header does NOT cover - rather than within the full canvas height,
-   * mirroring how StarMap's own CLICK-TO-CENTER (see below) centers
-   * horizontally within `[sidebarWidth, size.width]` instead of the full
-   * canvas width. `Math.max(0, ...)` is a floor, not just a fallback: it
-   * guarantees `contentOffsetY` can never end up LESS than `topOffset`
-   * (i.e. never renders above/into the header band) even if
-   * `plotContentHeight` were somehow taller than the available height -
-   * so this fixes the overlap unconditionally, for any dataset's date
-   * spread or lane count, not just the seed dataset's specific shape.
+   * The `Math.max` is a floor: when the footprint is taller than the band
+   * (many lanes, a short window), the plot pins to the band's top rather
+   * than riding up under the navbar - it overflows downward instead.
    */
-  const plotContentHeight =
-    MARGIN.top + axisY + AXIS_LABEL_ROOM + MARGIN.bottom;
-  const availableHeight = Math.max(0, size.height - topOffset);
-  const contentOffsetY =
-    topOffset + Math.max(0, (availableHeight - plotContentHeight) / 2);
+  const plotContentTop = BASELINE_Y - LANE_HEIGHT / 2;
+  const plotContentBottom = axisY + AXIS_LABEL_ROOM;
+  const bandTop = plotBand.top;
+  const bandBottom = plotBand.bottom > 0 ? plotBand.bottom : size.height;
+  const contentOffsetY = Math.max(
+    bandTop - plotContentTop,
+    (bandTop + bandBottom) / 2 - (plotContentTop + plotContentBottom) / 2
+  );
 
   // ─── Hover tooltip ───
   // Tracks the hovered entry plus the raw viewport (clientX/clientY)
@@ -894,125 +1172,24 @@ export default function LinearTimeline({
     y: number;
   } | null>(null);
 
-  /**
-   * ──────────────────────────────────────────────────────────────────────
-   * AUTO-RECENTER: PROGRAMMATIC PAN VIA d3-zoom's `.transform()`, TIED TO
-   * THE EXPANDED-ENTRY STATE CHANGE
-   * ──────────────────────────────────────────────────────────────────────
-   * Same trigger, same `zoomBehavior.transform` + transition mechanism,
-   * and same reasoning as StarMap.tsx's CLICK-TO-CENTER effect - keyed on
-   * `expandedEntryId` itself (not called from the click handler directly)
-   * so expanding a panel via a sidebar row click recenters exactly the
-   * same as a direct click on the timeline does. See StarMap's own
-   * comment for the full reasoning on why this lives in an effect keyed
-   * on the prop rather than in the click handler.
-   *
-   * THE MATH HAS TO DIFFER FROM StarMap's, THOUGH - see the "PAN/ZOOM"
-   * comment at the top of this file: StarMap transforms one `<g>`, so a
-   * star's (x, y) is a fixed "world" coordinate independent of the
-   * current zoom, and centering it is just "solve for the translate that
-   * puts this fixed point at the target." Here, `xScale` (and therefore
-   * every point/range's `cx`) already has the CURRENT zoom transform
-   * baked in - so the "world" x to center on has to be read off
-   * `baseXScale` (the UNZOOMED scale) instead, and the new transform's
-   * `x` is solved the same way StarMap solves for its translate:
-   * `screen = k * world + x`, so `x = target - k * world`, at the
-   * CURRENT zoom level `k` (unchanged, same as StarMap preserving
-   * `currentTransform.k`). `currentTransform.y` is carried over as-is
-   * rather than recomputed - this view only ever reads `xScale`
-   * (horizontal), so `y` has no visible effect on anything rendered here,
-   * and preserving it (instead of, say, resetting to 0) avoids silently
-   * fighting whatever y a user's own two-finger/trackpad pan gesture may
-   * have already set.
-   *
-   * WHY THE TARGET IS JUST `innerWidth / 2` NOW, UNLIKE StarMap's OWN
-   * `sidebarWidth + (width - sidebarWidth) / 2`:
-   * See the CANVAS ORIGIN SHIFT comment above `innerWidth` - g-local
-   * coordinate space (everything positioned relative to
-   * `<g transform="translate(contentOriginX, ...)">`) already EXCLUDES
-   * the sidebar's band by construction now, so its own midpoint is
-   * already the midpoint of exactly the visible-past-the-sidebar region -
-   * there's nothing left to separately subtract. StarMap still needs its
-   * own more involved formula because ITS coordinate space is NOT shifted
-   * the same way (see that comment for why a direct origin shift doesn't
-   * fit StarMap's free-form layout the way it fits this linear one); this
-   * effect's job is now purely "bring the clicked entry to the middle of
-   * whatever's currently visible," with the sidebar-avoidance itself
-   * already handled structurally before this even runs.
-   *
-   * For a range entry (has `endTimestamp`), the midpoint of its start and
-   * end is used as the "world" x to center on, rather than just its
-   * start - centering on the capsule's start would visually push most of
-   * a long-duration entry off to one side of the target instead of
-   * centering the entry itself.
-   *
-   * `sidebarWidth` IS STILL A DEPENDENCY, EVEN THOUGH THE FORMULA NO
-   * LONGER MENTIONS IT DIRECTLY: it still drives `innerWidth` (via
-   * `contentOriginX`), which `targetX` is computed from - and the same
-   * first-click staleness this dependency was originally added to fix
-   * still applies: `hasSelection` (and therefore whether SidebarPanelStack
-   * is even mounted, and therefore `contentOriginX`/`innerWidth`) flips in
-   * the SAME render `expandedEntryId` changes on the very first entry
-   * ever opened, while `sidebarWidth` itself is still 0 from BEFORE the
-   * sidebar existed to measure - a real width only lands in a SEPARATE,
-   * slightly later commit (Timeline.tsx's own ResizeObserver effect has
-   * to run first). Without `sidebarWidth` in these deps, this effect
-   * would already have centered against the UN-shifted, full-canvas
-   * `innerWidth` before the real one ever arrives, and never get a chance
-   * to correct itself, since `expandedEntryId` alone doesn't change again
-   * just because `sidebarWidth` (and therefore `contentOriginX`) did.
-   * With it included, this effect re-fires once the real width lands,
-   * recentering again against the now-correctly-shifted `innerWidth` -
-   * d3's `.transition()` simply redirects the still-in-flight first
-   * animation toward the corrected target rather than restarting it, so
-   * this reads as one smooth pan converging on the right spot rather than
-   * a visible double jump. This also means resizing the window WHILE a
-   * panel is open correctly re-centers as the sidebar's rendered width
-   * (and therefore the shifted origin) changes with it.
-   */
-  useEffect(() => {
-    const svgNode = svgRef.current;
-    const zoomBehavior = zoomBehaviorRef.current;
-    if (!svgNode || !zoomBehavior || !expandedEntryId) return;
+  /** Hover-tooltip + click wiring for a hollow glyph - identical behavior to the solid points/capsules' inline handlers. */
+  const hollowEntryHandlers = (entry: Entry) => ({
+    onMouseEnter: (event: React.MouseEvent) =>
+      setHovered({ entry, x: event.clientX, y: event.clientY }),
+    onMouseMove: (event: React.MouseEvent) =>
+      setHovered(current =>
+        current && current.entry.id === entry.id
+          ? { ...current, x: event.clientX, y: event.clientY }
+          : current
+      ),
+    onMouseLeave: () => setHovered(null),
+    onClick: () => onEntryClick(entry),
+  });
 
-    const target = entries.find(entry => entry.id === expandedEntryId);
-    if (!target) return;
-
-    if (innerWidth === 0) return;
-
-    const worldDate = target.endTimestamp
-      ? new Date(
-          (new Date(target.timestamp).getTime() +
-            new Date(target.endTimestamp).getTime()) /
-            2
-        )
-      : new Date(target.timestamp);
-    const worldX = baseXScale(worldDate);
-
-    const targetX = innerWidth / 2;
-
-    const currentTransform = d3.zoomTransform(svgNode);
-
-    const centeredTransform = d3.zoomIdentity
-      .translate(targetX, currentTransform.y)
-      .scale(currentTransform.k) // preserve the user's current zoom level
-      .translate(-worldX, 0);
-
-    d3.select(svgNode)
-      .transition()
-      .duration(650) // 500-750ms: smooth, not sluggish - same duration as StarMap's
-      .call(zoomBehavior.transform, centeredTransform);
-    // `entries`/`size`/`baseXScale`/`innerWidth`/`contentOriginX` are
-    // deliberately still excluded - see StarMap's own CLICK-TO-CENTER
-    // comment for why an effect like this should only re-run for the
-    // specific things that should actually TRIGGER a recenter (the
-    // expanded entry changing, or the sidebar's width changing - which
-    // `innerWidth`/`contentOriginX` are themselves only ever a function
-    // of, alongside `size.width`, which is deliberately excluded on its
-    // own too), not every render that happens to touch one of the values
-    // it reads.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedEntryId, sidebarWidth, sidebarSide]);
+  // No auto-recenter on opening an entry (unlike StarMap's CLICK-TO-
+  // CENTER): the axis is pinned to `selectedRange` edge to edge, in sync
+  // with TimeRangeSelector's brush and the drag-to-slide above, and
+  // panning to an entry would silently break that alignment.
 
   const isReady = size.width > 0 && size.height > 0;
 
@@ -1025,7 +1202,10 @@ export default function LinearTimeline({
     // StarMap.tsx's own canvas paints, so this reads as the same
     // background rather than a visibly flatter one just because this is a
     // different view.
-    <div ref={containerRef} className="canvas-vignette-bg fixed inset-0 z-0">
+    <div
+      ref={containerRef}
+      className="canvas-vignette-bg canvas-texture fixed inset-0 z-0"
+    >
       <svg
         ref={svgRef}
         width={size.width}
@@ -1049,6 +1229,18 @@ export default function LinearTimeline({
           >
             <feGaussianBlur stdDeviation="3" />
           </filter>
+          {/* Soft same-color glow under a hollow range's sine wave - see the HOLLOW ENTRIES comment. */}
+          <filter
+            id="hollow-wave-glow"
+            x="-100%"
+            y="-100%"
+            width="300%"
+            height="300%"
+          >
+            <feGaussianBlur
+              stdDeviation={HOLLOW_WAVE_GLOW_BLUR_STD_DEVIATION}
+            />
+          </filter>
         </defs>
         {/*
          * `contentOriginX`, not `MARGIN.left` - see the CANVAS ORIGIN
@@ -1059,6 +1251,95 @@ export default function LinearTimeline({
          * rather than drawing it at a fixed spot and panning the view.
          */}
         <g transform={`translate(${contentOriginX},${contentOffsetY})`}>
+          {/*
+           * HOLLOW WAVES - see the HOLLOW ENTRIES comment. Drawn first so
+           * they sit behind everything else. The opened-entry highlight
+           * is a highlight-colored copy of the wave's line (blurred glow +
+           * crisp outline) behind the colored one, the same approach
+           * SpiralTimeline.tsx uses for its waves, with this file's own
+           * glow values (the capsules' +4px / 0.6 / opened-point-glow).
+           */}
+          {isReady &&
+            hollowRanges.map(({ entry, pathD, color, lane }) => {
+              const isOpened = openedEntryIdSet.has(entry.id);
+              const isFocused = entry.id === expandedEntryId;
+              const isFilteredOut = !activeCategorySet.has(entry.activityType);
+              return (
+                // Moved down to its orbit lane's row - the path itself is
+                // built around y = 0 (see `hollowRanges`).
+                <g
+                  key={entry.id}
+                  transform={`translate(0,${orbitLaneY(lane)})`}
+                  style={{
+                    opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
+                  }}
+                  className="cursor-pointer transition-opacity duration-200"
+                  {...hollowEntryHandlers(entry)}
+                >
+                  {/* Invisible, wider hit stroke - the 1.75px line alone is too thin to hover comfortably. */}
+                  <path
+                    d={pathD}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={HOLLOW_WAVE_HIT_STROKE_WIDTH}
+                    strokeLinecap="round"
+                  />
+                  {isOpened && (
+                    <>
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={OPENED_HIGHLIGHT_COLOR}
+                        strokeWidth={
+                          HOLLOW_WAVE_STROKE_WIDTH +
+                          (isFocused ? FOCUSED_GLOW_STROKE_WIDTH : 4) * 2
+                        }
+                        strokeOpacity={isFocused ? FOCUSED_GLOW_OPACITY : 0.6}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        filter="url(#opened-point-glow)"
+                        className="pointer-events-none"
+                      />
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={OPENED_HIGHLIGHT_COLOR}
+                        strokeWidth={
+                          HOLLOW_WAVE_STROKE_WIDTH +
+                          (isFocused ? FOCUSED_RING_STROKE_WIDTH : 1.5) * 2
+                        }
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="pointer-events-none"
+                      />
+                    </>
+                  )}
+                  <g
+                    opacity={HOLLOW_WAVE_OPACITY}
+                    className="pointer-events-none"
+                  >
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={HOLLOW_WAVE_GLOW_STROKE_WIDTH}
+                      strokeOpacity={HOLLOW_WAVE_GLOW_OPACITY}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      filter="url(#hollow-wave-glow)"
+                    />
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={HOLLOW_WAVE_STROKE_WIDTH}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </g>
+                </g>
+              );
+            })}
           {isReady &&
             // Range entries (endTimestamp set): a short horizontal
             // capsule from start to end x, instead of a single point -
@@ -1180,6 +1461,63 @@ export default function LinearTimeline({
                 </g>
               );
             })}
+          {/*
+           * HOLLOW RINGS - see the HOLLOW ENTRIES comment. Same opened
+           * glow/ring as a solid point (points.map below); only the
+           * marker itself differs. Drawn before solid points so a solid
+           * point on top keeps the click.
+           */}
+          {isReady &&
+            hollowPoints.map(({ entry, cx, color }) => {
+              const isOpened = openedEntryIdSet.has(entry.id);
+              const isFocused = entry.id === expandedEntryId;
+              const isFilteredOut = !activeCategorySet.has(entry.activityType);
+              return (
+                <g
+                  key={entry.id}
+                  style={{
+                    opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
+                  }}
+                  className="transition-opacity duration-200"
+                >
+                  {isOpened && (
+                    <circle
+                      cx={cx}
+                      cy={orbitRingY}
+                      r={POINT_RADIUS + 5}
+                      fill="none"
+                      stroke={OPENED_HIGHLIGHT_COLOR}
+                      strokeWidth={isFocused ? FOCUSED_GLOW_STROKE_WIDTH : 4}
+                      strokeOpacity={isFocused ? FOCUSED_GLOW_OPACITY : 0.6}
+                      filter="url(#opened-point-glow)"
+                      className="pointer-events-none"
+                    />
+                  )}
+                  {/* Hollow ring: a background-colored "cutout" with a category-colored border. Its opaque fill is also the hover/click target. */}
+                  <circle
+                    cx={cx}
+                    cy={orbitRingY}
+                    r={POINT_RADIUS}
+                    fill="var(--bg-color)"
+                    stroke={color}
+                    strokeWidth={HOLLOW_POINT_STROKE_WIDTH}
+                    className="cursor-pointer"
+                    {...hollowEntryHandlers(entry)}
+                  />
+                  {isOpened && (
+                    <circle
+                      cx={cx}
+                      cy={orbitRingY}
+                      r={POINT_RADIUS + 3}
+                      fill="none"
+                      stroke={OPENED_HIGHLIGHT_COLOR}
+                      strokeWidth={isFocused ? FOCUSED_RING_STROKE_WIDTH : 1.5}
+                      className="pointer-events-none"
+                    />
+                  )}
+                </g>
+              );
+            })}
           {isReady &&
             points.map(({ entry, cx, color }) => {
               const isOpened = openedEntryIdSet.has(entry.id);
@@ -1269,7 +1607,6 @@ export default function LinearTimeline({
           sidebarWidth={sidebarWidth}
           sidebarSide={sidebarSide}
           editModeBannerVisible={isEditMode}
-          stackTop={tooltipStackTop}
         />
       )}
     </div>

@@ -121,7 +121,20 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { Entry } from '../types/Entry';
-import { Category } from '../types/Category';
+import { Category, getCategoryDomain, getVisualStyle } from '../types/Category';
+import {
+  HOLLOW_POINT_STROKE_WIDTH,
+  HOLLOW_WAVE_HIT_STROKE_WIDTH,
+} from '../utils/hollowGlyphs';
+import {
+  Point,
+  auroraColorAt,
+  buildRibbon,
+  orderAuroraCategories,
+  ribbonPath,
+  sampleArc,
+  sampleCatmullRom,
+} from '../utils/auroraRibbon';
 // Activity -> color mapping lives in utils/colors.ts, not here, so that
 // EntryPanel's sidebar accent bar (and anything else that needs an
 // activity's color) always matches a star's color in this view - see the
@@ -141,6 +154,14 @@ import {
 
 interface StarMapProps {
   entries: Entry[];
+  /**
+   * The FULL, unfiltered entries list (Constellation.tsx's own `entries`,
+   * not the time-filtered `entries` above) - read only to work out which
+   * movement categories an aurora ribbon threads through (see AURORA
+   * RIBBONS). That's a property of the orbit entry's own date span, so it
+   * mustn't change with whatever time window happens to be selected.
+   */
+  allEntries: Entry[];
   /**
    * Whether the RAW, unfiltered dataset (Constellation.tsx's own
    * `entries.length > 0`, not the time-filtered `entries` prop above) has
@@ -241,8 +262,6 @@ interface StarMapProps {
    * `topOffset`/`sidebarWidth` purely to hand them to VizEmptyState.
    */
   isEditMode: boolean;
-  /** Top of the top-right tooltip stack - see VizEmptyState.tsx's `stackTop`. */
-  tooltipStackTop?: number;
 }
 
 /** Opacity applied to a star whose category is filtered out. */
@@ -275,6 +294,239 @@ const LABEL_CLEARANCE = 16;
  * goal in both themes.
  */
 const OPENED_HIGHLIGHT_COLOR = 'var(--star-highlight-color)';
+
+/**
+ * Radius (px) of a hollow single-date entry's ring - a fixed size rather
+ * than a solid star's seeded 2.5-5px "magnitude", since a ring needs room
+ * for its cutout to read as hollow at all. Stroke width is shared with
+ * Spiral/Linear (utils/hollowGlyphs.ts).
+ */
+const RING_RADIUS = 4.5;
+
+/**
+ * ──────────────────────────────────────────────────────────────────────
+ * AURORA RIBBONS: HOLLOW RANGE ENTRIES
+ * ──────────────────────────────────────────────────────────────────────
+ * A hollow range entry (getVisualStyle - by default an Orbit-domain
+ * category's multi-day entry: context AROUND the practice) isn't a point
+ * in one cluster, so it doesn't get a star. It's drawn as an aurora: a
+ * soft, wavy, gradient-filled ribbon through the clusters of the
+ * MOVEMENT categories that were active while it was going on - any
+ * Movement-domain category with an entry dated within (or overlapping)
+ * the orbit entry's own full span, read from `allEntries` so the time
+ * filter never changes which clusters it touches. The time filter still
+ * decides whether the ribbon is drawn at all, since it's only built from
+ * the filtered `entries`, like every other glyph.
+ *   - 2+ touched categories: a Catmull-Rom curve through their cluster
+ *     centers (plus a short tail past each end), starting at the
+ *     category whose matching entry is earliest and then hopping to the
+ *     nearest unvisited center (to keep it from zig-zagging). Each
+ *     stretch between two points gets its own gradient (see AURORA
+ *     COLORS), so the colors blend in visit order even when
+ *     the path doubles back (one gradient across the whole ribbon would
+ *     mis-assign colors there).
+ *   - 1 touched category: an arc hugging the inner (canvas-center) side
+ *     of that cluster, blending the orbit color into that category's.
+ *   - 0 touched: a short arc floating in the open space around the canvas
+ *     center, placed and shaped from the entry's id (stable across
+ *     reloads), in the orbit entry's own color.
+ * Geometry lives in utils/auroraRibbon.ts; colors and the rippled,
+ * drifting look are covered by AURORA COLORS (in the `auroras` memo) and
+ * AURORA LOOK (below). Drawn behind labels and stars, so a star on top of
+ * a ribbon keeps the click.
+ */
+const AURORA_SAMPLES_PER_SEGMENT = 24;
+const AURORA_ARC_SAMPLES = 48;
+const AURORA_HALF_WIDTH_FRACTION = 0.009;
+const AURORA_MIN_HALF_WIDTH = 4;
+const AURORA_MAX_HALF_WIDTH = 9;
+/** Side-to-side weave, as a fraction of the half-width. */
+const AURORA_UNDULATION_FRACTION = 1.6;
+/** One weave per this fraction of the canvas's smaller dimension. */
+const AURORA_WAVELENGTH_FRACTION = 0.065;
+/** Single-category arc: radius (fraction of clusterRadius) and half-sweep (radians). */
+const AURORA_CLUSTER_ARC_RADIUS_FRACTION = 0.85;
+const AURORA_CLUSTER_ARC_HALF_SWEEP = 0.9;
+/** No-category fallback: distance from canvas center, arc radius, and sweep - all seeded per entry within these ranges. */
+const AURORA_FALLBACK_MIN_DISTANCE_FRACTION = 0.04;
+const AURORA_FALLBACK_MAX_DISTANCE_FRACTION = 0.12;
+const AURORA_FALLBACK_ARC_RADIUS_FRACTION = 0.05;
+const AURORA_FALLBACK_MIN_SWEEP = 1.6;
+const AURORA_FALLBACK_MAX_SWEEP = 2.4;
+/**
+ * Multi-category tails: how far (fraction of clusterRadius) the ribbon
+ * runs on past its first and last cluster, so the orbit's own color has
+ * somewhere to live at both ends - see AURORA COLORS.
+ */
+const AURORA_TAIL_FRACTION = 0.6;
+/**
+ * AURORA LOOK: each ribbon is drawn twice through its own pair of SVG
+ * filters - a crisp-ish body and a wide, faint glow under it - and both
+ * start by pushing the ribbon's pixels around with Perlin-style noise
+ * (feTurbulence -> feDisplacementMap), so its edges ripple organically
+ * instead of following the smooth spline exactly. Turbulence is seeded
+ * per entry, so no two ribbons ripple alike.
+ *
+ * DRIFT: the noise FIELD slides slowly back and forth under the ribbon
+ * (an eased offset of the noise, x and y on different periods so the
+ * motion never visibly repeats in lockstep), so the ripples flow along
+ * the edges. The frequency stays fixed on purpose:
+ * animating `baseFrequency` (an earlier version) rescales the whole noise
+ * field around the canvas origin, so a ribbon hundreds of px from it saw
+ * its pattern churn wholesale - a choppy "boiling" rather than a drift,
+ * however long the cycle. Subtle by design: a few px of edge motion,
+ * never enough to move the ribbon off its clusters or over neighboring
+ * stars (which are drawn above it anyway). Left out entirely under
+ * `prefers-reduced-motion`, leaving the same distorted shape, static.
+ */
+const AURORA_TURBULENCE_FREQUENCY = '0.018 0.024';
+const AURORA_TURBULENCE_OCTAVES = 2;
+const AURORA_DISPLACEMENT_SCALE = 14;
+/** How far (px) the noise field slides at the far end of each drift cycle. */
+const AURORA_DRIFT_DISTANCE = 60;
+const AURORA_DRIFT_X_PERIOD_MS = 14000;
+const AURORA_DRIFT_Y_PERIOD_MS = 11000;
+/**
+ * PERFORMANCE: an animated filter is re-rasterized - noise generation
+ * included, since browsers don't cache intermediate filter results -
+ * every time it changes, so the drift's cost is (animated filters on
+ * screen) x (updates per second), and it grows with how many ribbons are
+ * visible at once (all of them, zoomed out). Two things keep that down:
+ *   - ONE shared driver (the AURORA DRIFT DRIVER effect) updates every
+ *     ribbon's noise offset together, at AURORA_DRIFT_FPS rather than the
+ *     display's full rate. The drift moves under 9px/s, so each step is a
+ *     fraction of a pixel of noise shift - no visible stepping.
+ *   - Only the BODY filter is animated. The glow is blurred so far that
+ *     its ripple was invisible, so it's a plain static blur the browser
+ *     can rasterize once and reuse.
+ * If it's still heavy with many ribbons, AURORA_TURBULENCE_OCTAVES (2 ->
+ * 1) is the next knob: it roughly halves the noise cost, at the price of
+ * finer edge detail.
+ */
+const AURORA_DRIFT_FPS = 20;
+/** What every ribbon fades from and to at its ends - see AURORA FADE in the `auroras` memo. */
+const AURORA_FADE_COLOR = 'var(--bg-color)';
+/** Overall ribbon opacity - softer than the 0.8 hollow waves on Spiral/Linear, but well clear of FILTERED_OUT_OPACITY. */
+const AURORA_OPACITY = 0.55;
+/** Body and glow blur (px) - both softer than a plain shape, the glow much wider for an atmospheric halo. */
+const AURORA_SOFT_BLUR = 2;
+const AURORA_GLOW_BLUR = 10;
+const AURORA_GLOW_OPACITY = 0.55;
+/**
+ * Padding (px) around a ribbon's bounds for its filter region - room for
+ * the displacement and the glow's blur, plus the drift distance: sliding
+ * the noise uncovers a strip that wide along the region's top/left edge,
+ * which must stay clear of the ribbon.
+ */
+const AURORA_FILTER_PADDING = 40 + AURORA_DRIFT_DISTANCE;
+
+/**
+ * One AURORA STREAKS ray, in its own frame (x across the ribbon, from
+ * -reach to +reach; y along it): a thin band whose two edges are
+ * quadratic curves bowing sideways by `bow` at the middle (0 = a straight
+ * band). A filled shape rather than a stroked curve on purpose, so its
+ * bounding box always spans its full thickness - which is what the shared
+ * objectBoundingBox fade mask needs to cover all of it.
+ */
+function streakPath({
+  reach,
+  thickness,
+  bow,
+}: {
+  reach: number;
+  thickness: number;
+  bow: number;
+}): string {
+  const half = thickness / 2;
+  // A quadratic's control point sits at twice the peak offset.
+  const control = bow * 2;
+  const f = (value: number) => value.toFixed(2);
+  return (
+    `M${f(-reach)},${f(-half)} Q0,${f(control - half)} ${f(reach)},${f(-half)} ` +
+    `L${f(reach)},${f(half)} Q0,${f(control + half)} ${f(-reach)},${f(half)} Z`
+  );
+}
+
+/** An SVG-id-safe version of an entry id. */
+function svgIdSafe(value: string): string {
+  return value.replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
+/**
+ * AURORA STREAKS: soft rays of light crossing the ribbon - perpendicular
+ * to its local direction, like the vertical rays of a real aurora
+ * curtain - brightest on the ribbon's path and fading to nothing outward
+ * on both sides (one shared mask, `aurora-streak-mask`, fades every streak
+ * along its own length). The aim is a continuous, uneven HAZE, not
+ * countable "legs":
+ *   - CLUSTERED PLACEMENT: cluster centers land along the ribbon at
+ *     exponentially distributed gaps (mean AURORA_STREAK_CLUSTER_GAP_PX),
+ *     so some sit close together and others leave real gaps; each
+ *     cluster scatters a few streaks around its center (Gaussian spread),
+ *     which overlap heavily.
+ *   - LOW OPACITY + HEAVY BLUR: each streak alone is faint; overlapping
+ *     ones build up into denser glow, and the wide blur merges neighbors.
+ *   - PROMINENCE: one skewed random value per streak drives its reach,
+ *     thickness and brightness together, so most are short and faint and
+ *     a few are long and bright - rather than everything mildly varied.
+ *   - ARCHED vs STRAIGHT: about AURORA_STREAK_ARCH_CHANCE of them bow
+ *     gently sideways (a quadratic curve) instead of running straight.
+ *     Both are the same shape - a thin band whose two edges are quadratic
+ *     curves, with a bow of 0 for straight ones - so they share the
+ *     exact same mask, blur, opacity, coloring and drift, and read as one
+ *     effect.
+ * Each streak takes the ribbon's own blended color at its spot
+ * (auroraColorAt in utils/auroraRibbon.ts), so a multi-color ribbon's
+ * haze shifts color along it. All randomness is seeded per entry (stable
+ * across reloads). Drawn inside the ribbon's animated body filter, so the
+ * streaks ripple with the shared drift (and sit still under
+ * `prefers-reduced-motion`) without any animation of their own; they take
+ * no pointer events, so the ribbon's hit area and the stars above are
+ * unaffected.
+ */
+/** Mean gap (px of ribbon length) between cluster centers - exponentially distributed, so gaps vary a lot. */
+const AURORA_STREAK_CLUSTER_GAP_PX = 32;
+/** Streaks per cluster, uniformly in [MIN, MAX]. */
+const AURORA_STREAK_CLUSTER_MIN_SIZE = 1;
+const AURORA_STREAK_CLUSTER_MAX_SIZE = 6;
+/** Standard deviation (px of ribbon length) of a streak's offset from its cluster center. */
+const AURORA_STREAK_CLUSTER_SPREAD_PX = 7;
+/**
+ * Fraction of the ribbon's length (centered) that carries full-strength
+ * streaks; they ease out over the rest, split between the two ends.
+ */
+const AURORA_STREAK_COVERAGE = 0.45;
+/**
+ * PROMINENCE skew: prominence = random^this, so values pile up near 0
+ * (short/faint) with a long tail toward 1 (long/bright).
+ */
+const AURORA_STREAK_PROMINENCE_SKEW = 1.8;
+/** Reach (each side of the path) as a multiple of the ribbon's full half-width, from prominence 0 -> 1 - scaled down only by the COVERAGE envelope. */
+const AURORA_STREAK_MIN_REACH_FACTOR = 1.2;
+const AURORA_STREAK_MAX_REACH_FACTOR = 9;
+const AURORA_STREAK_MIN_REACH_PX = 6;
+const AURORA_STREAK_MIN_THICKNESS = 1.5;
+const AURORA_STREAK_MAX_THICKNESS = 7;
+const AURORA_STREAK_MIN_OPACITY = 0.1;
+const AURORA_STREAK_MAX_OPACITY = 0.45;
+/** Independent +/- jitter (fraction) on each of reach/thickness/brightness, so prominence isn't the whole story. */
+const AURORA_STREAK_JITTER = 0.25;
+/** Share of streaks drawn arched, and their bow range as a fraction of reach (sign random). */
+const AURORA_STREAK_ARCH_CHANCE = 0.4;
+const AURORA_STREAK_MIN_BOW = 0.08;
+const AURORA_STREAK_MAX_BOW = 0.22;
+/**
+ * Extra blur (px) on the streaks alone, on top of the body filter's
+ * AURORA_SOFT_BLUR they share with the ribbon - wide, so neighbors merge
+ * into haze. A static filter, so it adds no animation of its own.
+ */
+const AURORA_STREAK_BLUR = 6;
+/**
+ * The ribbon's hit area: its own shape PLUS an invisible stroke this wide
+ * around it, so it stays easy to hover/click now that the visible ribbon
+ * is thin (same width as the hollow waves' hit stroke on Spiral/Linear).
+ */
+const AURORA_HIT_STROKE_WIDTH = HOLLOW_WAVE_HIT_STROKE_WIDTH;
 
 /**
  * Tiny deterministic string hash (djb2 variant) -> 32-bit seed.
@@ -319,6 +571,7 @@ function randomPointInDisc(random: () => number, radius: number) {
 
 export default function StarMap({
   entries,
+  allEntries,
   hasAnyEntries,
   categories,
   onStarClick,
@@ -330,7 +583,6 @@ export default function StarMap({
   resetViewSignal,
   topOffset,
   isEditMode,
-  tooltipStackTop,
 }: StarMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -546,9 +798,12 @@ export default function StarMap({
     const zoomBehavior = zoomBehaviorRef.current;
     if (!svgNode || !zoomBehavior || !expandedEntryId) return;
 
-    const star = stars.find(
-      candidate => candidate.entry.id === expandedEntryId
-    );
+    // A star/ring, or an aurora's own midpoint (see AURORA RIBBONS).
+    const star =
+      stars.find(candidate => candidate.entry.id === expandedEntryId) ??
+      auroras
+        .filter(candidate => candidate.entry.id === expandedEntryId)
+        .map(candidate => candidate.midpoint)[0];
     if (!star) return;
 
     const { width, height } = size;
@@ -684,7 +939,14 @@ export default function StarMap({
     const { width, height } = size;
     if (width === 0 || height === 0) return [];
 
-    return entries.map(entry => {
+    // Hollow RANGE entries are auroras, not stars - see AURORA RIBBONS.
+    // Hollow single-date entries stay here (same seeded position, drawn
+    // as a ring instead of a dot - see the `hollow` flag below).
+    const starEntries = entries.filter(
+      entry =>
+        !entry.endTimestamp || getVisualStyle(entry, categories) === 'solid'
+    );
+    return starEntries.map(entry => {
       const center = categoryCenters[entry.activityType] ?? {
         x: width / 2,
         y: height / 2,
@@ -701,15 +963,349 @@ export default function StarMap({
         y: center.y + offset.y,
         radius,
         color: getActivityColor(entry.activityType),
+        hollow: getVisualStyle(entry, categories) === 'hollow',
       };
     });
-    // `categories` is otherwise unused here (star position/radius doesn't
-    // depend on it) - it's still a dependency so a ManageCategoriesModal
-    // recolor (which never touches `entries`) recomputes each star's
-    // `color` via getActivityColor immediately, instead of leaving stale
-    // colors on screen until something else forces `stars` to recompute.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `categories` is also what makes a ManageCategoriesModal recolor/
+    // re-domain (which never touches `entries`) recompute each star's
+    // color and solid/hollow style immediately.
   }, [entries, categoryCenters, size, clusterRadius, categories]);
+
+  // ─── Aurora ribbons ─── see the AURORA RIBBONS comment at the top.
+  const auroras = useMemo(() => {
+    const { width, height } = size;
+    if (width === 0 || height === 0) return [];
+    const minDimension = Math.min(width, height);
+    const halfWidth = Math.min(
+      AURORA_MAX_HALF_WIDTH,
+      Math.max(AURORA_MIN_HALF_WIDTH, minDimension * AURORA_HALF_WIDTH_FRACTION)
+    );
+    const movementCategoryIds = new Set(
+      categories
+        .filter(category => getCategoryDomain(category) === 'Movement')
+        .map(category => category.id)
+    );
+
+    return entries
+      .filter(
+        entry =>
+          entry.endTimestamp && getVisualStyle(entry, categories) === 'hollow'
+      )
+      .map(entry => {
+        const visited = orderAuroraCategories(
+          entry,
+          allEntries,
+          movementCategoryIds,
+          categoryCenters
+        );
+
+        const random = mulberry32(hashStringToSeed(`${entry.id}:aurora`));
+        const phase = random() * Math.PI * 2;
+
+        // Centerline + where each colored stretch starts/ends on it.
+        // AURORA COLORS: the orbit entry's OWN category color anchors the
+        // gradient - both ends, and the middle of every stretch between
+        // two clusters - with each touched movement category's color
+        // surfacing where the ribbon crosses its cluster. So it reads as
+        // "this orbit category" first, woven with what it touched.
+        const orbitColor = getActivityColor(entry.activityType);
+        let centerline: Point[];
+        let stretches: { from: number; to: number; colors: string[] }[];
+        if (visited.length >= 2) {
+          const centers = visited.map(id => categoryCenters[id]);
+          // Tails past the first/last cluster, pointing away from the
+          // neighboring one - where the orbit color sits at each end.
+          const tail = (end: Point, neighbor: Point): Point => {
+            const dx = end.x - neighbor.x;
+            const dy = end.y - neighbor.y;
+            const length = Math.hypot(dx, dy) || 1;
+            const reach = clusterRadius * AURORA_TAIL_FRACTION;
+            return {
+              x: end.x + (dx / length) * reach,
+              y: end.y + (dy / length) * reach,
+            };
+          };
+          const anchors = [
+            tail(centers[0], centers[1]),
+            ...centers,
+            tail(centers[centers.length - 1], centers[centers.length - 2]),
+          ];
+          centerline = sampleCatmullRom(anchors, AURORA_SAMPLES_PER_SEGMENT);
+          const clusterColors = visited.map(id => getActivityColor(id));
+          stretches = anchors.slice(0, -1).map((_, k) => ({
+            from: k * AURORA_SAMPLES_PER_SEGMENT,
+            to: (k + 1) * AURORA_SAMPLES_PER_SEGMENT,
+            colors:
+              k === 0
+                ? [orbitColor, clusterColors[0]]
+                : k === anchors.length - 2
+                  ? [clusterColors[k - 1], orbitColor]
+                  : [clusterColors[k - 1], orbitColor, clusterColors[k]],
+          }));
+        } else if (visited.length === 1) {
+          const center = categoryCenters[visited[0]];
+          const inward = center.angle + Math.PI;
+          centerline = sampleArc(
+            center,
+            clusterRadius * AURORA_CLUSTER_ARC_RADIUS_FRACTION,
+            inward - AURORA_CLUSTER_ARC_HALF_SWEEP,
+            inward + AURORA_CLUSTER_ARC_HALF_SWEEP,
+            AURORA_ARC_SAMPLES
+          );
+          stretches = [
+            {
+              from: 0,
+              to: AURORA_ARC_SAMPLES,
+              colors: [orbitColor, getActivityColor(visited[0]), orbitColor],
+            },
+          ];
+        } else {
+          const distance =
+            minDimension *
+            (AURORA_FALLBACK_MIN_DISTANCE_FRACTION +
+              random() *
+                (AURORA_FALLBACK_MAX_DISTANCE_FRACTION -
+                  AURORA_FALLBACK_MIN_DISTANCE_FRACTION));
+          const direction = random() * Math.PI * 2;
+          const sweep =
+            AURORA_FALLBACK_MIN_SWEEP +
+            random() * (AURORA_FALLBACK_MAX_SWEEP - AURORA_FALLBACK_MIN_SWEEP);
+          const startAngle = random() * Math.PI * 2;
+          centerline = sampleArc(
+            {
+              x: width / 2 + Math.cos(direction) * distance,
+              y: height / 2 + Math.sin(direction) * distance,
+            },
+            minDimension * AURORA_FALLBACK_ARC_RADIUS_FRACTION,
+            startAngle,
+            startAngle + sweep,
+            AURORA_ARC_SAMPLES
+          );
+          stretches = [
+            { from: 0, to: AURORA_ARC_SAMPLES, colors: [orbitColor] },
+          ];
+        }
+
+        // AURORA FADE: every ribbon starts and ends in the theme's
+        // background color, so it fades in from the canvas and back out
+        // instead of starting/ending on a solid hue - and a one-color
+        // ribbon reads as a glow (background -> color -> background)
+        // rather than a flat wash. The first stretch gains the leading
+        // stop and the last the trailing one (the same stretch when
+        // there's only one). A CSS variable, so it follows the theme.
+        stretches[0].colors = [AURORA_FADE_COLOR, ...stretches[0].colors];
+        const lastStretch = stretches[stretches.length - 1];
+        lastStretch.colors = [...lastStretch.colors, AURORA_FADE_COLOR];
+
+        const ribbon = buildRibbon(centerline, {
+          halfWidth,
+          undulationAmplitude: halfWidth * AURORA_UNDULATION_FRACTION,
+          wavelength: minDimension * AURORA_WAVELENGTH_FRACTION,
+          phase,
+        });
+        const idBase = `aurora-${svgIdSafe(entry.id)}`;
+
+        // AURORA STREAKS - see that comment at the top.
+        const streakRandom = mulberry32(
+          hashStringToSeed(`${entry.id}:streaks`)
+        );
+        const streaks: {
+          x: number;
+          y: number;
+          angle: number;
+          reach: number;
+          thickness: number;
+          /** Sideways bow (px) at the streak's middle - 0 for a straight one. */
+          bow: number;
+          color: string;
+          opacity: number;
+        }[] = [];
+        // Each sample's position along the ribbon (0-1, by arc length),
+        // for the coverage envelope below.
+        const arcLengths = [0];
+        for (let k = 1; k < ribbon.centers.length; k++) {
+          arcLengths.push(
+            arcLengths[k - 1] +
+              Math.hypot(
+                ribbon.centers[k].x - ribbon.centers[k - 1].x,
+                ribbon.centers[k].y - ribbon.centers[k - 1].y
+              )
+          );
+        }
+        const totalLength = arcLengths[arcLengths.length - 1] || 1;
+        const edgeFraction = (1 - AURORA_STREAK_COVERAGE) / 2;
+        const between = (min: number, max: number, t: number) =>
+          min + (max - min) * t;
+        const jittered = (value: number) =>
+          value * (1 + (streakRandom() * 2 - 1) * AURORA_STREAK_JITTER);
+        // A standard-normal draw (Box-Muller) from the seeded generator.
+        const gaussian = () =>
+          Math.sqrt(-2 * Math.log(1 - streakRandom())) *
+          Math.cos(2 * Math.PI * streakRandom());
+
+        // CLUSTERED PLACEMENT: exponential gaps between cluster centers,
+        // then a Gaussian scatter of streaks around each.
+        const positions: number[] = [];
+        for (
+          let clusterAt =
+            -Math.log(1 - streakRandom()) * AURORA_STREAK_CLUSTER_GAP_PX;
+          clusterAt < totalLength;
+          clusterAt +=
+            -Math.log(1 - streakRandom()) * AURORA_STREAK_CLUSTER_GAP_PX
+        ) {
+          const size = Math.round(
+            between(
+              AURORA_STREAK_CLUSTER_MIN_SIZE,
+              AURORA_STREAK_CLUSTER_MAX_SIZE,
+              streakRandom()
+            )
+          );
+          for (let n = 0; n < size; n++) {
+            const at = clusterAt + gaussian() * AURORA_STREAK_CLUSTER_SPREAD_PX;
+            if (at > 0 && at < totalLength) positions.push(at);
+          }
+        }
+
+        for (const at of positions) {
+          // The sample at (or just before) this length, interpolated
+          // toward the next one for the exact spot.
+          let low = 0;
+          let high = arcLengths.length - 1;
+          while (high - low > 1) {
+            const mid = (low + high) >> 1;
+            if (arcLengths[mid] <= at) low = mid;
+            else high = mid;
+          }
+          const span = arcLengths[high] - arcLengths[low] || 1;
+          const t = (at - arcLengths[low]) / span;
+          const center = {
+            x: between(ribbon.centers[low].x, ribbon.centers[high].x, t),
+            y: between(ribbon.centers[low].y, ribbon.centers[high].y, t),
+          };
+          const normal = ribbon.normals[low];
+
+          // COVERAGE envelope: 1 across the central AURORA_STREAK_COVERAGE
+          // of the ribbon, easing to 0 over the remaining stretch at each
+          // end.
+          const along = at / totalLength;
+          const envelope =
+            edgeFraction <= 0
+              ? 1
+              : d3.easeSinInOut(
+                  Math.min(1, along / edgeFraction, (1 - along) / edgeFraction)
+                );
+
+          const stretch =
+            stretches.find(({ from, to }) => low >= from && low <= to) ??
+            stretches[stretches.length - 1];
+          // Only the COLOR is taken from the gradient - its end fade is
+          // replaced by the coverage envelope above.
+          const { color } = auroraColorAt(
+            center,
+            centerline[stretch.from],
+            centerline[stretch.to],
+            stretch.colors,
+            AURORA_FADE_COLOR
+          );
+
+          // PROMINENCE drives reach/thickness/brightness together. All
+          // random numbers are drawn before any skip, so every other
+          // streak's values stay put.
+          const prominence = Math.pow(
+            streakRandom(),
+            AURORA_STREAK_PROMINENCE_SKEW
+          );
+          const reach = jittered(
+            Math.max(
+              AURORA_STREAK_MIN_REACH_PX,
+              halfWidth *
+                between(
+                  AURORA_STREAK_MIN_REACH_FACTOR,
+                  AURORA_STREAK_MAX_REACH_FACTOR,
+                  prominence
+                )
+            )
+          );
+          const thickness = jittered(
+            between(
+              AURORA_STREAK_MIN_THICKNESS,
+              AURORA_STREAK_MAX_THICKNESS,
+              prominence
+            )
+          );
+          const brightness = Math.min(
+            1,
+            jittered(
+              between(
+                AURORA_STREAK_MIN_OPACITY,
+                AURORA_STREAK_MAX_OPACITY,
+                prominence
+              )
+            )
+          );
+          const arched = streakRandom() < AURORA_STREAK_ARCH_CHANCE;
+          const bowFraction = between(
+            AURORA_STREAK_MIN_BOW,
+            AURORA_STREAK_MAX_BOW,
+            streakRandom()
+          );
+          const bowSign = streakRandom() < 0.5 ? -1 : 1;
+          if (envelope <= 0.02) continue;
+
+          const scaledReach = reach * envelope;
+          streaks.push({
+            x: center.x,
+            y: center.y,
+            angle: (Math.atan2(normal.y, normal.x) * 180) / Math.PI,
+            reach: scaledReach,
+            thickness,
+            bow: arched ? bowSign * bowFraction * scaledReach : 0,
+            color,
+            opacity: brightness * envelope,
+          });
+        }
+
+        // Filter region in canvas px (not the default % of the bounding
+        // box, which would clip a near-horizontal ribbon's ripple/glow),
+        // covering the streaks' tips too.
+        const streakTips = streaks.flatMap(({ x, y, angle, reach }) => {
+          const radians = (angle * Math.PI) / 180;
+          const ox = Math.cos(radians) * reach;
+          const oy = Math.sin(radians) * reach;
+          return [
+            { x: x + ox, y: y + oy },
+            { x: x - ox, y: y - oy },
+          ];
+        });
+        const bounds = [...ribbon.left, ...ribbon.right, ...streakTips];
+        const xs = bounds.map(point => point.x);
+        const ys = bounds.map(point => point.y);
+        const minX = Math.min(...xs) - AURORA_FILTER_PADDING;
+        const minY = Math.min(...ys) - AURORA_FILTER_PADDING;
+
+        return {
+          entry,
+          path: ribbonPath(ribbon),
+          midpoint: ribbon.midpoint,
+          filterIdBase: idBase,
+          filterRegion: {
+            x: minX,
+            y: minY,
+            width: Math.max(...xs) + AURORA_FILTER_PADDING - minX,
+            height: Math.max(...ys) + AURORA_FILTER_PADDING - minY,
+          },
+          turbulenceSeed: Math.floor(random() * 1000),
+          streaks,
+          segments: stretches.map(({ from, to, colors }, index) => ({
+            path: ribbonPath(ribbon, from, to),
+            gradientId: `${idBase}-${index}`,
+            start: centerline[from],
+            end: centerline[to],
+            colors,
+          })),
+        };
+      });
+  }, [entries, allEntries, categories, categoryCenters, size, clusterRadius]);
 
   const isReady = size.width > 0 && size.height > 0;
 
@@ -748,6 +1344,63 @@ export default function StarMap({
   // panel, and opening/closing a panel doesn't touch this state, so the
   // tooltip layers on top of the existing click/highlight behavior rather
   // than interacting with it at all.
+  // AURORA LOOK's drift is skipped under `prefers-reduced-motion` - kept
+  // in state (and followed live) so toggling the OS setting applies
+  // without a reload.
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(
+    () =>
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  );
+  useEffect(() => {
+    const query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    if (!query) return;
+    const update = () => setPrefersReducedMotion(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  /**
+   * AURORA DRIFT DRIVER - the one loop that animates every ribbon (see
+   * AURORA LOOK's DRIFT and PERFORMANCE). Writes the same offset straight
+   * onto each body filter's tagged <feOffset> - DOM attributes, not React
+   * state, so a tick never re-renders StarMap. Each axis eases there and
+   * back as `(1 - cos) / 2`, which has no corners at the turnarounds.
+   * requestAnimationFrame already pauses in background tabs; under
+   * `prefers-reduced-motion` the loop doesn't run and the noise sits at
+   * its resting offset.
+   */
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const setOffset = (dx: number, dy: number) => {
+      svg.querySelectorAll('feOffset[data-aurora-drift]').forEach(node => {
+        node.setAttribute('dx', dx.toFixed(2));
+        node.setAttribute('dy', dy.toFixed(2));
+      });
+    };
+    if (prefersReducedMotion) {
+      setOffset(0, 0);
+      return;
+    }
+
+    const ease = (now: number, period: number) =>
+      (AURORA_DRIFT_DISTANCE * (1 - Math.cos((2 * Math.PI * now) / period))) /
+      2;
+    let frame = 0;
+    let lastTick = -Infinity;
+    const tick = (now: number) => {
+      frame = requestAnimationFrame(tick);
+      if (now - lastTick < 1000 / AURORA_DRIFT_FPS) return;
+      lastTick = now;
+      setOffset(
+        ease(now, AURORA_DRIFT_X_PERIOD_MS),
+        ease(now, AURORA_DRIFT_Y_PERIOD_MS)
+      );
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [prefersReducedMotion]);
+
   const [hovered, setHovered] = useState<{
     entry: Entry;
     x: number;
@@ -759,21 +1412,20 @@ export default function StarMap({
     // above. z-0 is the base layer: Layout.tsx's navbar, Constellation's
     // header text, FilterBar, and the sidebar overlay all render above
     // this with their own higher z-index.
-    <div ref={containerRef} className="fixed inset-0 z-0">
+    <div
+      ref={containerRef}
+      className="canvas-vignette-bg canvas-texture fixed inset-0 z-0"
+    >
       <svg
         ref={svgRef}
         width={size.width}
         height={size.height}
-        // canvas-vignette-bg (see index.css): a plain CSS background, not
-        // an SVG <radialGradient>/<rect> pair (which this used to paint
-        // itself) - so this canvas's vignette is generated by the EXACT
-        // same code path as Layout.tsx's shell/navbar and
-        // LinearTimeline.tsx's/SpiralTimeline.tsx's own canvases, instead
-        // of a second, separately-defined gradient that could (and did:
-        // SVG's objectBoundingBox-unit gradient doesn't map to CSS's
-        // radial-gradient() the same way) drift out of visual sync with
-        // theirs. See that class's own comment in index.css.
-        className="canvas-vignette-bg cursor-grab active:cursor-grabbing"
+        // Transparent: the vignette (canvas-vignette-bg, a plain CSS
+        // background shared with Layout.tsx and the other two canvases
+        // rather than an SVG gradient that could drift out of sync) and
+        // the CANVAS TEXTURE layer both live on the container div above,
+        // so the texture can sit between them - see index.css.
+        className="cursor-grab active:cursor-grabbing"
       >
         <defs>
           {/*
@@ -791,6 +1443,99 @@ export default function StarMap({
           >
             <feGaussianBlur stdDeviation="3" />
           </filter>
+          {/*
+           * AURORA LOOK - per ribbon, a body filter (noise displacement
+           * for rippled edges, then a soft blur) and a static glow filter
+           * (a wide blur) - see PERFORMANCE for why only the body moves.
+           */}
+          {auroras.flatMap(({ filterIdBase, filterRegion, turbulenceSeed }) => [
+            <filter
+              key={`${filterIdBase}-body`}
+              id={`${filterIdBase}-body`}
+              filterUnits="userSpaceOnUse"
+              {...filterRegion}
+            >
+              <feTurbulence
+                type="fractalNoise"
+                baseFrequency={AURORA_TURBULENCE_FREQUENCY}
+                numOctaves={AURORA_TURBULENCE_OCTAVES}
+                seed={turbulenceSeed}
+                result="staticNoise"
+              />
+              {/* DRIFT - moved by the shared AURORA DRIFT DRIVER, never per ribbon. */}
+              <feOffset
+                data-aurora-drift=""
+                in="staticNoise"
+                dx={0}
+                dy={0}
+                result="noise"
+              />
+              <feDisplacementMap
+                in="SourceGraphic"
+                in2="noise"
+                scale={AURORA_DISPLACEMENT_SCALE}
+                xChannelSelector="R"
+                yChannelSelector="G"
+                result="rippled"
+              />
+              <feGaussianBlur in="rippled" stdDeviation={AURORA_SOFT_BLUR} />
+            </filter>,
+            // Static - see PERFORMANCE above.
+            <filter
+              key={`${filterIdBase}-glow`}
+              id={`${filterIdBase}-glow`}
+              filterUnits="userSpaceOnUse"
+              {...filterRegion}
+            >
+              <feGaussianBlur stdDeviation={AURORA_GLOW_BLUR} />
+            </filter>,
+          ])}
+          {/*
+           * AURORA STREAKS' shared fade: in each streak's own (unrotated)
+           * box, transparent at both ends, solid at the middle - where
+           * the streak crosses the ribbon's path.
+           */}
+          <linearGradient id="aurora-streak-fade" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="white" stopOpacity={0} />
+            <stop offset="0.5" stopColor="white" stopOpacity={1} />
+            <stop offset="1" stopColor="white" stopOpacity={0} />
+          </linearGradient>
+          <filter
+            id="aurora-streak-blur"
+            x="-20%"
+            y="-20%"
+            width="140%"
+            height="140%"
+          >
+            <feGaussianBlur stdDeviation={AURORA_STREAK_BLUR} />
+          </filter>
+          <mask id="aurora-streak-mask" maskContentUnits="objectBoundingBox">
+            <rect width={1} height={1} fill="url(#aurora-streak-fade)" />
+          </mask>
+          {/* One gradient per ribbon stretch, laid along that stretch's own two ends - see AURORA COLORS. */}
+          {auroras.flatMap(({ segments }) =>
+            segments.map(({ gradientId, start, end, colors }) => (
+              <linearGradient
+                key={gradientId}
+                id={gradientId}
+                gradientUnits="userSpaceOnUse"
+                x1={start.x}
+                y1={start.y}
+                x2={end.x}
+                y2={end.y}
+              >
+                {colors.map((color, index) => (
+                  <stop
+                    key={index}
+                    offset={
+                      colors.length === 1 ? 0 : index / (colors.length - 1)
+                    }
+                    stopColor={color}
+                  />
+                ))}
+              </linearGradient>
+            ))
+          )}
         </defs>
 
         {/*
@@ -799,6 +1544,105 @@ export default function StarMap({
          * together (cluster labels + stars) lives inside it.
          */}
         <g ref={zoomLayerRef}>
+          {/*
+           * AURORA RIBBONS - see that comment at the top. Behind labels
+           * and stars. The colored stretches sit in ONE group carrying
+           * the opacity, so where two stretches meet they don't double
+           * up into a darker seam. The opened highlight follows the
+           * stars' recipe: a blurred highlight-colored glow behind, a
+           * crisp thin outline on top.
+           */}
+          {isReady &&
+            auroras.map(({ entry, path, segments, filterIdBase, streaks }) => {
+              const isOpened = openedEntryIdSet.has(entry.id);
+              const isFocused = entry.id === expandedEntryId;
+              const isFilteredOut = !activeCategorySet.has(entry.activityType);
+              const fills = segments.map(segment => (
+                <path
+                  key={segment.gradientId}
+                  d={segment.path}
+                  fill={`url(#${segment.gradientId})`}
+                />
+              ));
+              return (
+                <g
+                  key={entry.id}
+                  style={{ opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1 }}
+                  className="transition-opacity duration-200"
+                >
+                  {isOpened && (
+                    <path
+                      d={path}
+                      fill="none"
+                      stroke={OPENED_HIGHLIGHT_COLOR}
+                      strokeWidth={
+                        (isFocused ? FOCUSED_GLOW_STROKE_WIDTH : 4) * 2
+                      }
+                      strokeOpacity={isFocused ? FOCUSED_GLOW_OPACITY : 0.6}
+                      strokeLinejoin="round"
+                      filter="url(#opened-star-glow)"
+                      className="pointer-events-none"
+                    />
+                  )}
+                  <g opacity={AURORA_OPACITY} className="pointer-events-none">
+                    <g
+                      opacity={AURORA_GLOW_OPACITY}
+                      filter={`url(#${filterIdBase}-glow)`}
+                    >
+                      {fills}
+                    </g>
+                    <g filter={`url(#${filterIdBase}-body)`}>
+                      {fills}
+                      {/* AURORA STREAKS - see that comment at the top. */}
+                      <g filter="url(#aurora-streak-blur)">
+                        {streaks.map((streak, index) => (
+                          <path
+                            key={index}
+                            d={streakPath(streak)}
+                            fill={streak.color}
+                            opacity={streak.opacity}
+                            mask="url(#aurora-streak-mask)"
+                            transform={`translate(${streak.x.toFixed(2)},${streak.y.toFixed(2)}) rotate(${streak.angle.toFixed(1)})`}
+                          />
+                        ))}
+                      </g>
+                    </g>
+                  </g>
+                  {isOpened && (
+                    <path
+                      d={path}
+                      fill="none"
+                      stroke={OPENED_HIGHLIGHT_COLOR}
+                      strokeWidth={isFocused ? FOCUSED_RING_STROKE_WIDTH : 1.5}
+                      strokeLinejoin="round"
+                      className="pointer-events-none"
+                    />
+                  )}
+                  {/* The whole ribbon as one hit target, over the blurred fills - widened by an invisible stroke (AURORA_HIT_STROKE_WIDTH). */}
+                  <path
+                    d={path}
+                    fill="transparent"
+                    stroke="transparent"
+                    strokeWidth={AURORA_HIT_STROKE_WIDTH}
+                    strokeLinejoin="round"
+                    className="cursor-pointer"
+                    onClick={() => onStarClick(entry)}
+                    onMouseEnter={event =>
+                      setHovered({ entry, x: event.clientX, y: event.clientY })
+                    }
+                    onMouseMove={event =>
+                      setHovered(current =>
+                        current && current.entry.id === entry.id
+                          ? { ...current, x: event.clientX, y: event.clientY }
+                          : current
+                      )
+                    }
+                    onMouseLeave={() => setHovered(null)}
+                  />
+                </g>
+              );
+            })}
+
           {/*
            * ────────────────────────────────────────────────────────────
            * LABEL POSITIONING: OUTSIDE THE CLUSTER, NOT AT ITS CENTER
@@ -841,7 +1685,11 @@ export default function StarMap({
               );
             })}
 
-          {stars.map(({ entry, x, y, radius, color }) => {
+          {stars.map(({ entry, x, y, radius: starRadius, color, hollow }) => {
+            // A hollow single-date entry is a ring (see RING_RADIUS) at
+            // the same seeded spot a star would take; everything else
+            // here - highlight, hover, click - is shared.
+            const radius = hollow ? RING_RADIUS : starRadius;
             const isOpened = openedEntryIdSet.has(entry.id);
             // FOCUSED ENTRY: the one the sidebar's FocusedEntryView is
             // showing gets a brighter opened highlight - see
@@ -879,10 +1727,10 @@ export default function StarMap({
                   cx={x}
                   cy={y}
                   r={radius}
-                  fill={color}
+                  fill={hollow ? 'var(--bg-color)' : color}
                   stroke={color}
-                  strokeOpacity={0.35}
-                  strokeWidth={4}
+                  strokeOpacity={hollow ? 1 : 0.35}
+                  strokeWidth={hollow ? HOLLOW_POINT_STROKE_WIDTH : 4}
                   className="cursor-pointer"
                   onClick={() => onStarClick(entry)}
                   // Same hover handlers (and the EDIT: no more native
@@ -941,7 +1789,6 @@ export default function StarMap({
           sidebarWidth={sidebarWidth}
           sidebarSide={sidebarSide}
           editModeBannerVisible={isEditMode}
-          stackTop={tooltipStackTop}
         />
       )}
     </div>

@@ -41,7 +41,7 @@
  * them meant actually overwriting the saved category each time, with no
  * way to back out short of picking the old color again from memory.
  *
- * Edits now live in `drafts` - a plain `{ [categoryId]: { name, color } }`
+ * Edits now live in `drafts` - a plain `{ [categoryId]: { name, color, domain } }`
  * map, seeded from the last-persisted `categories` snapshot every time the
  * modal opens (see the `isOpen` effect below) and otherwise touched by
  * NOTHING but this component's own handlers. Every row reads FROM `drafts`
@@ -77,7 +77,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Entry } from '../types/Entry';
-import { Category } from '../types/Category';
+import CategoryColorPicker from './CategoryColorPicker';
+import {
+  Category,
+  DOMAINS,
+  Domain,
+  getCategoryDomain,
+} from '../types/Category';
 import {
   loadCategories,
   updateCategory,
@@ -89,6 +95,16 @@ import {
 interface CategoryDraft {
   name: string;
   color: string;
+  domain: Domain;
+}
+
+/** A category's persisted values in draft shape - the "original" undo/commit diff against. */
+function toDraft(category: Category): CategoryDraft {
+  return {
+    name: category.name,
+    color: category.color,
+    domain: getCategoryDomain(category),
+  };
 }
 
 /** How many golden-angle "Suggestions" swatches the expanded picker offers per category. */
@@ -147,10 +163,7 @@ export default function ManageCategoriesModal({
     setCategories(fresh);
     setDrafts(
       Object.fromEntries(
-        fresh.map(category => [
-          category.id,
-          { name: category.name, color: category.color },
-        ])
+        fresh.map(category => [category.id, toDraft(category)])
       )
     );
     setOpenSwatchId(null);
@@ -172,9 +185,15 @@ export default function ManageCategoriesModal({
       if (!draft) continue;
 
       const name = draft.name.trim() || category.name;
-      const updates: Partial<Pick<Category, 'name' | 'color'>> = {};
+      const updates: Partial<Pick<Category, 'name' | 'color' | 'domain'>> = {};
       if (name !== category.name) updates.name = name;
       if (draft.color !== category.color) updates.color = draft.color;
+      // Compared against the RESOLVED domain, so a legacy category with no
+      // stored domain isn't rewritten just for opening the modal - only an
+      // actual toggle persists one.
+      if (draft.domain !== getCategoryDomain(category)) {
+        updates.domain = draft.domain;
+      }
 
       if (Object.keys(updates).length > 0) {
         updateCategory(category.id, updates);
@@ -278,18 +297,23 @@ export default function ManageCategoriesModal({
     }));
   };
 
-  /**
-   * Resets just this ONE category's draft color back to its last-persisted
-   * value - the per-row undo button below. Leaves that category's own
-   * draft NAME, and every other category's draft entirely, untouched.
-   */
-  const handleRevertColor = (categoryId: string) => {
-    const original = categories.find(category => category.id === categoryId);
-    if (!original) return;
+  /** Domain toggle - stages the draft only, see the top-of-file comment. */
+  const handleDomainChange = (categoryId: string, domain: Domain) => {
     setDrafts(prev => ({
       ...prev,
-      [categoryId]: { ...prev[categoryId], color: original.color },
+      [categoryId]: { ...prev[categoryId], domain },
     }));
+  };
+
+  /**
+   * Resets just this ONE category's draft (name, color, and domain) back to
+   * its last-persisted values - the per-row undo button below. Every other
+   * category's draft is left untouched.
+   */
+  const handleRevertRow = (categoryId: string) => {
+    const original = categories.find(category => category.id === categoryId);
+    if (!original) return;
+    setDrafts(prev => ({ ...prev, [categoryId]: toDraft(original) }));
   };
 
   const handleDelete = (category: Category) => {
@@ -363,16 +387,17 @@ export default function ManageCategoriesModal({
             ) : (
               <div className="space-y-3">
                 {categories.map(category => {
-                  const draft = drafts[category.id] ?? {
-                    name: category.name,
-                    color: category.color,
-                  };
+                  const original = toDraft(category);
+                  const draft = drafts[category.id] ?? original;
                   const entryCount = entries.filter(
                     entry => entry.activityType === category.id
                   ).length;
                   const canDelete = entryCount === 0;
                   const isSwatchOpen = openSwatchId === category.id;
-                  const hasUnsavedColor = draft.color !== category.color;
+                  const hasUnsavedChanges =
+                    draft.name !== original.name ||
+                    draft.color !== original.color ||
+                    draft.domain !== original.domain;
 
                   // "In use" group - every OTHER category's own draft color
                   // (what it'll actually be once Done is clicked), deduped
@@ -411,17 +436,17 @@ export default function ManageCategoriesModal({
                           style={{ backgroundColor: draft.color }}
                         />
 
-                        {/* Per-category undo - reverts ONLY this category's staged color, see handleRevertColor. */}
+                        {/* Per-category undo - reverts ONLY this category's staged name/color/domain, see handleRevertRow. */}
                         <button
                           type="button"
-                          onClick={() => handleRevertColor(category.id)}
-                          disabled={!hasUnsavedColor}
+                          onClick={() => handleRevertRow(category.id)}
+                          disabled={!hasUnsavedChanges}
                           title={
-                            hasUnsavedColor
-                              ? 'Revert to saved color'
-                              : 'No unsaved color change'
+                            hasUnsavedChanges
+                              ? 'Revert unsaved changes'
+                              : 'No unsaved changes'
                           }
-                          aria-label={`Revert ${category.name} to its saved color`}
+                          aria-label={`Revert ${category.name} to its saved values`}
                           className="flex-shrink-0 text-[var(--text-muted-color)] transition-colors hover:text-[var(--accent-color)] disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-[var(--text-muted-color)]"
                         >
                           <svg
@@ -453,8 +478,38 @@ export default function ManageCategoriesModal({
                             }
                           }}
                           aria-label={`Rename ${category.name}`}
-                          className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-1.5 text-sm text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
+                          className="block min-w-0 flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-1.5 text-sm text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                         />
+
+                        {/* Domain toggle - one segment per DOMAINS entry, staged in `drafts` like name/color. */}
+                        <div
+                          role="radiogroup"
+                          aria-label={`Domain for ${category.name}`}
+                          className="flex flex-shrink-0 gap-0.5 rounded-md bg-[var(--field-tint-1)] p-0.5"
+                        >
+                          {DOMAINS.map(domain => {
+                            const isSelected = draft.domain === domain.id;
+                            return (
+                              <button
+                                key={domain.id}
+                                type="button"
+                                role="radio"
+                                aria-checked={isSelected}
+                                title={domain.description}
+                                onClick={() =>
+                                  handleDomainChange(category.id, domain.id)
+                                }
+                                className={`rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors ${
+                                  isSelected
+                                    ? 'bg-[var(--accent-color)] text-[var(--accent-foreground-color)]'
+                                    : 'text-[var(--text-muted-color)] hover:text-[var(--text-color)]'
+                                }`}
+                              >
+                                {domain.label}
+                              </button>
+                            );
+                          })}
+                        </div>
 
                         <span className="flex-shrink-0 text-xs text-[var(--text-muted-color)]">
                           {entryCount} {entryCount === 1 ? 'entry' : 'entries'}
@@ -489,73 +544,20 @@ export default function ManageCategoriesModal({
                       </div>
 
                       {isSwatchOpen && (
-                        <div className="ml-9 space-y-2.5 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] p-3">
-                          <ColorSwatchGroup
-                            label="Current"
-                            colors={[category.color]}
-                            selectedColor={draft.color}
-                            onPick={color =>
-                              handleColorPick(category.id, color)
-                            }
-                          />
-
-                          {inUseColors.length > 0 && (
-                            <ColorSwatchGroup
-                              label="In use"
-                              colors={inUseColors}
-                              selectedColor={draft.color}
-                              onPick={color =>
-                                handleColorPick(category.id, color)
-                              }
-                            />
-                          )}
-
-                          <ColorSwatchGroup
-                            label="Suggestions"
-                            colors={suggestedColors}
-                            selectedColor={draft.color}
-                            onPick={color =>
-                              handleColorPick(category.id, color)
-                            }
-                          />
-
-                          <div>
-                            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-                              Custom
-                            </p>
-                            {/*
-                             * Full-freedom escape hatch beyond the curated
-                             * options above - a native <input type="color">
-                             * stacked (opacity-0) over a conic-gradient
-                             * "color wheel" icon, so the swatch READS as
-                             * "pick anything" rather than one more solid
-                             * color option. Gradient/multi-color category
-                             * appearance is intentionally NOT offered here -
-                             * see the top-of-file comment.
-                             */}
-                            <label
-                              className="relative block h-6 w-6 cursor-pointer rounded-full border-2 border-[var(--field-border-strong)] transition-transform hover:scale-110"
-                              style={{
-                                backgroundImage:
-                                  'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)',
-                              }}
-                              title="Pick a custom color"
-                            >
-                              <input
-                                type="color"
-                                value={draft.color}
-                                onChange={e =>
-                                  handleCustomColorChange(
-                                    category.id,
-                                    e.target.value
-                                  )
-                                }
-                                aria-label={`Pick a custom color for ${category.name}`}
-                                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                              />
-                            </label>
-                          </div>
-                        </div>
+                        <CategoryColorPicker
+                          className="ml-9"
+                          groups={[
+                            { label: 'Current', colors: [category.color] },
+                            { label: 'In use', colors: inUseColors },
+                            { label: 'Suggestions', colors: suggestedColors },
+                          ]}
+                          selectedColor={draft.color}
+                          onPick={color => handleColorPick(category.id, color)}
+                          onCustomChange={color =>
+                            handleCustomColorChange(category.id, color)
+                          }
+                          customAriaLabel={`Pick a custom color for ${category.name}`}
+                        />
                       )}
                     </div>
                   );
@@ -574,56 +576,6 @@ export default function ManageCategoriesModal({
             </button>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * One labeled row of color swatches within the expanded picker - "Current"
- * (the category's own saved color, always exactly one swatch), "In use"
- * (every other category's color), or "Suggestions" (golden-angle
- * alternatives) all render through this same small helper so the three
- * groups stay visually consistent. `selectedColor` is the category's
- * DRAFT color (not its persisted one) - see ManageCategoriesModal's own
- * top-of-file DRAFT STATE comment - so the pressed/outlined swatch always
- * reflects whatever's currently staged, even mid-preview across groups.
- */
-function ColorSwatchGroup({
-  label,
-  colors,
-  selectedColor,
-  onPick,
-}: {
-  label: string;
-  colors: string[];
-  selectedColor: string;
-  onPick: (color: string) => void;
-}) {
-  return (
-    <div>
-      <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
-        {label}
-      </p>
-      <div className="flex flex-wrap gap-2">
-        {colors.map((color, index) => (
-          <button
-            // Colors within a group aren't guaranteed unique (e.g. two
-            // categories could already share a color before dedup catches
-            // it elsewhere) - index keeps React's keys stable regardless.
-            key={`${color}-${index}`}
-            type="button"
-            onClick={() => onPick(color)}
-            aria-label={`Use color ${color}`}
-            aria-pressed={selectedColor === color}
-            className="h-6 w-6 flex-shrink-0 rounded-full border-2 transition-transform hover:scale-110"
-            style={{
-              backgroundColor: color,
-              borderColor:
-                selectedColor === color ? 'var(--text-color)' : 'transparent',
-            }}
-          />
-        ))}
       </div>
     </div>
   );

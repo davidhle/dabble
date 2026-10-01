@@ -147,16 +147,17 @@ import ResetButton from '../components/ResetButton';
 import ResetToast from '../components/ResetToast';
 import SidebarPanelStack from '../components/SidebarPanelStack';
 import SidebarResizeHandle from '../components/SidebarResizeHandle';
+import SidebarCollapseToggle from '../components/SidebarCollapseToggle';
 import SidebarSideToggle from '../components/SidebarSideToggle';
 import StarMap from '../components/StarMap';
 import TimeRangeSelector from '../components/TimeRangeSelector';
 import VizPageHeader from '../components/VizPageHeader';
-import VisibleRangeHeader from '../components/VisibleRangeHeader';
-import { STACK_GAP } from '../utils/topRightTooltipStack';
 import { Entry } from '../types/Entry';
 import { loadCategories } from '../utils/categories';
 import { isEntryWithinRange } from '../utils/entryDateRange';
+import { layoutEdges } from '../utils/layoutEdges';
 import { useEntrySelection } from '../hooks/useEntrySelection';
+import { useRevealEntryInRange } from '../hooks/useRevealEntryInRange';
 import { useSidebarWidth } from '../hooks/useSidebarWidth';
 import { useTimeRange } from '../context/TimeRangeContext';
 import { useEditMode } from '../context/EditModeContext';
@@ -242,6 +243,10 @@ export default function Constellation({
     },
   });
 
+  // Opening an entry that's outside the selected time window slides the
+  // window to it - see useRevealEntryInRange.ts.
+  useRevealEntryInRange(expandedEntryId, entries);
+
   // The dynamic category list - recomputed whenever entries change, since
   // that's exactly when a new category could have appeared (a fresh "+
   // Add new category" in AddEntryForm always creates its new entry in the
@@ -258,28 +263,6 @@ export default function Constellation({
   );
 
   const { isEditMode } = useEditMode();
-
-  /**
-   * Composes StarMap's single `onStarClick` callback around the shared
-   * `isEditMode` flag - see EditModeContext.tsx's top-of-file "WHY THIS IS
-   * A GLOBAL CLICK-BEHAVIOR OVERRIDE" comment for why this branch lives
-   * here (in the page) rather than inside StarMap.tsx itself. While Edit
-   * Mode is on, a star click goes STRAIGHT to `onEditEntry` and never
-   * touches `handleEntryClick` at all - the sidebar panel stack is
-   * completely bypassed, not just left as-is, so clicking a star that's
-   * already open/expanded doesn't toggle or close its panel while editing
-   * is the whole point of clicking.
-   */
-  const handleCanvasEntryClick = useCallback(
-    (entry: Entry) => {
-      if (isEditMode) {
-        onEditEntry(entry);
-        return;
-      }
-      handleEntryClick(entry);
-    },
-    [isEditMode, onEditEntry, handleEntryClick]
-  );
 
   // `containerRef` is the unified `.bullet-journal-surface` box below
   // (title/subtitle/FilterBar/sidebar panel stack, all ONE container now -
@@ -324,15 +307,34 @@ export default function Constellation({
     resetWidth: resetSidebarWidth,
     side: sidebarSide,
     toggleSide: toggleSidebarSide,
+    collapsed: sidebarCollapsed,
+    toggleCollapsed: toggleSidebarCollapsed,
+    expand: expandSidebar,
   } = useSidebarWidth(containerLayout);
-  // VisibleRangeHeader's live bottom edge - when it's in the top-right
-  // corner (sidebar on the left), the top-right tooltip stack
-  // (EditModeBanner/VizEmptyState) drops below it instead of overlapping.
-  const [rangeHeaderBottom, setRangeHeaderBottom] = useState(0);
-  const tooltipStackTop =
-    sidebarSide === 'left' && rangeHeaderBottom > 0
-      ? rangeHeaderBottom + STACK_GAP
-      : undefined;
+
+  /**
+   * Composes StarMap's single `onStarClick` callback around the shared
+   * `isEditMode` flag - see EditModeContext.tsx's top-of-file "WHY THIS IS
+   * A GLOBAL CLICK-BEHAVIOR OVERRIDE" comment for why this branch lives
+   * here (in the page) rather than inside StarMap.tsx itself. While Edit
+   * Mode is on, a star click goes STRAIGHT to `onEditEntry` and never
+   * touches `handleEntryClick` at all - the sidebar panel stack is
+   * completely bypassed, not just left as-is, so clicking a star that's
+   * already open/expanded doesn't toggle or close its panel while editing
+   * is the whole point of clicking.
+   */
+  const handleCanvasEntryClick = useCallback(
+    (entry: Entry) => {
+      if (isEditMode) {
+        onEditEntry(entry);
+        return;
+      }
+      // Reopen a collapsed sidebar so the click visibly does something.
+      expandSidebar();
+      handleEntryClick(entry);
+    },
+    [isEditMode, onEditEntry, handleEntryClick, expandSidebar]
+  );
   const [topOffset, setTopOffset] = useState(0);
 
   useEffect(() => {
@@ -341,12 +343,12 @@ export default function Constellation({
     if (!containerEl || !headerEl) return;
 
     const updateLayout = () => {
-      const containerRect = containerEl.getBoundingClientRect();
+      // left/right via layoutEdges, not the rect: a collapsed sidebar is
+      // slid off-screen by a transform the gutter math must ignore.
       const headerRect = headerEl.getBoundingClientRect();
       setContainerLayout({
-        top: containerRect.top,
-        left: containerRect.left,
-        right: document.documentElement.clientWidth - containerRect.right,
+        top: containerEl.getBoundingClientRect().top,
+        ...layoutEdges(containerEl),
       });
       setTopOffset(headerRect.bottom);
     };
@@ -393,7 +395,9 @@ export default function Constellation({
 
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || !hasSelection) {
+    // A collapsed sidebar covers nothing, so the canvas centers on the
+    // full viewport - same as when there's no selection.
+    if (!el || !hasSelection || sidebarCollapsed) {
       setSidebarWidth(0);
       return;
     }
@@ -401,12 +405,11 @@ export default function Constellation({
     // The width of the screen band the sidebar occupies, measured from its
     // own edge - see useSidebarWidth.ts's SidebarSide comment.
     const updateWidth = () => {
-      const rect = el.getBoundingClientRect();
-      setSidebarWidth(
-        sidebarSide === 'left'
-          ? rect.right
-          : document.documentElement.clientWidth - rect.left
-      );
+      // layoutEdges, not the rect: right after expanding, the sidebar is
+      // still mid-slide back in (see index.css's COLLAPSED SIDEBAR).
+      const { left, right } = layoutEdges(el);
+      const vw = document.documentElement.clientWidth;
+      setSidebarWidth(sidebarSide === 'left' ? vw - right : vw - left);
     };
     updateWidth();
     // A window resize can move the container without resizing it (a
@@ -418,7 +421,7 @@ export default function Constellation({
       observer.disconnect();
       window.removeEventListener('resize', updateWidth);
     };
-  }, [hasSelection, sidebarSide]);
+  }, [hasSelection, sidebarSide, sidebarCollapsed]);
 
   return (
     // A Fragment, not a single `space-y-4` div, wraps the whole return:
@@ -474,12 +477,17 @@ export default function Constellation({
        * left-side anchor gets from `main`'s left padding, mirrored.
        */}
       <div
-        className={`relative z-10 w-fit ${
+        // Collapsed: index.css slides this whole wrapper toward its screen
+        // edge, leaving a sliver of the surface peeking out - see its
+        // COLLAPSED SIDEBAR rules and SidebarCollapseToggle.tsx.
+        data-sidebar-collapsed={sidebarCollapsed ? sidebarSide : undefined}
+        className={`sidebar-slide relative z-10 w-fit ${
           sidebarSide === 'right' ? 'ml-auto' : ''
         }`}
       >
         <div
           ref={containerRef}
+          data-sidebar-surface
           className="bullet-journal-surface relative z-10 flex flex-col rounded-2xl border border-[var(--panel-border-color)] shadow-lg backdrop-blur-sm"
           style={{
             width: containerWidth,
@@ -562,12 +570,23 @@ export default function Constellation({
 
         <SidebarSideToggle side={sidebarSide} onToggle={toggleSidebarSide} />
 
+        <SidebarCollapseToggle
+          side={sidebarSide}
+          collapsed={sidebarCollapsed}
+          onToggle={toggleSidebarCollapsed}
+        />
+
         {expandedEntryId && (
           <BookmarkRail
             side={sidebarSide}
             selectedEntries={selectedEntries}
             focusedEntryId={expandedEntryId}
-            onSelect={handleExpandPanel}
+            onSelect={entryId => {
+              // A tab still pokes out of a collapsed sidebar - picking one
+              // brings the sidebar back to show that entry.
+              expandSidebar();
+              handleExpandPanel(entryId);
+            }}
           />
         )}
       </div>
@@ -592,6 +611,7 @@ export default function Constellation({
        */}
       <StarMap
         entries={timeFilteredEntries}
+        allEntries={entries}
         hasAnyEntries={entries.length > 0}
         categories={categories}
         onStarClick={handleCanvasEntryClick}
@@ -603,18 +623,7 @@ export default function Constellation({
         resetViewSignal={resetViewSignal}
         topOffset={topOffset}
         isEditMode={isEditMode}
-        tooltipStackTop={tooltipStackTop}
       />
-
-      {/* Waits for the sidebar's first measurement so it doesn't flash at the top of the viewport. */}
-      {containerLayout.top > 0 && (
-        <VisibleRangeHeader
-          range={selectedRange}
-          top={containerLayout.top}
-          sidebarSide={sidebarSide}
-          onBottomChange={setRangeHeaderBottom}
-        />
-      )}
 
       {/*
        * Same component, same props shape, and same fixed-bottom
@@ -632,7 +641,7 @@ export default function Constellation({
         sidebarSide={sidebarSide}
       />
 
-      {isEditMode && <EditModeBanner top={tooltipStackTop} />}
+      {isEditMode && <EditModeBanner />}
 
       <ResetToast visible={resetPending} />
 
