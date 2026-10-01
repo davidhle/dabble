@@ -565,6 +565,116 @@ h2 {
  * to the bounding box's aspect ratio, i.e. an ellipse on any non-square
  * viewport - so `ellipse` here is the closer match, not a plain circle.
  */
+/*
+ * CANVAS TEXTURE - the bottommost decorative layer of the three viz
+ * canvases (StarMap/LinearTimeline/SpiralTimeline add `.canvas-texture`
+ * to their `fixed inset-0` container, alongside `.canvas-vignette-bg`):
+ *   - LIGHT: the same paper grain as `.bullet-journal-surface` (shared
+ *     image, opacity token and overlay blend), so canvas, sidebar and
+ *     TimeRangeSelector read as one paper surface.
+ *   - DARK: a sparse, static starfield of tiny specks - stacked
+ *     radial-gradient tiles in three co-prime sizes (197/263/331px), so
+ *     the repeat never visibly lines up. Deliberately unlike real entry
+ *     stars (2.5-5px, vivid category colors, a halo): sub-pixel to ~1px,
+ *     desaturated slate grey, at 18-34% alpha - and it doesn't pan or
+ *     zoom with the data, which sets it apart further.
+ * A `::before` at z-index -1 inside the container's own stacking context
+ * (it's `fixed` with a z-index), so it paints above the vignette but
+ * below the <svg>. `pointer-events: none`, so it never takes a hover or
+ * click. `transform: translateZ(0)` gives it its own compositing layer:
+ * rasterized once, never repainted while the SVG above it pans/zooms.
+ */
+.canvas-texture::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: var(--canvas-texture-image);
+  background-size: var(--canvas-texture-size);
+  opacity: var(--canvas-texture-opacity);
+  mix-blend-mode: var(--canvas-texture-blend);
+  transform: translateZ(0);
+}
+
+:root {
+  --paper-grain-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --canvas-texture-image:
+    radial-gradient(
+      circle at 86px 42px,
+      rgba(203, 213, 225, 0.18) 0 0.8px,
+      transparent 1.4px
+    ),
+    radial-gradient(
+      circle at 22px 141px,
+      rgba(203, 213, 225, 0.28) 0 0.5px,
+      transparent 1.1px
+    ),
+    radial-gradient(
+      circle at 153px 18px,
+      rgba(203, 213, 225, 0.18) 0 0.6px,
+      transparent 1.2px
+    ),
+    radial-gradient(
+      circle at 26px 115px,
+      rgba(203, 213, 225, 0.18) 0 0.8px,
+      transparent 1.4px
+    ),
+    radial-gradient(
+      circle at 127px 50px,
+      rgba(203, 213, 225, 0.18) 0 0.8px,
+      transparent 1.4px
+    ),
+    radial-gradient(
+      circle at 67px 118px,
+      rgba(203, 213, 225, 0.34) 0 0.5px,
+      transparent 1.1px
+    ),
+    radial-gradient(
+      circle at 29px 117px,
+      rgba(203, 213, 225, 0.22) 0 0.5px,
+      transparent 1.1px
+    ),
+    radial-gradient(
+      circle at 152px 218px,
+      rgba(203, 213, 225, 0.18) 0 0.6px,
+      transparent 1.2px
+    ),
+    radial-gradient(
+      circle at 296px 161px,
+      rgba(203, 213, 225, 0.18) 0 0.6px,
+      transparent 1.2px
+    ),
+    radial-gradient(
+      circle at 301px 296px,
+      rgba(203, 213, 225, 0.28) 0 0.6px,
+      transparent 1.2px
+    ),
+    radial-gradient(
+      circle at 53px 284px,
+      rgba(203, 213, 225, 0.18) 0 0.5px,
+      transparent 1.1px
+    ),
+    radial-gradient(
+      circle at 320px 109px,
+      rgba(203, 213, 225, 0.34) 0 0.8px,
+      transparent 1.4px
+    );
+  --canvas-texture-size:
+    197px 197px, 197px 197px, 197px 197px, 197px 197px, 263px 263px,
+    263px 263px, 263px 263px, 263px 263px, 331px 331px, 331px 331px,
+    331px 331px, 331px 331px;
+  --canvas-texture-opacity: 1;
+  --canvas-texture-blend: normal;
+}
+
+:root[data-theme='light'] {
+  --canvas-texture-image: var(--paper-grain-image);
+  --canvas-texture-size: 200px 200px;
+  --canvas-texture-opacity: var(--paper-grain-opacity);
+  --canvas-texture-blend: overlay;
+}
+
 .canvas-vignette-bg {
   background-color: var(--bg-color);
   background-image: radial-gradient(
@@ -639,7 +749,7 @@ h2 {
 }
 
 .bullet-journal-surface::before {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-image: var(--paper-grain-image);
   background-size: 200px 200px;
   opacity: var(--paper-grain-opacity);
   mix-blend-mode: overlay;

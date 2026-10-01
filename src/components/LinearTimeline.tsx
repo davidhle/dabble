@@ -1151,7 +1151,10 @@ export default function LinearTimeline({
     // StarMap.tsx's own canvas paints, so this reads as the same
     // background rather than a visibly flatter one just because this is a
     // different view.
-    <div ref={containerRef} className="canvas-vignette-bg fixed inset-0 z-0">
+    <div
+      ref={containerRef}
+      className="canvas-vignette-bg canvas-texture fixed inset-0 z-0"
+    >
       <svg
         ref={svgRef}
         width={size.width}
