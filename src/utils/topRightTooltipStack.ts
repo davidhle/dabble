@@ -21,14 +21,15 @@
 
 /**
  * Distance (px) from the very top of the viewport to the stack's TOP
- * slot. Clears Layout.tsx's navbar's RIGHT pill (the one holding just the
- * '+' button) - `pt-4` (16px) from the viewport top, `p-1.5` (6px) around
- * the `h-10` (40px) button, so that pill's own bottom edge sits at
+ * slot. Clears Layout.tsx's navbar's RIGHT pill (the Settings gear + '+'
+ * buttons) - `pt-4` (16px) from the viewport top, `p-1.5` (6px) around
+ * the `h-10` (40px) buttons, so that pill's own bottom edge sits at
  * 16+6+40+6=68px - by a comfortable ~16-18px margin, so neither tooltip
  * can ever overlap that pill regardless of which one occupies this slot.
  * A fixed value (not measured off the pill directly): the pill's own
  * height and position are effectively constant across every page this
- * stack renders on, so there's no live layout fact here worth a ref/
+ * stack renders on (its WIDTH is irrelevant - the stack is right-anchored,
+ * so the gear button widening the pill leftward doesn't move it), so there's no live layout fact here worth a ref/
  * effect the way TimeRangeSelector's own measured rect is elsewhere in
  * this app. Revisit this if Layout.tsx's right pill's own top offset/
  * padding/button size ever changes - see that pill's own comment in

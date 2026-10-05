@@ -5,7 +5,7 @@
  * localStorage as a portable JSON file, and load that same file back in -
  * either on the same device after clearing site data, or on a different
  * device/browser entirely. Pairs with the "Start Your Own Constellation"
- * reset (see About.tsx): export before resetting to keep a backup, or
+ * reset (see hooks/useDataManagement.ts): export before resetting to keep a backup, or
  * import right after resetting to load someone else's (or your own
  * previously-exported) data into the now-blank slate.
  *
@@ -161,7 +161,7 @@ export function parseImportFile(file: File): Promise<DabbleExportData> {
  * Overwrites localStorage's entries and categories with `data` - see the
  * "REPLACE, NOT MERGE" comment at the top of this file for why this is a
  * full takeover rather than a merge. Caller is responsible for reloading
- * the view afterward (see About.tsx) so every already-mounted component
+ * the view afterward (see hooks/useDataManagement.ts) so every already-mounted component
  * re-reads from localStorage instead of continuing to show stale state.
  */
 export function applyImportedData(data: DabbleExportData): void {

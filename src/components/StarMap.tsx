@@ -146,6 +146,8 @@ import { getActivityColor } from '../utils/colors';
 import EntryTooltip from './EntryTooltip';
 import type { SidebarSide } from '../hooks/useSidebarWidth';
 import VizEmptyState from './VizEmptyState';
+import { useMotionEnabled } from '../hooks/useMotionEnabled';
+import { zoomTo } from '../utils/zoomTo';
 import {
   FOCUSED_GLOW_OPACITY,
   FOCUSED_GLOW_STROKE_WIDTH,
@@ -376,8 +378,9 @@ const AURORA_TAIL_FRACTION = 0.6;
  * its pattern churn wholesale - a choppy "boiling" rather than a drift,
  * however long the cycle. Subtle by design: a few px of edge motion,
  * never enough to move the ribbon off its clusters or over neighboring
- * stars (which are drawn above it anyway). Left out entirely under
- * `prefers-reduced-motion`, leaving the same distorted shape, static.
+ * stars (which are drawn above it anyway). Left out entirely with the
+ * Animations setting off (hooks/useMotionEnabled.ts), leaving the same
+ * distorted shape, static.
  */
 const AURORA_TURBULENCE_FREQUENCY = '0.018 0.024';
 const AURORA_TURBULENCE_OCTAVES = 2;
@@ -479,8 +482,8 @@ function svgIdSafe(value: string): string {
  * (auroraColorAt in utils/auroraRibbon.ts), so a multi-color ribbon's
  * haze shifts color along it. All randomness is seeded per entry (stable
  * across reloads). Drawn inside the ribbon's animated body filter, so the
- * streaks ripple with the shared drift (and sit still under
- * `prefers-reduced-motion`) without any animation of their own; they take
+ * streaks ripple with the shared drift (and sit still with Animations
+ * off) without any animation of their own; they take
  * no pointer events, so the ribbon's hit area and the stars above are
  * unaffected.
  */
@@ -595,6 +598,14 @@ export default function StarMap({
     SVGSVGElement,
     unknown
   > | null>(null);
+
+  // Animations setting (hooks/useMotionEnabled.ts). Mirrored into a ref
+  // for the CLICK-TO-CENTER / RESET-VIEW effects below, which are keyed
+  // on what TRIGGERS a move - toggling the setting must not itself
+  // recenter or reset the view.
+  const motionEnabled = useMotionEnabled();
+  const motionEnabledRef = useRef(motionEnabled);
+  motionEnabledRef.current = motionEnabled;
 
   // ─── Responsive sizing ───
   // The root <div> is `fixed inset-0` (see "FULL-BLEED CANVAS" above), so
@@ -824,10 +835,8 @@ export default function StarMap({
       .scale(currentTransform.k) // preserve the user's current zoom level
       .translate(-star.x, -star.y);
 
-    d3.select(svgNode)
-      .transition()
-      .duration(650) // 500-750ms: smooth, not sluggish
-      .call(zoomBehavior.transform, centeredTransform);
+    // Glides, or jumps straight there with Animations off - see zoomTo.
+    zoomTo(svgNode, zoomBehavior, centeredTransform, motionEnabledRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandedEntryId, sidebarWidth, sidebarSide]);
 
@@ -858,10 +867,7 @@ export default function StarMap({
     const zoomBehavior = zoomBehaviorRef.current;
     if (!svgNode || !zoomBehavior) return;
 
-    d3.select(svgNode)
-      .transition()
-      .duration(650)
-      .call(zoomBehavior.transform, d3.zoomIdentity);
+    zoomTo(svgNode, zoomBehavior, d3.zoomIdentity, motionEnabledRef.current);
   }, [resetViewSignal]);
 
   // ─── Star jitter radius ───
@@ -1344,30 +1350,24 @@ export default function StarMap({
   // panel, and opening/closing a panel doesn't touch this state, so the
   // tooltip layers on top of the existing click/highlight behavior rather
   // than interacting with it at all.
-  // AURORA LOOK's drift is skipped under `prefers-reduced-motion` - kept
-  // in state (and followed live) so toggling the OS setting applies
-  // without a reload.
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(
-    () =>
-      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-  );
-  useEffect(() => {
-    const query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-    if (!query) return;
-    const update = () => setPrefersReducedMotion(query.matches);
-    query.addEventListener('change', update);
-    return () => query.removeEventListener('change', update);
-  }, []);
-
   /**
    * AURORA DRIFT DRIVER - the one loop that animates every ribbon (see
    * AURORA LOOK's DRIFT and PERFORMANCE). Writes the same offset straight
    * onto each body filter's tagged <feOffset> - DOM attributes, not React
    * state, so a tick never re-renders StarMap. Each axis eases there and
    * back as `(1 - cos) / 2`, which has no corners at the turnarounds.
-   * requestAnimationFrame already pauses in background tabs; under
-   * `prefers-reduced-motion` the loop doesn't run and the noise sits at
-   * its resting offset.
+   * requestAnimationFrame already pauses in background tabs. With
+   * Animations off (`motionEnabled`, see hooks/useMotionEnabled.ts) no
+   * loop is scheduled at all - no requestAnimationFrame, no timer - and
+   * the noise sits at its resting offset: a static frame of the same
+   * distorted shape. Toggling the setting tears the loop down (effect
+   * cleanup) or starts it, live.
+   *
+   * Re-run on `auroras` too: a ribbon whose <feOffset> mounts AFTER this
+   * effect last ran (e.g. a filter or range change brings a new one into
+   * view) would otherwise keep its JSX default until the next drift tick -
+   * harmless while drifting, but with Animations off there is no next
+   * tick, so the static frame is re-applied here.
    */
   useEffect(() => {
     const svg = svgRef.current;
@@ -1378,7 +1378,7 @@ export default function StarMap({
         node.setAttribute('dy', dy.toFixed(2));
       });
     };
-    if (prefersReducedMotion) {
+    if (!motionEnabled) {
       setOffset(0, 0);
       return;
     }
@@ -1399,7 +1399,7 @@ export default function StarMap({
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [prefersReducedMotion]);
+  }, [motionEnabled, auroras]);
 
   const [hovered, setHovered] = useState<{
     entry: Entry;

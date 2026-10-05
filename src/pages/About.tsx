@@ -2,8 +2,8 @@
  * About.tsx - Project History & Roadmap
  *
  * Home.tsx serves as the primary landing/introduction page for the MVP
- * (welcome copy plus the Export/Import/"Start Your Own Constellation"
- * data-management actions). This page is reserved for the project's own
+ * (welcome copy plus "Start Your Own Constellation"; Export/Import live in
+ * the Settings modal - see SettingsModal.tsx). This page is reserved for the project's own
  * story - the thesis research it grew out of, its broader goals, and
  * what's built vs. still planned - rather than data management.
  *

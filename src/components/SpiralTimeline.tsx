@@ -483,6 +483,8 @@ import { formatSingleDate } from '../utils/formatEntryDate';
 import EntryTooltip from './EntryTooltip';
 import type { SidebarSide } from '../hooks/useSidebarWidth';
 import VizEmptyState from './VizEmptyState';
+import { useMotionEnabled } from '../hooks/useMotionEnabled';
+import { zoomTo } from '../utils/zoomTo';
 import { assignLanes, assignLaneAroundRanges } from '../utils/laneAssignment';
 import {
   FOCUSED_GLOW_OPACITY,
@@ -1409,6 +1411,14 @@ export default function SpiralTimeline({
     unknown
   > | null>(null);
 
+  // Animations setting (hooks/useMotionEnabled.ts). Mirrored into a ref
+  // for the RANGE TRANSITION / CLICK-TO-CENTER / RESET-VIEW effects below,
+  // which are keyed on what TRIGGERS a move and read it per change -
+  // toggling the setting must not itself recenter, reset or re-tween.
+  const motionEnabled = useMotionEnabled();
+  const motionEnabledRef = useRef(motionEnabled);
+  motionEnabledRef.current = motionEnabled;
+
   // ─── Responsive sizing ───
   // Same ResizeObserver-on-a-container-ref pattern as StarMap.tsx/
   // LinearTimeline.tsx - now measuring the full viewport (see the
@@ -1495,9 +1505,11 @@ export default function SpiralTimeline({
    *
    * BRUSH DRAGS snap instead of gliding - see RAPID_RANGE_CHANGE_MS.
    *
-   * REDUCED MOTION: with `prefers-reduced-motion: reduce`, the domain is
-   * set straight to its target (checked per change, so toggling the OS
-   * setting takes effect on the next range change without a reload).
+   * ANIMATIONS OFF: with the Animations setting off (hooks/
+   * useMotionEnabled.ts - which also folds in the OS reduced-motion
+   * preference), the domain is set straight to its target and no
+   * d3.timer is started (read per change via `motionEnabledRef`, so
+   * toggling takes effect on the next range change without a reload).
    * `useLayoutEffect` so the snapshot lands before the browser paints the
    * first post-change frame - otherwise exiting entries would blink out
    * and entering ones blink in at full opacity for one frame.
@@ -1529,13 +1541,11 @@ export default function SpiralTimeline({
       return;
     }
 
-    const prefersReducedMotion =
-      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     const changedAt = performance.now();
     const isRapidChange =
       changedAt - lastTargetChangeAtRef.current < RAPID_RANGE_CHANGE_MS;
     lastTargetChangeAtRef.current = changedAt;
-    if (prefersReducedMotion || isRapidChange) {
+    if (!motionEnabledRef.current || isRapidChange) {
       displayedDomainRef.current = to;
       setDisplayedDomain(to);
       setTransition(null);
@@ -2391,10 +2401,8 @@ export default function SpiralTimeline({
       .scale(currentTransform.k) // preserve the user's current zoom level
       .translate(-world.x, -world.y);
 
-    d3.select(svgNode)
-      .transition()
-      .duration(650) // 500-750ms: smooth, not sluggish, same as StarMap's
-      .call(zoomBehavior.transform, centeredTransform);
+    // Glides, or jumps straight there with Animations off - see zoomTo.
+    zoomTo(svgNode, zoomBehavior, centeredTransform, motionEnabledRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandedEntryId, sidebarWidth, sidebarSide]);
 
@@ -2414,10 +2422,7 @@ export default function SpiralTimeline({
     const zoomBehavior = zoomBehaviorRef.current;
     if (!svgNode || !zoomBehavior) return;
 
-    d3.select(svgNode)
-      .transition()
-      .duration(650)
-      .call(zoomBehavior.transform, d3.zoomIdentity);
+    zoomTo(svgNode, zoomBehavior, d3.zoomIdentity, motionEnabledRef.current);
   }, [resetViewSignal]);
 
   // ─── Hover tooltip ───

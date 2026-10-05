@@ -25,8 +25,9 @@
  * range every frame, so the brush and all three canvases glide with it
  * (SpiralTimeline treats back-to-back range changes as a live drag and
  * follows them frame by frame). It yields the moment anything else sets
- * the range mid-glide (the user grabbing the brush), and is instant under
- * `prefers-reduced-motion`.
+ * the range mid-glide (the user grabbing the brush), and is instant -
+ * no animation frames at all - with the Animations setting off (see
+ * hooks/useMotionEnabled.ts).
  */
 
 import { useEffect, useRef } from 'react';
@@ -34,6 +35,7 @@ import * as d3 from 'd3';
 import { DateRange, useTimeRange } from '../context/TimeRangeContext';
 import type { Entry } from '../types/Entry';
 import { isEntryWithinRange } from '../utils/entryDateRange';
+import { useMotionEnabled } from './useMotionEnabled';
 
 /** How far in from the nearer edge (as a fraction of the window's duration) a revealed entry lands. */
 const REVEAL_MARGIN_FRACTION = 0.1;
@@ -56,6 +58,11 @@ export function useRevealEntryInRange(
   const selectedRangeRef = useRef(selectedRange);
   selectedRangeRef.current = selectedRange;
   const frameRef = useRef<number | null>(null);
+  // Read per reveal through a ref - the effect below is keyed on the
+  // expanded entry alone (see its own comment).
+  const motionEnabled = useMotionEnabled();
+  const motionEnabledRef = useRef(motionEnabled);
+  motionEnabledRef.current = motionEnabled;
 
   // Stop any glide in flight on unmount.
   useEffect(
@@ -74,9 +81,7 @@ export function useRevealEntryInRange(
 
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     frameRef.current = null;
-    const prefersReducedMotion =
-      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-    if (prefersReducedMotion) {
+    if (!motionEnabledRef.current) {
       setSelectedRange(target);
       return;
     }

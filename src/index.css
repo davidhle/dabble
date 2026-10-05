@@ -468,10 +468,41 @@ html[data-sidebar-side='right'] [data-corner-stack] {
   pointer-events: auto;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --sidebar-slide-duration: 0ms;
-  }
+/*
+ * Sidebar slide off with the Animations setting - see ANIMATIONS OFF
+ * below. (Was an OS `prefers-reduced-motion` media query; that preference
+ * is now folded into the setting by SettingsContext.tsx, so an explicit
+ * user choice wins over it.) Zeroing the variable also zeroes the
+ * collapse's visibility-hide delay, so contents hide in the same frame.
+ */
+:root[data-animations='off'] {
+  --sidebar-slide-duration: 0ms;
+}
+
+/*
+ * ANIMATIONS OFF - global safety net. SettingsContext.tsx sets
+ * `data-animations="off"` on <html> when the Animations setting is off;
+ * this zeroes every CSS transition and keyframe animation (Tailwind
+ * `transition-*`/`duration-*` hovers, entry glow/opacity fades, bookmark
+ * tabs, panel transitions, the sidebar slide) so each jumps to its end
+ * state. JS-driven motion (d3 transitions/timers, requestAnimationFrame
+ * loops) isn't affected by CSS and reads hooks/useMotionEnabled.ts
+ * instead.
+ *
+ * SAFE TO ZERO: nothing in the app listens for transitionend /
+ * animationend or relies on a transition/animation delay to finish its
+ * logic - the sidebar's delayed visibility-hide (above) only times when
+ * contents disappear, and zero is correct there too.
+ */
+:root[data-animations='off'] *,
+:root[data-animations='off'] *::before,
+:root[data-animations='off'] *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
 }
 
 body {

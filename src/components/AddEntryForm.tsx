@@ -126,6 +126,7 @@ import { COUNTRIES } from '../data/countries';
 import CategoryColorPicker from './CategoryColorPicker';
 import MoodPicker from './MoodPicker';
 import MediaLinksInput from './MediaLinksInput';
+import { useMotionEnabled } from '../hooks/useMotionEnabled';
 
 /**
  * Sentinel <option> value for the trailing "+ Add new category" dropdown
@@ -177,6 +178,9 @@ export default function AddEntryForm({
   // ─── Step Navigation State ───
   // Tracks which step the user is on (1 or 2)
   const [currentStep, setCurrentStep] = useState(1);
+  // Step-change slide-in below is skipped with Animations off - see
+  // hooks/useMotionEnabled.ts.
+  const motionEnabled = useMotionEnabled();
 
   // ─── Step 1 Fields: Activity Details ───
   // The dynamic category list itself - loaded fresh whenever the modal
@@ -954,8 +958,9 @@ export default function AddEntryForm({
                 <div
                   className="transition-all duration-300 ease-in-out"
                   style={{
-                    animation:
-                      slideDirection === 'forward'
+                    animation: !motionEnabled
+                      ? undefined
+                      : slideDirection === 'forward'
                         ? 'slideInFromRight 0.3s ease-out'
                         : 'slideInFromLeft 0.3s ease-out',
                   }}

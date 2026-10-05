@@ -60,6 +60,7 @@ import { initializeDefaultDataForFirstVisit } from './utils/initializeFirstVisit
 import { TimeRangeProvider } from './context/TimeRangeContext';
 import { EntrySelectionProvider } from './context/EntrySelectionContext';
 import { EditModeProvider } from './context/EditModeContext';
+import { SettingsProvider } from './context/SettingsContext';
 
 function App() {
   /**
@@ -293,93 +294,98 @@ function App() {
     // owns - see each context file for what it derives from that
     // (fullRange; categories) - EditModeProvider needs no such input, since
     // `isEditMode` is just a standalone flag.
-    <TimeRangeProvider entries={entries}>
-      <EntrySelectionProvider entries={entries}>
-        <EditModeProvider>
-          {/* HashRouter (URLs like /dabble/#/constellation) instead of BrowserRouter
+    // SettingsProvider is outermost: app-wide preferences (Animations)
+    // that every other provider's consumers may read - see
+    // SettingsContext.tsx.
+    <SettingsProvider>
+      <TimeRangeProvider entries={entries}>
+        <EntrySelectionProvider entries={entries}>
+          <EditModeProvider>
+            {/* HashRouter (URLs like /dabble/#/constellation) instead of BrowserRouter
           is a deliberate trade-off for static GitHub Pages hosting: Pages has no
           server-side rewrite rule, so a direct load or refresh of a BrowserRouter
           path like /dabble/constellation would 404. The hash portion of the URL
           never reaches the server, so GitHub Pages just serves index.html and
           React Router handles the rest client-side. Given the deployment
           timeline, this was chosen over adding a 404.html redirect workaround. */}
-          <HashRouter>
-            <Routes>
-              {/**
-               * Parent route with Layout
-               *
-               * The Layout component wraps all child routes, providing:
-               * - Consistent navbar across all pages
-               * - AddEntry modal accessible from any page
-               * - Main content container
-               *
-               * The onAddEntry prop enables the Layout (and its AddEntryForm)
-               * to add entries to the state managed here.
-               */}
-              <Route
-                path="/"
-                element={
-                  <Layout
-                    entries={entries}
-                    onAddEntry={addEntry}
-                    onUpdateEntry={updateEntry}
-                    onDeleteEntry={deleteEntry}
-                    editingEntry={editingEntry}
-                    onEditEntry={setEditingEntry}
-                  />
-                }
-              >
+            <HashRouter>
+              <Routes>
                 {/**
-                 * Child routes render inside Layout's <Outlet />
+                 * Parent route with Layout
                  *
-                 * These components could receive entries as props if needed.
-                 * Currently they don't need entries, but here's how you'd do it:
+                 * The Layout component wraps all child routes, providing:
+                 * - Consistent navbar across all pages
+                 * - AddEntry modal accessible from any page
+                 * - Main content container
                  *
-                 * <Route
-                 *   index
-                 *   element={<Home entries={entries} />}
-                 * />
-                 *
-                 * Or use Outlet context in Layout to pass data.
+                 * The onAddEntry prop enables the Layout (and its AddEntryForm)
+                 * to add entries to the state managed here.
                  */}
-                <Route index element={<Home />} />
-                <Route path="about" element={<About />} />
                 <Route
-                  path="constellation"
+                  path="/"
                   element={
-                    <Constellation
+                    <Layout
                       entries={entries}
-                      onEditEntry={setEditingEntry}
+                      onAddEntry={addEntry}
                       onUpdateEntry={updateEntry}
+                      onDeleteEntry={deleteEntry}
+                      editingEntry={editingEntry}
+                      onEditEntry={setEditingEntry}
                     />
                   }
-                />
-                <Route
-                  path="linear"
-                  element={
-                    <Timeline
-                      entries={entries}
-                      onEditEntry={setEditingEntry}
-                      onUpdateEntry={updateEntry}
-                    />
-                  }
-                />
-                <Route
-                  path="spiral"
-                  element={
-                    <Spiral
-                      entries={entries}
-                      onEditEntry={setEditingEntry}
-                      onUpdateEntry={updateEntry}
-                    />
-                  }
-                />
-              </Route>
-            </Routes>
-          </HashRouter>
-        </EditModeProvider>
-      </EntrySelectionProvider>
-    </TimeRangeProvider>
+                >
+                  {/**
+                   * Child routes render inside Layout's <Outlet />
+                   *
+                   * These components could receive entries as props if needed.
+                   * Currently they don't need entries, but here's how you'd do it:
+                   *
+                   * <Route
+                   *   index
+                   *   element={<Home entries={entries} />}
+                   * />
+                   *
+                   * Or use Outlet context in Layout to pass data.
+                   */}
+                  <Route index element={<Home />} />
+                  <Route path="about" element={<About />} />
+                  <Route
+                    path="constellation"
+                    element={
+                      <Constellation
+                        entries={entries}
+                        onEditEntry={setEditingEntry}
+                        onUpdateEntry={updateEntry}
+                      />
+                    }
+                  />
+                  <Route
+                    path="linear"
+                    element={
+                      <Timeline
+                        entries={entries}
+                        onEditEntry={setEditingEntry}
+                        onUpdateEntry={updateEntry}
+                      />
+                    }
+                  />
+                  <Route
+                    path="spiral"
+                    element={
+                      <Spiral
+                        entries={entries}
+                        onEditEntry={setEditingEntry}
+                        onUpdateEntry={updateEntry}
+                      />
+                    }
+                  />
+                </Route>
+              </Routes>
+            </HashRouter>
+          </EditModeProvider>
+        </EntrySelectionProvider>
+      </TimeRangeProvider>
+    </SettingsProvider>
   );
 }
 
