@@ -51,6 +51,25 @@ export interface MediaLink {
 }
 
 /**
+ * EntryPhoto Interface
+ *
+ * One photo attached to an entry (see Entry.photos). There's no backend,
+ * so the image lives inline as a data URL - already downscaled and
+ * re-encoded as JPEG by utils/photos.ts's processPhotoFile to keep
+ * localStorage's ~5MB quota in reach.
+ */
+export interface EntryPhoto {
+  /** Generated with crypto.randomUUID(), like Entry.id. */
+  id: string;
+
+  /** `data:image/jpeg;base64,...` */
+  dataUrl: string;
+
+  /** Optional caption, shown under the photo in the sidebar lightbox. */
+  caption?: string;
+}
+
+/**
  * EntryLocation Interface
  *
  * STRUCTURED LOCATION (intentional groundwork, deliberately plain text):
@@ -173,6 +192,17 @@ export interface Entry {
    * Documents the activity with visual/audio evidence.
    */
   mediaLinks: MediaLink[];
+
+  /**
+   * Photos attached directly to the entry - see EntryPhoto below. Kept
+   * separate from `mediaLinks` (which are links OUT to external sites):
+   * these are the image data itself, stored inline.
+   *
+   * OPTIONAL & BACKWARD-COMPATIBLE: absent on entries created before
+   * photos existed and on any entry without photos - treated the same as
+   * an empty array everywhere it's read.
+   */
+  photos?: EntryPhoto[];
 
   /**
    * Where the activity took place.

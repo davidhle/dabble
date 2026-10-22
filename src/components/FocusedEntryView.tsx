@@ -61,6 +61,7 @@ import { formatEntryDate } from '../utils/formatEntryDate';
 import { formatLocationDisplay } from '../utils/formatLocation';
 import { EntryOriginalContent, EntryReflections } from './EntryContent';
 import IconButton from './IconButton';
+import { ActivePlayerProvider } from './MediaLinkList';
 
 interface FocusedEntryViewProps {
   /** The full selection - the focused entry is looked up from it. */
@@ -79,8 +80,10 @@ interface FocusedEntryViewProps {
   onEdit: (entry: Entry) => void;
   /** Removes this entry from the selection (which also exits focused mode). */
   onClose: (entryId: string) => void;
-  /** App.tsx's `updateEntry` - used to save reflections. */
-  onUpdateEntry: (entry: Entry) => void;
+  /** App.tsx's `updateEntry` - used to save reflections. Returns false if the save failed. */
+  onUpdateEntry: (entry: Entry) => boolean;
+  /** Whether the sidebar is collapsed - stops any playing video, see ActivePlayerProvider. */
+  collapsed: boolean;
 }
 
 export default function FocusedEntryView({
@@ -95,6 +98,7 @@ export default function FocusedEntryView({
   onEdit,
   onClose,
   onUpdateEntry,
+  collapsed,
 }: FocusedEntryViewProps) {
   const entry = selectedEntries.find(
     selected => selected.entry.id === focusedEntryId
@@ -251,11 +255,20 @@ export default function FocusedEntryView({
             borderLeftWidth: 4,
           }}
         >
-          {view === 'original' ? (
-            <EntryOriginalContent entry={entry} />
-          ) : (
-            <EntryReflections entry={entry} onUpdate={onUpdateEntry} />
-          )}
+          {/*
+           * One inline video player at a time across both tabs - and none
+           * once the entry, tab, or sidebar collapse state changes (see
+           * MediaLinkList.tsx).
+           */}
+          <ActivePlayerProvider
+            resetKey={`${entry.id}|${view}|${collapsed ? 'collapsed' : 'open'}`}
+          >
+            {view === 'original' ? (
+              <EntryOriginalContent entry={entry} />
+            ) : (
+              <EntryReflections entry={entry} onUpdate={onUpdateEntry} />
+            )}
+          </ActivePlayerProvider>
         </div>
       </div>
     </>

@@ -42,7 +42,7 @@
  * 6. useEffect logs entries to console
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import Home from './pages/Home';
@@ -61,6 +61,7 @@ import { TimeRangeProvider } from './context/TimeRangeContext';
 import { EntrySelectionProvider } from './context/EntrySelectionContext';
 import { EditModeProvider } from './context/EditModeContext';
 import { SettingsProvider } from './context/SettingsContext';
+import StorageFullToast from './components/StorageFullToast';
 
 function App() {
   /**
@@ -102,15 +103,37 @@ function App() {
   });
 
   /**
-   * EFFECT: Persist entries to localStorage whenever they change
-   *
-   * Separate from the logging effect below (different concern: this one
-   * has an actual side effect other code depends on, not just debugging
-   * output) even though both key off the same `entries` dependency.
+   * STORAGE-FULL TOAST: flipped on whenever commitEntries' save fails -
+   * see StorageFullToast.tsx.
    */
-  useEffect(() => {
-    saveEntries(entries);
-  }, [entries]);
+  const [isStorageFull, setIsStorageFull] = useState(false);
+  const dismissStorageFull = useCallback(() => setIsStorageFull(false), []);
+
+  /**
+   * COMMIT ENTRIES: persist FIRST, then update state.
+   *
+   * This used to be a useEffect that saved `entries` after every change.
+   * Photos (see EntryPhoto in types/Entry.ts) make hitting localStorage's
+   * ~5MB quota realistic, and with save-after-the-fact a failed write
+   * still left the change in state - the form would close as if it had
+   * saved, then the entry would vanish on the next reload. Saving first
+   * means a failed write changes nothing: state stays as it was, the
+   * caller gets `false` back, and AddEntryForm/AddReflectionForm stay
+   * open with the user's work intact (plus the toast explaining why).
+   *
+   * Reads `entries` from this render's closure rather than setState's
+   * functional form, since the save has to happen synchronously with the
+   * exact array that becomes state - every caller is a single user
+   * action, so there's no batched-update race to guard against here.
+   */
+  const commitEntries = (nextEntries: Entry[]): boolean => {
+    if (!saveEntries(nextEntries)) {
+      setIsStorageFull(true);
+      return false;
+    }
+    setEntries(nextEntries);
+    return true;
+  };
 
   /**
    * EFFECT: Log entries whenever they change
@@ -160,9 +183,9 @@ function App() {
    *
    * IMPLEMENTATION NOTES:
    *
-   * 1. We use the functional form of setState: (prev) => newState
-   *    This ensures we're working with the latest state value,
-   *    which is important if multiple rapid updates occur.
+   * 1. Goes through commitEntries (see above), which saves before
+   *    updating state and returns whether the save worked - AddEntryForm
+   *    only closes when it did.
    *
    * 2. We spread the previous array and add the new entry at the end.
    *    This creates a NEW array, ensuring React detects the change.
@@ -181,16 +204,14 @@ function App() {
    *   setEntries((prev) => [...prev, entry]);
    * }, []);
    */
-  const addEntry = (entry: Entry) => {
-    setEntries(prevEntries => {
-      const newEntries = [...prevEntries, entry];
+  const addEntry = (entry: Entry): boolean => {
+    const newEntries = [...entries, entry];
 
-      // Additional logging at the point of update
-      console.log('Adding new entry:', entry);
-      console.log('New entries count:', newEntries.length);
+    // Additional logging at the point of update
+    console.log('Adding new entry:', entry);
+    console.log('New entries count:', newEntries.length);
 
-      return newEntries;
-    });
+    return commitEntries(newEntries);
   };
 
   /**
@@ -221,13 +242,12 @@ function App() {
    * its own ADD VS. EDIT MODE comment), so this only ever matches exactly
    * one entry; every other entry in the array passes through untouched.
    */
-  const updateEntry = (updatedEntry: Entry) => {
-    setEntries(prevEntries =>
-      prevEntries.map(entry =>
+  const updateEntry = (updatedEntry: Entry): boolean =>
+    commitEntries(
+      entries.map(entry =>
         entry.id === updatedEntry.id ? updatedEntry : entry
       )
     );
-  };
 
   /**
    * DELETE ENTRY CALLBACK
@@ -247,9 +267,7 @@ function App() {
    */
   const deleteEntry = (entryId: string) => {
     recordDeletedEntryId(entryId);
-    setEntries(prevEntries =>
-      prevEntries.filter(entry => entry.id !== entryId)
-    );
+    commitEntries(entries.filter(entry => entry.id !== entryId));
   };
 
   /**
@@ -385,6 +403,10 @@ function App() {
           </EditModeProvider>
         </EntrySelectionProvider>
       </TimeRangeProvider>
+      <StorageFullToast
+        visible={isStorageFull}
+        onDismiss={dismissStorageFull}
+      />
     </SettingsProvider>
   );
 }

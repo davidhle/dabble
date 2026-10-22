@@ -19,6 +19,7 @@ import {
   DEFAULT_DOMAIN,
   Domain,
 } from '../types/Category';
+import { safeSetItem } from './safeStorage';
 
 /** localStorage key the category list is persisted under. */
 const CATEGORIES_STORAGE_KEY = 'dabble-categories';
@@ -157,7 +158,7 @@ export function loadCategories(): Category[] {
 
 /** Persists the given category list to localStorage. */
 export function saveCategories(categories: Category[]): void {
-  localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(categories));
+  safeSetItem(CATEGORIES_STORAGE_KEY, JSON.stringify(categories));
 }
 
 /**
@@ -352,7 +353,7 @@ export function loadDeletedCategoryIds(): string[] {
 function recordDeletedCategoryId(categoryId: string): void {
   const existing = loadDeletedCategoryIds();
   if (existing.includes(categoryId)) return;
-  localStorage.setItem(
+  safeSetItem(
     DELETED_CATEGORY_IDS_STORAGE_KEY,
     JSON.stringify([...existing, categoryId])
   );

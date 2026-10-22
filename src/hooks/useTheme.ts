@@ -26,6 +26,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { safeSetItem } from '../utils/safeStorage';
 
 export type Theme = 'dark' | 'light';
 
@@ -48,7 +49,7 @@ export function useTheme(): { theme: Theme; toggleTheme: () => void } {
     } else {
       document.documentElement.removeAttribute('data-theme');
     }
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
+    safeSetItem(THEME_STORAGE_KEY, theme);
   }, [theme]);
 
   const toggleTheme = () => {

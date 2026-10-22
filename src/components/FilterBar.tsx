@@ -72,6 +72,7 @@
 import { useEffect, useState } from 'react';
 import { Category, DOMAINS, getCategoryDomain } from '../types/Category';
 import { useEntrySelectionContext } from '../context/EntrySelectionContext';
+import { safeSetItem } from '../utils/safeStorage';
 
 export type SortMode = 'date' | 'category';
 
@@ -110,7 +111,7 @@ export default function FilterBar({
   );
 
   useEffect(() => {
-    localStorage.setItem(FILTER_COLLAPSE_STORAGE_KEY, String(collapsed));
+    safeSetItem(FILTER_COLLAPSE_STORAGE_KEY, String(collapsed));
   }, [collapsed]);
 
   // ManageCategoriesModal itself is NOT rendered here - it's mounted in

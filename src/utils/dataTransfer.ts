@@ -29,6 +29,8 @@ import { Category, getCategoryDomain, isDomain } from '../types/Category';
 import { Entry } from '../types/Entry';
 import { loadCategories, saveCategories } from './categories';
 import { loadEntries, saveEntries } from './entriesStorage';
+import { sanitizePhotos } from './photos';
+import { STORAGE_FULL_MESSAGE } from './safeStorage';
 
 /** The full shape of one exported/imported data file. */
 export interface DabbleExportData {
@@ -165,7 +167,22 @@ export function parseImportFile(file: File): Promise<DabbleExportData> {
  * re-reads from localStorage instead of continuing to show stale state.
  */
 export function applyImportedData(data: DabbleExportData): void {
-  saveEntries(data.entries);
+  // Photos are the one entry field validated item-by-item: they end up as
+  // <img src>, so anything that isn't an image data URL is dropped. A
+  // file without photos (any export made before they existed) passes
+  // through unchanged.
+  const entries = data.entries.map(entry => {
+    if (entry.photos === undefined) return entry;
+    const { photos: rawPhotos, ...rest } = entry;
+    const photos = sanitizePhotos(rawPhotos);
+    return photos ? { ...rest, photos } : rest;
+  });
+
+  // Checked before categories are touched, so a file too big for this
+  // browser's storage fails as a whole and leaves existing data intact.
+  if (!saveEntries(entries)) {
+    throw new Error(STORAGE_FULL_MESSAGE);
+  }
   // Spread (not a field-by-field rebuild) so every category field - known
   // or future - survives the import; only `domain` is normalized, so a
   // legacy file without one (or with an unknown value) is stored as the

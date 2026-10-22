@@ -22,6 +22,7 @@
  */
 
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { safeSetItem } from '../utils/safeStorage';
 
 /** localStorage keys - same naming convention as useTheme.ts's THEME_STORAGE_KEY. */
 export const SIDEBAR_WIDTH_STORAGE_KEY = 'dabble-sidebar-width';
@@ -97,10 +98,7 @@ export function useSidebarWidth(gaps: { left: number; right: number }) {
   /** Saves the current width - on drag end rather than every frame. */
   const persist = useCallback(() => {
     if (userWidthRef.current !== null) {
-      localStorage.setItem(
-        SIDEBAR_WIDTH_STORAGE_KEY,
-        String(userWidthRef.current)
-      );
+      safeSetItem(SIDEBAR_WIDTH_STORAGE_KEY, String(userWidthRef.current));
     }
   }, []);
 
@@ -114,7 +112,7 @@ export function useSidebarWidth(gaps: { left: number; right: number }) {
   const toggleSide = useCallback(() => {
     setSide(current => {
       const next = current === 'left' ? 'right' : 'left';
-      localStorage.setItem(SIDEBAR_SIDE_STORAGE_KEY, next);
+      safeSetItem(SIDEBAR_SIDE_STORAGE_KEY, next);
       return next;
     });
   }, []);
@@ -122,7 +120,7 @@ export function useSidebarWidth(gaps: { left: number; right: number }) {
   const toggleCollapsed = useCallback(() => {
     setCollapsed(current => {
       const next = !current;
-      localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(next));
+      safeSetItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(next));
       return next;
     });
   }, []);
@@ -130,7 +128,7 @@ export function useSidebarWidth(gaps: { left: number; right: number }) {
   /** Un-collapses - e.g. when a canvas click opens an entry the hidden sidebar would show. */
   const expand = useCallback(() => {
     setCollapsed(false);
-    localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, 'false');
+    safeSetItem(SIDEBAR_COLLAPSED_STORAGE_KEY, 'false');
   }, []);
 
   // Mirrors `side` onto <html data-sidebar-side> for as long as a

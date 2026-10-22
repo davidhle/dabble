@@ -20,6 +20,13 @@
  * (🏷️/💫/📝/💭/🔗/🪞) - a purely cosmetic touch to break up what's
  * otherwise an all-caps text-only label.
  *
+ * PHOTOS: EntryOriginalContent shows the entry's photos (if any) as a
+ * gallery just above the Description - see PhotoGallery.tsx.
+ *
+ * MEDIA LINKS: rendered by MediaLinkList.tsx in both tabs, so a YouTube
+ * link (in the entry or a reflection) gets the same click-to-play
+ * preview card.
+ *
  * MOOD / MEDIA LINKS: both follow the same "label + content, render
  * nothing at all when empty" pattern Tags uses. Mood chips are teal rather
  * than Tags' indigo or any color from NEW_CATEGORY_COLOR_PALETTE
@@ -29,11 +36,12 @@
 
 import { useState } from 'react';
 import { Entry, Reflection } from '../types/Entry';
-import { linkify, LINK_CLASSNAME } from '../utils/linkify';
-import { getMediaLinkLabel } from '../utils/mediaLinks';
+import { linkify } from '../utils/linkify';
 import { formatSingleDate } from '../utils/formatEntryDate';
 import AddReflectionForm from './AddReflectionForm';
 import IconButton from './IconButton';
+import MediaLinkList from './MediaLinkList';
+import PhotoGallery from './PhotoGallery';
 
 const SECTION_LABEL_CLASSNAME =
   'text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]';
@@ -79,6 +87,10 @@ export function EntryOriginalContent({ entry }: { entry: Entry }) {
         </div>
       )}
 
+      {entry.photos && entry.photos.length > 0 && (
+        <PhotoGallery photos={entry.photos} />
+      )}
+
       <div>
         <p className={SECTION_LABEL_CLASSNAME}>📝 Description</p>
         <p className="mt-1.5 whitespace-pre-wrap text-sm text-[var(--text-secondary-color)]">
@@ -96,28 +108,15 @@ export function EntryOriginalContent({ entry }: { entry: Entry }) {
       </div>
 
       {/*
-       * Each link renders as a labeled link-out ("View on Instagram")
-       * rather than the raw URL - getMediaLinkLabel derives the platform
-       * from the URL's own hostname, since AddEntryForm.tsx always saves
-       * `media.type` as "Video" regardless of the actual platform (see its
-       * addMediaLink comment). Same target/rel/LINK_CLASSNAME styling
-       * linkify.ts uses for a URL inside free-text notes/description.
+       * YouTube links render as click-to-play preview cards; every other
+       * link as a labeled link-out ("View on Instagram") rather than the
+       * raw URL - see MediaLinkList.tsx.
        */}
       {entry.mediaLinks.length > 0 && (
         <div>
           <p className={SECTION_LABEL_CLASSNAME}>🔗 Media Links</p>
-          <div className="mt-1.5 flex flex-col gap-1">
-            {entry.mediaLinks.map((media, index) => (
-              <a
-                key={index}
-                href={media.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`text-sm ${LINK_CLASSNAME}`}
-              >
-                {getMediaLinkLabel(media.url)}
-              </a>
-            ))}
+          <div className="mt-1.5">
+            <MediaLinkList mediaLinks={entry.mediaLinks} scope="entry" />
           </div>
         </div>
       )}
@@ -129,9 +128,11 @@ interface EntryReflectionsProps {
   entry: Entry;
   /**
    * Persists a modified copy of this entry (same id) - wired to App.tsx's
-   * `updateEntry`. Used to add, edit, and delete reflections.
+   * `updateEntry`. Used to add, edit, and delete reflections. Returns
+   * false when the save failed (storage full), in which case the open
+   * form stays open so the reflection isn't lost.
    */
-  onUpdate: (entry: Entry) => void;
+  onUpdate: (entry: Entry) => boolean;
 }
 
 /**
@@ -155,19 +156,20 @@ export function EntryReflections({ entry, onUpdate }: EntryReflectionsProps) {
   );
 
   const handleSaveNew = (reflection: Reflection) => {
-    onUpdate({ ...entry, reflections: [...reflections, reflection] });
-    setOpenForm(null);
+    if (onUpdate({ ...entry, reflections: [...reflections, reflection] })) {
+      setOpenForm(null);
+    }
   };
 
   // AddReflectionForm keeps the edited reflection's id, so match on it.
   const handleSaveEdit = (edited: Reflection) => {
-    onUpdate({
+    const saved = onUpdate({
       ...entry,
       reflections: reflections.map(reflection =>
         reflection.id === edited.id ? edited : reflection
       ),
     });
-    setOpenForm(null);
+    if (saved) setOpenForm(null);
   };
 
   const handleConfirmDelete = (reflectionId: string) => {
@@ -293,18 +295,11 @@ export function EntryReflections({ entry, onUpdate }: EntryReflectionsProps) {
                   {linkify(reflection.text)}
                 </p>
                 {reflection.mediaLinks && reflection.mediaLinks.length > 0 && (
-                  <div className="mt-1 flex flex-col gap-1">
-                    {reflection.mediaLinks.map((media, index) => (
-                      <a
-                        key={index}
-                        href={media.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`text-sm ${LINK_CLASSNAME}`}
-                      >
-                        {getMediaLinkLabel(media.url)}
-                      </a>
-                    ))}
+                  <div className="mt-1.5">
+                    <MediaLinkList
+                      mediaLinks={reflection.mediaLinks}
+                      scope={reflection.id}
+                    />
                   </div>
                 )}
               </div>

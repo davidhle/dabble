@@ -21,6 +21,7 @@
 import {
   Entry,
   EntryLocation,
+  EntryPhoto,
   MediaLink,
   MediaType,
   Reflection,
@@ -50,6 +51,8 @@ interface RawSeedEntry {
    * through as-is rather than adapted like the entry's own mediaLinks.
    */
   reflections?: Reflection[] | null;
+  /** Optional photo attachments - see Entry.photos. Passed through as-is. */
+  photos?: EntryPhoto[] | null;
 }
 
 /**
@@ -136,6 +139,7 @@ function toEntry(raw: RawSeedEntry): Entry {
     ...(raw.dateDisplay ? { dateDisplay: raw.dateDisplay } : {}),
     ...(raw.endTimestamp ? { endTimestamp: raw.endTimestamp } : {}),
     ...(raw.reflections?.length ? { reflections: raw.reflections } : {}),
+    ...(raw.photos?.length ? { photos: raw.photos } : {}),
   };
 }
 

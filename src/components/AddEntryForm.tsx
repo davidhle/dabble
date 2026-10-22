@@ -10,7 +10,7 @@
  *    required field (Title) is filled. This gives the user immediate
  *    feedback about what's needed before they can proceed.
  * 3. Step 2 ("Reflections & Media") collects optional reflections: mood, notes,
- *    media links (YouTube/Vimeo), and has a placeholder for photo uploads.
+ *    media links (YouTube/Vimeo), and photo attachments (see PhotoPicker.tsx).
  * 4. The "Back" button returns to Step 1 without losing any entered data.
  * 5. "Add Entry" on Step 2 submits the complete form.
  *
@@ -45,8 +45,8 @@
  * PROPS FLOW:
  * - isOpen: boolean - Controls modal visibility (from Layout)
  * - onClose: () => void - Callback to close modal (from Layout)
- * - onSubmit: (entry: Entry) => void - Callback to add entry (from App via Layout)
- * - onUpdate: (entry: Entry) => void - Callback to replace an existing entry
+ * - onSubmit: (entry: Entry) => boolean - Callback to add entry (from App via Layout)
+ * - onUpdate: (entry: Entry) => boolean - Callback to replace an existing entry
  *   by id (from App via Layout) - see ADD VS. EDIT MODE below
  * - editingEntry?: Entry | null - When present, the form runs in edit mode
  *   instead of add mode - see ADD VS. EDIT MODE below
@@ -99,6 +99,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Entry,
+  EntryPhoto,
   MediaLink,
   SUGGESTED_TAGS,
   VisualStyle,
@@ -126,6 +127,7 @@ import { COUNTRIES } from '../data/countries';
 import CategoryColorPicker from './CategoryColorPicker';
 import MoodPicker from './MoodPicker';
 import MediaLinksInput from './MediaLinksInput';
+import PhotoPicker from './PhotoPicker';
 import { useMotionEnabled } from '../hooks/useMotionEnabled';
 
 /**
@@ -140,9 +142,14 @@ const ADD_NEW_CATEGORY_VALUE = '__add_new_category__';
 interface AddEntryFormProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (entry: Entry) => void;
+  /**
+   * Both onSubmit and onUpdate return false when the entry couldn't be
+   * saved (localStorage full - see App.tsx's commitEntries); the form then
+   * stays open so nothing the user entered is lost.
+   */
+  onSubmit: (entry: Entry) => boolean;
   /** Replaces an existing entry by id - see the ADD VS. EDIT MODE comment above. */
-  onUpdate: (entry: Entry) => void;
+  onUpdate: (entry: Entry) => boolean;
   /**
    * Deletes an existing entry by id - see the DELETE ENTRY comment below.
    * Only ever called in edit mode; add mode has no entry to delete.
@@ -269,6 +276,7 @@ export default function AddEntryForm({
   const [moods, setMoods] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
   const [mediaLinks, setMediaLinks] = useState<MediaLink[]>([]);
+  const [photos, setPhotos] = useState<EntryPhoto[]>([]);
 
   // ─── Form State ───
   const [errors, setErrors] = useState<FormErrors>({});
@@ -321,6 +329,7 @@ export default function AddEntryForm({
       setMoods(editingEntry.mood ?? []);
       setNotes(editingEntry.notes);
       setMediaLinks(editingEntry.mediaLinks);
+      setPhotos(editingEntry.photos ?? []);
       setDuration(
         editingEntry.duration != null ? String(editingEntry.duration) : ''
       );
@@ -381,6 +390,7 @@ export default function AddEntryForm({
       setTags([]);
       setMoods([]);
       setMediaLinks([]);
+      setPhotos([]);
       setCountry('');
       setCity('');
       setPlace('');
@@ -573,6 +583,14 @@ export default function AddEntryForm({
       description: description.trim(),
       tags,
       mediaLinks,
+      // Empty captions are dropped rather than stored as "" - same
+      // "omit when empty" convention as location/mood here.
+      photos:
+        photos.length > 0
+          ? photos.map(({ caption, ...photo }) =>
+              caption?.trim() ? { ...photo, caption: caption.trim() } : photo
+            )
+          : undefined,
       location: hasLocation
         ? {
             ...(trimmedCountry ? { country: trimmedCountry } : {}),
@@ -599,6 +617,7 @@ export default function AddEntryForm({
           : undefined,
     };
 
+    let saved: boolean;
     if (isEditMode && editingEntry) {
       // EDIT MODE: replace-by-id via onUpdate, rather than createEntry's
       // "mint a brand-new id" behavior - see updateEntry's own comment in
@@ -606,14 +625,25 @@ export default function AddEntryForm({
       // an append. `dateDisplay` is carried over unchanged since this form
       // has no field to edit or clear it (see its comment in
       // types/Entry.ts) - without this it would silently disappear from
-      // any entry that had one the moment it was edited.
-      onUpdate({
+      // any entry that had one the moment it was edited. `reflections`
+      // likewise: they're edited from the sidebar, not this form, and were
+      // previously dropped by every edit here.
+      saved = onUpdate({
         ...entryFields,
         id: editingEntry.id,
         dateDisplay: editingEntry.dateDisplay,
+        reflections: editingEntry.reflections,
       });
     } else {
-      onSubmit(createEntry(entryFields));
+      saved = onSubmit(createEntry(entryFields));
+    }
+
+    // Save failed (storage full - App.tsx shows the toast): keep the form
+    // open with everything still filled in, so nothing is lost and the
+    // user can remove a photo and try again.
+    if (!saved) {
+      setIsSubmitting(false);
+      return;
     }
 
     resetForm();
@@ -637,6 +667,7 @@ export default function AddEntryForm({
     setTagInput('');
     setMoods([]);
     setMediaLinks([]);
+    setPhotos([]);
     setCountry('');
     setCity('');
     setPlace('');
@@ -1570,7 +1601,7 @@ export default function AddEntryForm({
                   ) : (
                     /* ═══════════════════════════════════════════
                      * STEP 2: Reflections & Media
-                     * All fields optional: Mood, Notes, Media Links, Photo placeholder
+                     * All fields optional: Mood, Notes, Media Links, Photos
                      * ═══════════════════════════════════════════ */
                     <div className="space-y-4">
                       {/* Mood Selector */}
@@ -1600,51 +1631,25 @@ export default function AddEntryForm({
                         onChange={setMediaLinks}
                       />
 
-                      {/*
-                       * Photo Upload Placeholder
-                       *
-                       * WHY THIS IS A PLACEHOLDER:
-                       * Photo uploads require backend storage (e.g., Cloudflare R2, AWS S3)
-                       * to handle file persistence, resizing, and delivery. This placeholder
-                       * reserves the UI space and communicates intent to users while the
-                       * backend infrastructure is being set up.
-                       *
-                       * TODO: Implement photo upload when backend/R2 storage is set up
-                       * - Add file input with drag-and-drop support
-                       * - Integrate with R2/S3 for storage
-                       * - Add image preview thumbnails
-                       * - Handle upload progress and errors
-                       */}
-                      <div>
-                        <label className="block text-sm font-medium text-[var(--text-secondary-color)]">
-                          Photos
-                        </label>
-                        <div className="mt-1 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-[var(--field-border-strong)] bg-[var(--field-tint-1)] px-6 py-8">
-                          {/* Greyed-out camera/image icon */}
-                          <svg
-                            className="h-10 w-10 text-[var(--text-muted-color)]"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={1.5}
-                              d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"
-                            />
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={1.5}
-                              d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"
-                            />
-                          </svg>
-                          <p className="mt-2 text-sm text-[var(--text-muted-color)]">
-                            Photo upload coming soon
-                          </p>
-                        </div>
-                      </div>
+                      <PhotoPicker
+                        photos={photos}
+                        savedPhotos={editingEntry?.photos}
+                        onAdd={added => setPhotos(prev => [...prev, ...added])}
+                        onRemove={photoId =>
+                          setPhotos(prev =>
+                            prev.filter(photo => photo.id !== photoId)
+                          )
+                        }
+                        onCaptionChange={(photoId, caption) =>
+                          setPhotos(prev =>
+                            prev.map(photo =>
+                              photo.id === photoId
+                                ? { ...photo, caption }
+                                : photo
+                            )
+                          )
+                        }
+                      />
                     </div>
                   )}
                 </div>

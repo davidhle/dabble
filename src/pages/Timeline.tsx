@@ -134,7 +134,7 @@ interface TimelineProps {
   /** Opens `entry` in the shared AddEntryForm's edit mode - see App.tsx's `editingEntry` state. */
   onEditEntry: (entry: Entry) => void;
   /** App.tsx's `updateEntry` - used by EntryPanel to save reflections. */
-  onUpdateEntry: (entry: Entry) => void;
+  onUpdateEntry: (entry: Entry) => boolean;
 }
 
 export default function Timeline({
@@ -421,6 +421,7 @@ export default function Timeline({
               onEdit={onEditEntry}
               onClose={handleClosePanel}
               onUpdateEntry={onUpdateEntry}
+              collapsed={sidebarCollapsed}
             />
           ) : (
             <>

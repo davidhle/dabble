@@ -20,6 +20,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { saveCategories } from '../utils/categories';
 import { saveEntries } from '../utils/entriesStorage';
+import { safeSetItem } from '../utils/safeStorage';
 import {
   applyImportedData,
   exportData,
@@ -108,7 +109,7 @@ export default function useDataManagement(statusMessageKey: string) {
 
     saveEntries([]);
     saveCategories([]);
-    localStorage.setItem(
+    safeSetItem(
       statusMessageKey,
       JSON.stringify({
         type: 'info',
@@ -155,7 +156,7 @@ export default function useDataManagement(statusMessageKey: string) {
     try {
       const data = await parseImportFile(file);
       applyImportedData(data);
-      localStorage.setItem(
+      safeSetItem(
         statusMessageKey,
         JSON.stringify({
           type: 'success',

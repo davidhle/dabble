@@ -48,10 +48,10 @@ import { useEntrySelectionContext } from '../context/EntrySelectionContext';
 interface LayoutProps {
   /** The full, unfiltered entries array (App.tsx's own `entries` state) - passed through to AddEntryForm, which needs it to check whether an entry being deleted is the last one in its category. */
   entries: Entry[];
-  /** Callback to add a new entry to the app state (defined in App.tsx) */
-  onAddEntry: (entry: Entry) => void;
-  /** Callback to replace an existing entry (by id) in the app state (defined in App.tsx) */
-  onUpdateEntry: (entry: Entry) => void;
+  /** Callback to add a new entry to the app state (defined in App.tsx). Returns false if it couldn't be saved. */
+  onAddEntry: (entry: Entry) => boolean;
+  /** Callback to replace an existing entry (by id) in the app state (defined in App.tsx). Returns false if it couldn't be saved. */
+  onUpdateEntry: (entry: Entry) => boolean;
   /** Callback to remove an entry (by id) from the app state (defined in App.tsx) */
   onDeleteEntry: (entryId: string) => void;
   /** The entry currently open in AddEntryForm's edit mode, or null - see App.tsx's `editingEntry` state. */
@@ -159,9 +159,10 @@ export default function Layout({
    *
    * Currently it simply passes the entry up to the parent's handler.
    */
-  const handleAddEntry = (entry: Entry) => {
-    onAddEntry(entry);
-    // Modal closing is handled by AddEntryForm calling onClose
+  const handleAddEntry = (entry: Entry): boolean => {
+    // Modal closing is handled by AddEntryForm calling onClose - only
+    // once this reports the entry actually saved.
+    return onAddEntry(entry);
   };
 
   /**

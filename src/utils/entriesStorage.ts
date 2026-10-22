@@ -13,6 +13,7 @@
  */
 
 import { Entry } from '../types/Entry';
+import { safeSetItem } from './safeStorage';
 
 /** localStorage key the entries array is persisted under. */
 export const ENTRIES_STORAGE_KEY = 'dabble-entries';
@@ -75,9 +76,14 @@ export function loadEntries(): Entry[] {
   return [];
 }
 
-/** Persists the given entries array to localStorage. */
-export function saveEntries(entries: Entry[]): void {
-  localStorage.setItem(ENTRIES_STORAGE_KEY, JSON.stringify(entries));
+/**
+ * Persists the given entries array to localStorage. Returns false (rather
+ * than throwing) when the write fails - almost always because photos have
+ * filled the ~5MB quota - so callers can keep the in-memory change from
+ * being lost; see App.tsx's commitEntries.
+ */
+export function saveEntries(entries: Entry[]): boolean {
+  return safeSetItem(ENTRIES_STORAGE_KEY, JSON.stringify(entries));
 }
 
 /**
@@ -128,7 +134,7 @@ export function loadDeletedEntryIds(): string[] {
 export function recordDeletedEntryId(entryId: string): void {
   const existing = loadDeletedEntryIds();
   if (existing.includes(entryId)) return;
-  localStorage.setItem(
+  safeSetItem(
     DELETED_ENTRY_IDS_STORAGE_KEY,
     JSON.stringify([...existing, entryId])
   );
