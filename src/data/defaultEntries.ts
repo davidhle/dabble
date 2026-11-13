@@ -22,6 +22,7 @@ import {
   Entry,
   EntryLocation,
   EntryPhoto,
+  EntryStatus,
   MediaLink,
   MediaType,
   Reflection,
@@ -53,6 +54,10 @@ interface RawSeedEntry {
   reflections?: Reflection[] | null;
   /** Optional photo attachments - see Entry.photos. Passed through as-is. */
   photos?: EntryPhoto[] | null;
+  /** Optional planned/skipped status - see Entry.status. Absent = happened. */
+  status?: EntryStatus | null;
+  /** Optional creation time - see Entry.createdAt. */
+  createdAt?: string | null;
 }
 
 /**
@@ -140,6 +145,8 @@ function toEntry(raw: RawSeedEntry): Entry {
     ...(raw.endTimestamp ? { endTimestamp: raw.endTimestamp } : {}),
     ...(raw.reflections?.length ? { reflections: raw.reflections } : {}),
     ...(raw.photos?.length ? { photos: raw.photos } : {}),
+    ...(raw.status ? { status: raw.status } : {}),
+    ...(raw.createdAt ? { createdAt: raw.createdAt } : {}),
   };
 }
 

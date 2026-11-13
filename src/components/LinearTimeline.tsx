@@ -168,6 +168,16 @@ import {
 } from '../utils/hollowGlyphs';
 import { DateRange, useTimeRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
+import {
+  isSkipped,
+  isUnrealized,
+  SKIPPED_SPUR_DASH_ARRAY,
+  SKIPPED_SPUR_LENGTH_PX,
+  SKIPPED_SPUR_WIDTH,
+  UNREALIZED_DASH_ARRAY,
+  UNREALIZED_OUTLINE_GAP_PX,
+  UNREALIZED_OUTLINE_WIDTH,
+} from '../utils/entryStatus';
 // Shared with StarMap.tsx's own hover tooltip - see EntryTooltip.tsx's
 // header comment for why this was pulled out into one component instead
 // of each visualization keeping its own copy of the markup.
@@ -210,6 +220,12 @@ interface LinearTimelineProps {
    * treatment of its stars.
    */
   filterCategories: string[];
+  /**
+   * Whether planned/skipped entries count as filtered in - see
+   * EntrySelectionContext's `showUnrealized`. Same dimming as
+   * `filterCategories`.
+   */
+  showUnrealized: boolean;
   /**
    * Called with the clicked entry when a point or range is clicked -
    * wired by Timeline.tsx to useEntrySelection's `handleEntryClick`, the
@@ -429,6 +445,46 @@ const HOLLOW_WAVE_MIN_WAVELENGTH_PX = 16;
 /** How far (px) a drag must move before it starts sliding the selected range - see DRAG SLIDES A SUB-RANGE THROUGH TIME. */
 const SLIDE_DEAD_ZONE_PX = 3;
 
+/** Dash pattern for the NOW LINE - same as SpiralTimeline.tsx's NOW_LINE_DASH. */
+const NOW_LINE_DASH = '2,3';
+
+/**
+ * How far (px) above its row a SKIPPED entry's mark is lifted, with a
+ * dotted drop back down to that row at its planned date - see
+ * utils/entryStatus.ts. Kept under half a LANE_HEIGHT so a lifted capsule
+ * never reaches the lane above it.
+ */
+function skippedLift(entry: Entry): number {
+  return isSkipped(entry) ? SKIPPED_SPUR_LENGTH_PX : 0;
+}
+
+/** The dotted vertical "drop" tying a lifted skipped mark to its row. */
+function SkippedSpur({
+  x,
+  y1,
+  y2,
+  color,
+}: {
+  x: number;
+  y1: number;
+  y2: number;
+  color: string;
+}) {
+  return (
+    <line
+      x1={x}
+      x2={x}
+      y1={y1}
+      y2={y2}
+      stroke={color}
+      strokeWidth={SKIPPED_SPUR_WIDTH}
+      strokeDasharray={SKIPPED_SPUR_DASH_ARRAY}
+      strokeLinecap="round"
+      className="pointer-events-none"
+    />
+  );
+}
+
 /** A range's duration in ms. */
 function rangeSpan(range: DateRange): number {
   return range.end.getTime() - range.start.getTime();
@@ -493,6 +549,7 @@ export default function LinearTimeline({
   categories,
   hasAnyEntries,
   filterCategories,
+  showUnrealized,
   onEntryClick,
   openedEntryIds,
   expandedEntryId,
@@ -606,6 +663,19 @@ export default function LinearTimeline({
     () => new Set<string>(filterCategories),
     [filterCategories]
   );
+  /** Dimmed by the category filter, or by the "Planned & skipped" status filter. */
+  const isEntryFilteredOut = (entry: Entry): boolean =>
+    !activeCategorySet.has(entry.activityType) ||
+    (!showUnrealized && isUnrealized(entry));
+
+  /**
+   * NOW LINE: a dashed vertical line at today's date, so planned entries
+   * (see utils/entryStatus.ts) visibly sit to its right. Frozen at mount,
+   * same as SpiralTimeline.tsx's own `now` (see its "FROZEN AT MOUNT"
+   * comment) - and, like that marker, only drawn when today falls inside
+   * the visible axis.
+   */
+  const [now] = useState(() => new Date());
 
   // Whether there's anything actually visible to plot right now - see
   // StarMap.tsx's identical `isEmpty` comment and VizEmptyState.tsx's own
@@ -1192,6 +1262,7 @@ export default function LinearTimeline({
   // panning to an entry would silently break that alignment.
 
   const isReady = size.width > 0 && size.height > 0;
+  const nowX = xScale(now);
 
   return (
     // `fixed inset-0` (not a layout child) - see the FULL-BLEED CANVAS
@@ -1251,6 +1322,31 @@ export default function LinearTimeline({
          * rather than drawing it at a fixed spot and panning the view.
          */}
         <g transform={`translate(${contentOriginX},${contentOffsetY})`}>
+          {/* NOW LINE - see `now` above. Behind every entry. */}
+          {isReady && nowX >= 0 && nowX <= innerWidth && (
+            <g className="pointer-events-none">
+              <line
+                x1={nowX}
+                x2={nowX}
+                y1={plotContentTop}
+                y2={axisY}
+                stroke="currentColor"
+                strokeOpacity={0.5}
+                strokeWidth={1.5}
+                strokeDasharray={NOW_LINE_DASH}
+              />
+              <text
+                x={nowX}
+                y={plotContentTop - 4}
+                textAnchor="middle"
+                fill="currentColor"
+                className="select-none text-[10px] uppercase tracking-wide"
+                style={{ fontFamily: 'var(--font-body)' }}
+              >
+                Today
+              </text>
+            </g>
+          )}
           {/*
            * HOLLOW WAVES - see the HOLLOW ENTRIES comment. Drawn first so
            * they sit behind everything else. The opened-entry highlight
@@ -1260,22 +1356,30 @@ export default function LinearTimeline({
            * glow values (the capsules' +4px / 0.6 / opened-point-glow).
            */}
           {isReady &&
-            hollowRanges.map(({ entry, pathD, color, lane }) => {
+            hollowRanges.map(({ entry, pathD, color, lane, x0 }) => {
               const isOpened = openedEntryIdSet.has(entry.id);
               const isFocused = entry.id === expandedEntryId;
-              const isFilteredOut = !activeCategorySet.has(entry.activityType);
+              const isFilteredOut = isEntryFilteredOut(entry);
               return (
                 // Moved down to its orbit lane's row - the path itself is
                 // built around y = 0 (see `hollowRanges`).
                 <g
                   key={entry.id}
-                  transform={`translate(0,${orbitLaneY(lane)})`}
+                  transform={`translate(0,${orbitLaneY(lane) - skippedLift(entry)})`}
                   style={{
                     opacity: isFilteredOut ? FILTERED_OUT_OPACITY : 1,
                   }}
                   className="cursor-pointer transition-opacity duration-200"
                   {...hollowEntryHandlers(entry)}
                 >
+                  {isSkipped(entry) && (
+                    <SkippedSpur
+                      x={x0}
+                      y1={0}
+                      y2={SKIPPED_SPUR_LENGTH_PX}
+                      color={color}
+                    />
+                  )}
                   {/* Invisible, wider hit stroke - the 1.75px line alone is too thin to hover comfortably. */}
                   <path
                     d={pathD}
@@ -1318,22 +1422,28 @@ export default function LinearTimeline({
                     opacity={HOLLOW_WAVE_OPACITY}
                     className="pointer-events-none"
                   >
-                    <path
-                      d={pathD}
-                      fill="none"
-                      stroke={color}
-                      strokeWidth={HOLLOW_WAVE_GLOW_STROKE_WIDTH}
-                      strokeOpacity={HOLLOW_WAVE_GLOW_OPACITY}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      filter="url(#hollow-wave-glow)"
-                    />
+                    {/* PLANNED / SKIPPED: the wave's own line goes dashed (no glow, which would blur the dashes) - see utils/entryStatus.ts. */}
+                    {!isUnrealized(entry) && (
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke={color}
+                        strokeWidth={HOLLOW_WAVE_GLOW_STROKE_WIDTH}
+                        strokeOpacity={HOLLOW_WAVE_GLOW_OPACITY}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        filter="url(#hollow-wave-glow)"
+                      />
+                    )}
                     <path
                       d={pathD}
                       fill="none"
                       stroke={color}
                       strokeWidth={HOLLOW_WAVE_STROKE_WIDTH}
-                      strokeLinecap="round"
+                      strokeDasharray={
+                        isUnrealized(entry) ? UNREALIZED_DASH_ARRAY : undefined
+                      }
+                      strokeLinecap={isUnrealized(entry) ? 'butt' : 'round'}
                       strokeLinejoin="round"
                     />
                   </g>
@@ -1366,8 +1476,9 @@ export default function LinearTimeline({
               // showing gets a brighter opened highlight - see
               // utils/focusHighlight.ts.
               const isFocused = entry.id === expandedEntryId;
-              const isFilteredOut = !activeCategorySet.has(entry.activityType);
-              const y = BASELINE_Y + (lane + 1) * LANE_HEIGHT;
+              const isFilteredOut = isEntryFilteredOut(entry);
+              const laneY = BASELINE_Y + (lane + 1) * LANE_HEIGHT;
+              const y = laneY - skippedLift(entry);
               return (
                 // SELECTED-ENTRY HIGHLIGHT: one group per range, opacity
                 // applied once to the whole group (glow + capsule +
@@ -1381,6 +1492,25 @@ export default function LinearTimeline({
                   }}
                   className="transition-opacity duration-200"
                 >
+                  {isSkipped(entry) && (
+                    <SkippedSpur x={cxStart} y1={y} y2={laneY} color={color} />
+                  )}
+                  {/* PLANNED / SKIPPED: a dashed pill outline just outside the capsule - see utils/entryStatus.ts. */}
+                  {isUnrealized(entry) && (
+                    <rect
+                      {...capsuleOutlineRect(
+                        cxStart,
+                        cxEnd,
+                        y,
+                        UNREALIZED_OUTLINE_GAP_PX
+                      )}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={UNREALIZED_OUTLINE_WIDTH}
+                      strokeDasharray={UNREALIZED_DASH_ARRAY}
+                      className="pointer-events-none"
+                    />
+                  )}
                   {isOpened && (
                     // SELECTED-ENTRY HIGHLIGHT (capsule glow): same
                     // visual language as a point's glow circle just
@@ -1471,7 +1601,8 @@ export default function LinearTimeline({
             hollowPoints.map(({ entry, cx, color }) => {
               const isOpened = openedEntryIdSet.has(entry.id);
               const isFocused = entry.id === expandedEntryId;
-              const isFilteredOut = !activeCategorySet.has(entry.activityType);
+              const isFilteredOut = isEntryFilteredOut(entry);
+              const ringY = orbitRingY - skippedLift(entry);
               return (
                 <g
                   key={entry.id}
@@ -1483,7 +1614,7 @@ export default function LinearTimeline({
                   {isOpened && (
                     <circle
                       cx={cx}
-                      cy={orbitRingY}
+                      cy={ringY}
                       r={POINT_RADIUS + 5}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}
@@ -1493,21 +1624,32 @@ export default function LinearTimeline({
                       className="pointer-events-none"
                     />
                   )}
-                  {/* Hollow ring: a background-colored "cutout" with a category-colored border. Its opaque fill is also the hover/click target. */}
+                  {isSkipped(entry) && (
+                    <SkippedSpur
+                      x={cx}
+                      y1={ringY}
+                      y2={orbitRingY}
+                      color={color}
+                    />
+                  )}
+                  {/* Hollow ring: a background-colored "cutout" with a category-colored border. Its opaque fill is also the hover/click target. Dashed when planned/skipped - see utils/entryStatus.ts. */}
                   <circle
                     cx={cx}
-                    cy={orbitRingY}
+                    cy={ringY}
                     r={POINT_RADIUS}
                     fill="var(--bg-color)"
                     stroke={color}
                     strokeWidth={HOLLOW_POINT_STROKE_WIDTH}
+                    strokeDasharray={
+                      isUnrealized(entry) ? UNREALIZED_DASH_ARRAY : undefined
+                    }
                     className="cursor-pointer"
                     {...hollowEntryHandlers(entry)}
                   />
                   {isOpened && (
                     <circle
                       cx={cx}
-                      cy={orbitRingY}
+                      cy={ringY}
                       r={POINT_RADIUS + 3}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}
@@ -1522,7 +1664,9 @@ export default function LinearTimeline({
             points.map(({ entry, cx, color }) => {
               const isOpened = openedEntryIdSet.has(entry.id);
               const isFocused = entry.id === expandedEntryId;
-              const isFilteredOut = !activeCategorySet.has(entry.activityType);
+              const isFilteredOut = isEntryFilteredOut(entry);
+              const unrealized = isUnrealized(entry);
+              const pointY = BASELINE_Y - skippedLift(entry);
               return (
                 // SELECTED-ENTRY HIGHLIGHT: same per-entry <g> + opacity
                 // + glow/ring structure as StarMap.tsx's stars.map() -
@@ -1539,7 +1683,7 @@ export default function LinearTimeline({
                     // StarMap's opened-star glow circle.
                     <circle
                       cx={cx}
-                      cy={BASELINE_Y}
+                      cy={pointY}
                       r={POINT_RADIUS + 5}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}
@@ -1549,13 +1693,34 @@ export default function LinearTimeline({
                       className="pointer-events-none"
                     />
                   )}
+                  {isSkipped(entry) && (
+                    <SkippedSpur
+                      x={cx}
+                      y1={pointY}
+                      y2={BASELINE_Y}
+                      color={color}
+                    />
+                  )}
+                  {/* PLANNED / SKIPPED: the dot keeps its fill, with a dashed ring just outside it - see utils/entryStatus.ts. */}
+                  {unrealized && (
+                    <circle
+                      cx={cx}
+                      cy={pointY}
+                      r={POINT_RADIUS + UNREALIZED_OUTLINE_GAP_PX}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={UNREALIZED_OUTLINE_WIDTH}
+                      strokeDasharray={UNREALIZED_DASH_ARRAY}
+                      className="pointer-events-none"
+                    />
+                  )}
                   <circle
                     cx={cx}
-                    cy={BASELINE_Y}
+                    cy={pointY}
                     r={POINT_RADIUS}
                     fill={color}
                     stroke={color}
-                    strokeOpacity={0.35}
+                    strokeOpacity={unrealized ? 0 : 0.35}
                     strokeWidth={4}
                     className="cursor-pointer"
                     onMouseEnter={event =>
@@ -1581,7 +1746,7 @@ export default function LinearTimeline({
                     // top of an opened star.
                     <circle
                       cx={cx}
-                      cy={BASELINE_Y}
+                      cy={pointY}
                       r={POINT_RADIUS + 3}
                       fill="none"
                       stroke={OPENED_HIGHLIGHT_COLOR}

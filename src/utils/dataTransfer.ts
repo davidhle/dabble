@@ -30,6 +30,7 @@ import { Entry } from '../types/Entry';
 import { loadCategories, saveCategories } from './categories';
 import { loadEntries, saveEntries } from './entriesStorage';
 import { sanitizePhotos } from './photos';
+import { isEntryStatus } from './entryStatus';
 import { STORAGE_FULL_MESSAGE } from './safeStorage';
 
 /** The full shape of one exported/imported data file. */
@@ -171,9 +172,20 @@ export function applyImportedData(data: DabbleExportData): void {
   // <img src>, so anything that isn't an image data URL is dropped. A
   // file without photos (any export made before they existed) passes
   // through unchanged.
-  const entries = data.entries.map(entry => {
-    if (entry.photos === undefined) return entry;
-    const { photos: rawPhotos, ...rest } = entry;
+  //
+  // `status`/`createdAt` get the same treatment: an unrecognized status
+  // (or a non-string createdAt) is dropped rather than stored, so a bad
+  // value can't make an entry render as something it isn't - absent
+  // status means "happened", exactly like every pre-status export.
+  const entries = data.entries.map(rawEntry => {
+    const { status, createdAt, ...entry } = rawEntry;
+    const normalized: Entry = {
+      ...entry,
+      ...(isEntryStatus(status) ? { status } : {}),
+      ...(typeof createdAt === 'string' ? { createdAt } : {}),
+    };
+    if (normalized.photos === undefined) return normalized;
+    const { photos: rawPhotos, ...rest } = normalized;
     const photos = sanitizePhotos(rawPhotos);
     return photos ? { ...rest, photos } : rest;
   });

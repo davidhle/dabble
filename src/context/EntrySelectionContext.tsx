@@ -160,6 +160,14 @@ export interface EntrySelectionContextValue {
   categoryGroups: CategoryGroup[];
   filterCategories: string[];
   handleToggleFilterCategory: (category: string) => void;
+  /**
+   * Whether planned/skipped entries (see utils/entryStatus.ts) count as
+   * filtered IN. Visible by default; FilterBar's "Planned & skipped" chip
+   * toggles it, and it dims (never removes) those entries exactly like an
+   * inactive category does.
+   */
+  showUnrealized: boolean;
+  handleToggleShowUnrealized: () => void;
   handleResetFilters: () => void;
   hasSelection: boolean;
   resetPending: boolean;
@@ -355,6 +363,8 @@ export function EntrySelectionProvider({
     });
   }, [categories]);
 
+  const [showUnrealized, setShowUnrealized] = useState(true);
+
   const [resetPending, setResetPending] = useState(false);
   const resetPendingTimeoutRef = useRef<number | null>(null);
 
@@ -388,6 +398,7 @@ export function EntrySelectionProvider({
     }
     setSelectedEntries([]);
     setFilterCategories(categories.map(category => category.id));
+    setShowUnrealized(true);
     setSortMode('date');
     setResetPending(false);
     pageFullResetRef.current?.();
@@ -473,9 +484,15 @@ export function EntrySelectionProvider({
     [cancelResetPending]
   );
 
+  const handleToggleShowUnrealized = useCallback(() => {
+    cancelResetPending();
+    setShowUnrealized(current => !current);
+  }, [cancelResetPending]);
+
   const handleResetFilters = useCallback(() => {
     cancelResetPending();
     setFilterCategories(categories.map(category => category.id));
+    setShowUnrealized(true);
   }, [cancelResetPending, categories]);
 
   const handleSortModeChange = useCallback(
@@ -661,6 +678,8 @@ export function EntrySelectionProvider({
       categoryGroups,
       filterCategories,
       handleToggleFilterCategory,
+      showUnrealized,
+      handleToggleShowUnrealized,
       handleResetFilters,
       hasSelection,
       resetPending,
@@ -689,6 +708,8 @@ export function EntrySelectionProvider({
       categoryGroups,
       filterCategories,
       handleToggleFilterCategory,
+      showUnrealized,
+      handleToggleShowUnrealized,
       handleResetFilters,
       hasSelection,
       resetPending,

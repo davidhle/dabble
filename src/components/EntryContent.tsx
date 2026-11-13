@@ -38,6 +38,7 @@ import { useState } from 'react';
 import { Entry, Reflection } from '../types/Entry';
 import { linkify } from '../utils/linkify';
 import { formatSingleDate } from '../utils/formatEntryDate';
+import { isReflectionBefore } from '../utils/entryStatus';
 import AddReflectionForm from './AddReflectionForm';
 import IconButton from './IconButton';
 import MediaLinkList from './MediaLinkList';
@@ -133,6 +134,13 @@ interface EntryReflectionsProps {
    * form stays open so the reflection isn't lost.
    */
   onUpdate: (entry: Entry) => boolean;
+  /**
+   * Opens the add-reflection form on mount - used right after a planned
+   * entry is marked skipped, to offer an (optional) "why not?" note.
+   */
+  initialOpenNew?: boolean;
+  /** Placeholder for the add-reflection form's text box, when set. */
+  newReflectionPlaceholder?: string;
 }
 
 /**
@@ -142,8 +150,15 @@ interface EntryReflectionsProps {
  */
 type OpenForm = 'new' | string | null;
 
-export function EntryReflections({ entry, onUpdate }: EntryReflectionsProps) {
-  const [openForm, setOpenForm] = useState<OpenForm>(null);
+export function EntryReflections({
+  entry,
+  onUpdate,
+  initialOpenNew = false,
+  newReflectionPlaceholder,
+}: EntryReflectionsProps) {
+  const [openForm, setOpenForm] = useState<OpenForm>(
+    initialOpenNew ? 'new' : null
+  );
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
     null
   );
@@ -217,6 +232,15 @@ export function EntryReflections({ entry, onUpdate }: EntryReflectionsProps) {
                     {/* Date-only, stored at midnight UTC - see Reflection.writtenDate. */}
                     {formatSingleDate(new Date(reflection.writtenDate), false)}
                   </p>
+                  {/*
+                   * Written before the entry's own date - notes on a plan
+                   * (see utils/entryStatus.ts).
+                   */}
+                  {isReflectionBefore(reflection, entry) && (
+                    <span className="rounded-full border border-dashed border-[var(--text-muted-color)] px-1.5 text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
+                      Before
+                    </span>
+                  )}
                   <div className="-my-1.5 ml-auto flex items-center gap-0.5">
                     <IconButton
                       onClick={() => openEditForm(reflection.id)}
@@ -319,6 +343,7 @@ export function EntryReflections({ entry, onUpdate }: EntryReflectionsProps) {
           entry={entry}
           onSave={handleSaveNew}
           onCancel={() => setOpenForm(null)}
+          placeholder={newReflectionPlaceholder}
         />
       ) : (
         openForm === null && (

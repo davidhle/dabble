@@ -138,6 +138,7 @@ export default function Spiral({
     handleSortModeChange,
     categoryGroups,
     filterCategories,
+    showUnrealized,
     handleToggleFilterCategory,
     handleResetFilters,
     hasSelection,
@@ -439,6 +440,7 @@ export default function Spiral({
         categories={categories}
         hasAnyEntries={entries.length > 0}
         filterCategories={filterCategories}
+        showUnrealized={showUnrealized}
         onEntryClick={handleCanvasEntryClick}
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}

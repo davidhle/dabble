@@ -129,6 +129,7 @@ import MoodPicker from './MoodPicker';
 import MediaLinksInput from './MediaLinksInput';
 import PhotoPicker from './PhotoPicker';
 import { useMotionEnabled } from '../hooks/useMotionEnabled';
+import { toLocalDateString } from '../utils/entryStatus';
 
 /**
  * Sentinel <option> value for the trailing "+ Add new category" dropdown
@@ -138,6 +139,9 @@ import { useMotionEnabled } from '../hooks/useMotionEnabled';
  * opens the inline sub-form below; see handleActivityTypeChange.
  */
 const ADD_NEW_CATEGORY_VALUE = '__add_new_category__';
+
+const FUTURE_DATE_ERROR =
+  'Future dates are only for planned entries - turn on "Planned / upcoming".';
 
 interface AddEntryFormProps {
   isOpen: boolean;
@@ -167,6 +171,7 @@ interface AddEntryFormProps {
 
 interface FormErrors {
   title?: string;
+  date?: string;
   endDate?: string;
 }
 
@@ -251,6 +256,11 @@ export default function AddEntryForm({
   // Independent of the hasSpecificTime toggle above - either can be on,
   // off, or both, without affecting the other's UI or state.
   const [isMultiDay, setIsMultiDay] = useState(false);
+
+  // ─── Planned / upcoming ───
+  // Saves the entry with status 'planned' (see utils/entryStatus.ts) -
+  // the only way a future date is allowed (see isFutureWithoutPlanned).
+  const [isPlanned, setIsPlanned] = useState(false);
   // Solid (dot/capsule) vs. hollow (ring/wave) - see Entry.visualStyle.
   // Reset to the category's domain default on EVERY category change (see
   // selectCategory), but freely overridable after that; handleSubmit only
@@ -379,6 +389,7 @@ export default function AddEntryForm({
         setIsMultiDay(false);
         setEndDate('');
       }
+      setIsPlanned(editingEntry.status === 'planned');
     } else {
       // ─── ADD MODE: blank form, defaulting the date/time to now ───
       selectCategory(
@@ -408,6 +419,7 @@ export default function AddEntryForm({
       setHasSpecificTime(false);
       setIsMultiDay(false);
       setEndDate('');
+      setIsPlanned(false);
     }
   }, [isOpen, editingEntry]);
 
@@ -416,13 +428,21 @@ export default function AddEntryForm({
   const isEndDateBeforeStart =
     isMultiDay && endDate !== '' && endDate < dateOnly;
 
+  // Future dates are only for planned entries - a past/present entry
+  // can't have happened yet. Compared as local YYYY-MM-DD strings, the
+  // same format the date inputs use (and their `max` below).
+  const todayDate = toLocalDateString(new Date());
+  const isFutureWithoutPlanned =
+    !isPlanned && (dateOnly > todayDate || (isMultiDay && endDate > todayDate));
+
   /**
    * Determines if the user can proceed from Step 1 to Step 2.
    * Activity Type always has a value (see DYNAMIC CATEGORIES comment
    * above), so Title and (when a range is enabled) a valid end date are
    * the only checks needed here.
    */
-  const canProceedToStep2 = title.trim().length > 0 && !isEndDateBeforeStart;
+  const canProceedToStep2 =
+    title.trim().length > 0 && !isEndDateBeforeStart && !isFutureWithoutPlanned;
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -433,6 +453,10 @@ export default function AddEntryForm({
 
     if (isEndDateBeforeStart) {
       newErrors.endDate = 'End date cannot be before the start date';
+    }
+
+    if (isFutureWithoutPlanned) {
+      newErrors.date = FUTURE_DATE_ERROR;
     }
 
     setErrors(newErrors);
@@ -615,6 +639,20 @@ export default function AddEntryForm({
         visualStyle !== getDefaultVisualStyle(activityType, categories)
           ? visualStyle
           : undefined,
+      // Planned via the toggle; an edited skipped entry stays skipped
+      // unless switched to planned (resolving it otherwise happens from
+      // the sidebar - see FocusedEntryView.tsx). Unset = happened.
+      status: isPlanned
+        ? ('planned' as const)
+        : editingEntry?.status === 'skipped'
+          ? ('skipped' as const)
+          : undefined,
+      // New entries get stamped now. An older entry being turned into a
+      // plan gets stamped too, since that's when the plan was made - its
+      // "Did this happen? -> Yes" Before-reflection is dated from this.
+      createdAt:
+        editingEntry?.createdAt ??
+        (!editingEntry || isPlanned ? new Date().toISOString() : undefined),
     };
 
     let saved: boolean;
@@ -678,6 +716,7 @@ export default function AddEntryForm({
     setTimeOnly('');
     setIsMultiDay(false);
     setEndDate('');
+    setIsPlanned(false);
     setErrors({});
   }, [categories]);
 
@@ -1397,9 +1436,39 @@ export default function AddEntryForm({
                           type="date"
                           id="dateOnly"
                           value={dateOnly}
+                          max={isPlanned ? undefined : todayDate}
                           onChange={e => setDateOnly(e.target.value)}
-                          className="mt-1 block w-full rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
+                          className={`mt-1 block w-full rounded-md border bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:outline-none focus:ring-1 ${
+                            isFutureWithoutPlanned
+                              ? 'border-red-500/60 focus:border-red-500 focus:ring-red-500'
+                              : 'border-[var(--panel-border-color)] focus:border-[var(--accent-color)] focus:ring-[var(--accent-color)]'
+                          }`}
                         />
+                        {isFutureWithoutPlanned && (
+                          <p className="mt-1 text-sm text-red-400">
+                            {FUTURE_DATE_ERROR}
+                          </p>
+                        )}
+
+                        {/*
+                         * Planned / upcoming - see `isPlanned`. Same
+                         * checkbox pattern as the two toggles below.
+                         */}
+                        <div className="mt-2 flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="isPlanned"
+                            checked={isPlanned}
+                            onChange={e => setIsPlanned(e.target.checked)}
+                            className="h-4 w-4 rounded border-[var(--field-border-strong)] bg-[var(--field-tint-1)] text-[var(--accent-color)] focus:ring-[var(--accent-color)]"
+                          />
+                          <label
+                            htmlFor="isPlanned"
+                            className="text-sm text-[var(--text-muted-color)]"
+                          >
+                            Planned / upcoming
+                          </label>
+                        </div>
 
                         {/*
                          * Optional specific time - off by default, since
@@ -1478,6 +1547,7 @@ export default function AddEntryForm({
                               type="date"
                               id="endDate"
                               value={endDate}
+                              max={isPlanned ? undefined : todayDate}
                               onChange={e => setEndDate(e.target.value)}
                               className={`mt-1 block w-full rounded-md border bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:outline-none focus:ring-1 ${
                                 errors.endDate || isEndDateBeforeStart

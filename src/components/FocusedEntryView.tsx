@@ -51,7 +51,7 @@
  * See that file.
  */
 
-import { Ref } from 'react';
+import { Ref, useEffect, useState } from 'react';
 import { Entry } from '../types/Entry';
 import { SelectedEntry } from '../hooks/useEntrySelection';
 import { FocusedView } from '../context/EntrySelectionContext';
@@ -61,6 +61,7 @@ import { formatEntryDate } from '../utils/formatEntryDate';
 import { formatLocationDisplay } from '../utils/formatLocation';
 import { EntryOriginalContent, EntryReflections } from './EntryContent';
 import IconButton from './IconButton';
+import EntryStatusPrompt from './EntryStatusPrompt';
 import { ActivePlayerProvider } from './MediaLinkList';
 
 interface FocusedEntryViewProps {
@@ -103,6 +104,20 @@ export default function FocusedEntryView({
   const entry = selectedEntries.find(
     selected => selected.entry.id === focusedEntryId
   )?.entry;
+
+  /**
+   * SKIP PROMPT: bumped when EntryStatusPrompt marks this entry skipped.
+   * While nonzero, the Reflections tab opens with its add form showing,
+   * asking "Why didn't it happen?" (optional - it can be cancelled). Cleared
+   * on leaving that tab or switching entry, so it only fires once.
+   */
+  const [skipPromptNonce, setSkipPromptNonce] = useState(0);
+  useEffect(() => {
+    if (view !== 'reflections') setSkipPromptNonce(0);
+  }, [view]);
+  useEffect(() => {
+    setSkipPromptNonce(0);
+  }, [focusedEntryId]);
 
   if (!entry) return null;
 
@@ -214,8 +229,24 @@ export default function FocusedEntryView({
             {getCategoryName(entry.activityType)} &middot;{' '}
             {formatEntryDate(entry)}
             {formattedLocation && <> &middot; {formattedLocation}</>}
+            {/* PLANNED / SKIPPED chip - dashed, like the entry's mark on the canvas (see utils/entryStatus.ts). */}
+            {entry.status && (
+              <span className="ml-2 inline-flex items-center rounded-full border border-dashed border-[var(--text-muted-color)] px-2 py-0.5 align-middle text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary-color)]">
+                {entry.status === 'planned' ? 'Planned' : 'Skipped'}
+              </span>
+            )}
           </p>
         </div>
+
+        <EntryStatusPrompt
+          entry={entry}
+          onUpdateEntry={onUpdateEntry}
+          onEdit={onEdit}
+          onSkipped={() => {
+            setSkipPromptNonce(nonce => nonce + 1);
+            onViewChange('reflections');
+          }}
+        />
 
         {/* Same track/pill styling as FilterBar's sort-mode toggle. */}
         <div className="flex gap-1 rounded-lg bg-[var(--panel-bg-color-solid)] p-1">
@@ -266,7 +297,17 @@ export default function FocusedEntryView({
             {view === 'original' ? (
               <EntryOriginalContent entry={entry} />
             ) : (
-              <EntryReflections entry={entry} onUpdate={onUpdateEntry} />
+              <EntryReflections
+                // Remounted on each skip so its add form opens - see
+                // `skipPromptNonce`.
+                key={skipPromptNonce}
+                entry={entry}
+                onUpdate={onUpdateEntry}
+                initialOpenNew={skipPromptNonce > 0}
+                newReflectionPlaceholder={
+                  skipPromptNonce > 0 ? "Why didn't it happen?" : undefined
+                }
+              />
             )}
           </ActivePlayerProvider>
         </div>

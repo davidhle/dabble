@@ -122,7 +122,16 @@ export default function FilterBar({
   // modal nested inside a `backdrop-filter` ancestor gets contained by
   // THAT ancestor instead of the viewport, breaking the "full-screen
   // overlay" look a modal needs.
-  const { openManageCategoriesModal } = useEntrySelectionContext();
+  //
+  // The "Planned & skipped" chip below reads its state straight from the
+  // context too, rather than via props from each page - it's the same on
+  // every page, and the context already owns it alongside
+  // `filterCategories`.
+  const {
+    openManageCategoriesModal,
+    showUnrealized,
+    handleToggleShowUnrealized,
+  } = useEntrySelectionContext();
 
   const activeCount = filterCategories.length;
   const totalCount = categories.length;
@@ -277,6 +286,30 @@ export default function FilterBar({
               </section>
             );
           })}
+
+          {/*
+           * STATUS FILTER: one chip for planned + skipped entries (see
+           * utils/entryStatus.ts). Same dim-don't-remove behavior as a
+           * category chip. Its dashed border echoes the dashed outline
+           * those entries get on the canvas.
+           */}
+          <section aria-label="Status filter">
+            <h3 className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted-color)]">
+              Status
+            </h3>
+            <button
+              type="button"
+              onClick={handleToggleShowUnrealized}
+              aria-pressed={showUnrealized}
+              className={`rounded-full border border-dashed border-[var(--text-muted-color)] px-2.5 py-1 text-xs font-medium transition-colors ${
+                showUnrealized
+                  ? 'bg-[var(--field-tint-3)] text-[var(--text-color)]'
+                  : 'bg-[var(--field-tint-1)] text-[var(--text-muted-color)]'
+              }`}
+            >
+              Planned &amp; skipped
+            </button>
+          </section>
         </div>
       )}
 

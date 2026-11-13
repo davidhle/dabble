@@ -294,10 +294,32 @@ export interface Entry {
    * directly.
    */
   visualStyle?: VisualStyle;
+
+  /**
+   * 'planned' (a future intention) or 'skipped' (planned, but it didn't
+   * happen) - see utils/entryStatus.ts. A planned entry may have a future
+   * `timestamp`; the sidebar asks "Did this happen?" once it's passed and
+   * never resolves it on its own.
+   *
+   * OPTIONAL & BACKWARD-COMPATIBLE: absent means the entry happened -
+   * every entry created before this field existed, with no migration.
+   */
+  status?: EntryStatus;
+
+  /**
+   * When the entry was first saved, as an ISO string - distinct from
+   * `timestamp` (when the activity happens). Used to date the "Before"
+   * reflection a planned entry's notes become when it's resolved as
+   * happened. Absent on entries created before this field existed.
+   */
+  createdAt?: string;
 }
 
 /** See Entry.visualStyle. */
 export type VisualStyle = 'solid' | 'hollow';
+
+/** See Entry.status and utils/entryStatus.ts. */
+export type EntryStatus = 'planned' | 'skipped';
 
 /**
  * Reflection Interface

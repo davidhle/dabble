@@ -15,6 +15,12 @@
  * otherwise its timestamp) - a reflection can't predate the thing it
  * reflects on - and can't be later than today.
  *
+ * PLANNED / SKIPPED ENTRIES (see utils/entryStatus.ts) are the exception:
+ * writing about a plan before it happens is the point, so their floor is
+ * the day the entry was created (or none, without a createdAt). Editing
+ * a reflection never rejects the date it already has - e.g. a "Before"
+ * reflection kept after a plan was resolved as happened.
+ *
  * ADD VS. EDIT MODE: passing `reflection` pre-fills every field from it
  * and saves with that reflection's own id, so the caller can replace it in
  * place in `entry.reflections`. The same date range applies in both modes.
@@ -24,13 +30,7 @@ import { useState } from 'react';
 import { Entry, MediaLink, Reflection } from '../types/Entry';
 import MoodPicker from './MoodPicker';
 import MediaLinksInput from './MediaLinksInput';
-
-/** An ISO timestamp's calendar date (YYYY-MM-DD) in the viewer's local timezone. */
-function toLocalDateString(date: Date): string {
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 10);
-}
+import { isUnrealized, toLocalDateString } from '../utils/entryStatus';
 
 /**
  * The earliest allowed writtenDate for a reflection on `entry`, read back
@@ -39,6 +39,9 @@ function toLocalDateString(date: Date): string {
  * hasTime === false (placeholder midnight UTC - see types/Entry.ts).
  */
 function getMinReflectionDate(entry: Entry): string {
+  if (isUnrealized(entry)) {
+    return entry.createdAt ? toLocalDateString(new Date(entry.createdAt)) : '';
+  }
   if (entry.endTimestamp) {
     return toLocalDateString(new Date(entry.endTimestamp));
   }
@@ -55,6 +58,8 @@ interface AddReflectionFormProps {
   /** Called with the new/edited reflection; the caller persists it onto `entry`. */
   onSave: (reflection: Reflection) => void;
   onCancel: () => void;
+  /** Overrides the text box's placeholder - e.g. "Why didn't it happen?" for a just-skipped entry. */
+  placeholder?: string;
 }
 
 export default function AddReflectionForm({
@@ -62,8 +67,14 @@ export default function AddReflectionForm({
   reflection,
   onSave,
   onCancel,
+  placeholder,
 }: AddReflectionFormProps) {
-  const minDate = getMinReflectionDate(entry);
+  const entryMinDate = getMinReflectionDate(entry);
+  const existingDate = reflection?.writtenDate.slice(0, 10);
+  const minDate =
+    existingDate && entryMinDate && existingDate < entryMinDate
+      ? existingDate
+      : entryMinDate;
   const maxDate = toLocalDateString(new Date());
 
   // writtenDate is stored at midnight UTC, so its UTC date is the picked date.
@@ -87,7 +98,7 @@ export default function AddReflectionForm({
     // YYYY-MM-DD strings compare correctly as plain strings.
     if (!writtenDate) {
       newErrors.writtenDate = 'Pick the date this reflection was written.';
-    } else if (writtenDate < minDate) {
+    } else if (minDate && writtenDate < minDate) {
       newErrors.writtenDate = `Can't be before the entry itself (${minDate}).`;
     } else if (writtenDate > maxDate) {
       newErrors.writtenDate = "Can't be in the future.";
@@ -131,7 +142,7 @@ export default function AddReflectionForm({
           id={`reflection-date-${idSuffix}`}
           type="date"
           value={writtenDate}
-          min={minDate}
+          min={minDate || undefined}
           max={maxDate}
           onChange={e => setWrittenDate(e.target.value)}
           className={fieldClassName}
@@ -155,7 +166,9 @@ export default function AddReflectionForm({
           value={text}
           onChange={e => setText(e.target.value)}
           rows={4}
-          placeholder="Looking back, how do you feel about this now?"
+          placeholder={
+            placeholder ?? 'Looking back, how do you feel about this now?'
+          }
           className={fieldClassName}
         />
         {errors.text && (

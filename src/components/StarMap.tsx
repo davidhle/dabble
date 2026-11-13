@@ -140,6 +140,12 @@ import {
 // activity's color) always matches a star's color in this view - see the
 // comment in colors.ts for why that mapping isn't duplicated per-component.
 import { getActivityColor } from '../utils/colors';
+import {
+  isUnrealized,
+  UNREALIZED_DASH_ARRAY,
+  UNREALIZED_OUTLINE_GAP_PX,
+  UNREALIZED_OUTLINE_WIDTH,
+} from '../utils/entryStatus';
 // Shared with LinearTimeline.tsx's own hover tooltip - see
 // EntryTooltip.tsx's header comment for why this is a shared pattern
 // across both visualization views rather than duplicated per-component.
@@ -220,6 +226,12 @@ interface StarMapProps {
    * because its category gets filtered out here.
    */
   filterCategories: string[];
+  /**
+   * Whether planned/skipped entries count as filtered in - see
+   * EntrySelectionContext's `showUnrealized`. Same dim-don't-remove
+   * treatment as `filterCategories`.
+   */
+  showUnrealized: boolean;
   /**
    * The sidebar overlay's current rendered width in pixels (0 when it
    * isn't rendered, i.e. `selectedEntries` is empty) - see the
@@ -581,6 +593,7 @@ export default function StarMap({
   openedEntryIds,
   expandedEntryId,
   filterCategories,
+  showUnrealized,
   sidebarWidth,
   sidebarSide,
   resetViewSignal,
@@ -1327,6 +1340,10 @@ export default function StarMap({
     () => new Set<string>(filterCategories),
     [filterCategories]
   );
+  /** Dimmed by the category filter, or by the "Planned & skipped" status filter. */
+  const isEntryFilteredOut = (entry: Entry): boolean =>
+    !activeCategorySet.has(entry.activityType) ||
+    (!showUnrealized && isUnrealized(entry));
 
   // Whether there's anything actually visible to plot right now - "of the
   // entries inside the current time window (already time-filtered by
@@ -1556,7 +1573,7 @@ export default function StarMap({
             auroras.map(({ entry, path, segments, filterIdBase, streaks }) => {
               const isOpened = openedEntryIdSet.has(entry.id);
               const isFocused = entry.id === expandedEntryId;
-              const isFilteredOut = !activeCategorySet.has(entry.activityType);
+              const isFilteredOut = isEntryFilteredOut(entry);
               const fills = segments.map(segment => (
                 <path
                   key={segment.gradientId}
@@ -1608,6 +1625,18 @@ export default function StarMap({
                       </g>
                     </g>
                   </g>
+                  {/* PLANNED / SKIPPED: a dashed outline around the ribbon - see utils/entryStatus.ts. */}
+                  {isUnrealized(entry) && (
+                    <path
+                      d={path}
+                      fill="none"
+                      stroke={getActivityColor(entry.activityType)}
+                      strokeWidth={UNREALIZED_OUTLINE_WIDTH}
+                      strokeDasharray={UNREALIZED_DASH_ARRAY}
+                      strokeLinejoin="round"
+                      className="pointer-events-none"
+                    />
+                  )}
                   {isOpened && (
                     <path
                       d={path}
@@ -1690,12 +1719,13 @@ export default function StarMap({
             // the same seeded spot a star would take; everything else
             // here - highlight, hover, click - is shared.
             const radius = hollow ? RING_RADIUS : starRadius;
+            const unrealized = isUnrealized(entry);
             const isOpened = openedEntryIdSet.has(entry.id);
             // FOCUSED ENTRY: the one the sidebar's FocusedEntryView is
             // showing gets a brighter opened highlight - see
             // utils/focusHighlight.ts.
             const isFocused = entry.id === expandedEntryId;
-            const isFilteredOut = !activeCategorySet.has(entry.activityType);
+            const isFilteredOut = isEntryFilteredOut(entry);
             return (
               // Opacity is set on the whole group (glow + star + ring)
               // rather than per-circle, so a filtered-out star's "opened"
@@ -1723,14 +1753,34 @@ export default function StarMap({
                     className="pointer-events-none"
                   />
                 )}
+                {/*
+                 * PLANNED / SKIPPED (see utils/entryStatus.ts): a solid
+                 * star keeps its fill and gets a dashed ring just outside
+                 * it; a hollow ring's own stroke is dashed instead (below).
+                 */}
+                {unrealized && !hollow && (
+                  <circle
+                    cx={x}
+                    cy={y}
+                    r={radius + UNREALIZED_OUTLINE_GAP_PX}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={UNREALIZED_OUTLINE_WIDTH}
+                    strokeDasharray={UNREALIZED_DASH_ARRAY}
+                    className="pointer-events-none"
+                  />
+                )}
                 <circle
                   cx={x}
                   cy={y}
                   r={radius}
                   fill={hollow ? 'var(--bg-color)' : color}
                   stroke={color}
-                  strokeOpacity={hollow ? 1 : 0.35}
+                  strokeOpacity={hollow ? 1 : unrealized ? 0 : 0.35}
                   strokeWidth={hollow ? HOLLOW_POINT_STROKE_WIDTH : 4}
+                  strokeDasharray={
+                    unrealized && hollow ? UNREALIZED_DASH_ARRAY : undefined
+                  }
                   className="cursor-pointer"
                   onClick={() => onStarClick(entry)}
                   // Same hover handlers (and the EDIT: no more native

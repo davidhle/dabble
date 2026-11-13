@@ -473,6 +473,16 @@ import {
 } from '../utils/hollowGlyphs';
 import { DateRange, useTimeRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
+import {
+  isSkipped,
+  isUnrealized,
+  SKIPPED_SPUR_DASH_ARRAY,
+  SKIPPED_SPUR_LENGTH_PX,
+  SKIPPED_SPUR_WIDTH,
+  UNREALIZED_DASH_ARRAY,
+  UNREALIZED_OUTLINE_GAP_PX,
+  UNREALIZED_OUTLINE_WIDTH,
+} from '../utils/entryStatus';
 // Same date/time formatting the "now" marker's tooltip uses for its live
 // clock - see the top-of-file "NOW MARKER" comment and formatSingleDate's
 // own comment in formatEntryDate.ts.
@@ -521,6 +531,12 @@ interface SpiralTimelineProps {
    * points/capsules.
    */
   filterCategories: string[];
+  /**
+   * Whether planned/skipped entries count as filtered in - see
+   * EntrySelectionContext's `showUnrealized`. Same dimming as
+   * `filterCategories`.
+   */
+  showUnrealized: boolean;
   /**
    * Called with the clicked entry when a point or arc is clicked - wired
    * by Spiral.tsx to useEntrySelection's `handleEntryClick`, the same
@@ -879,6 +895,29 @@ const NOW_LINE_DASH = '2,3';
  * only its thin rays reaching past it.
  */
 const NOW_GLYPH_FONT_SIZE_PX = 18;
+
+/**
+ * Gap (px) between the "now" glyph's edge (taken as half its font size)
+ * and the near edge of its "Today" label - see the TODAY LABEL comment in
+ * the `nowMarker` useMemo.
+ */
+const NOW_LABEL_GAP_PX = 4;
+
+/** Half-span (in `t`) of the two-point sample the TODAY LABEL's tangent is estimated from - a few px of arc at typical sizes. */
+const NOW_LABEL_TANGENT_EPSILON_T = 0.0005;
+
+/**
+ * Arc length (px) the TODAY LABEL's curve extends either side of the
+ * glyph - comfortably longer than half the word, since a <textPath> drops
+ * any glyph that runs off the end of its path.
+ */
+const NOW_LABEL_PATH_HALF_SPAN_PX = 45;
+
+/** Samples along the TODAY LABEL's curve - plenty for a ~90px arc. */
+const NOW_LABEL_PATH_SAMPLES = 24;
+
+/** `id` of the TODAY LABEL's <textPath> curve - one spiral per page, so a fixed id is unique. */
+const NOW_LABEL_PATH_ID = 'spiral-now-label-path';
 
 /** Resting / hovered opacity of the "now" glyph - same idea as `YEAR_GLYPH_OPACITY`/`YEAR_GLYPH_HOVER_OPACITY`, just a bit stronger at rest so it doesn't read as quietly as a plain year waypoint. */
 const NOW_GLYPH_OPACITY = 0.7;
@@ -1332,15 +1371,16 @@ function buildOrbitWavePath(
   amplitude: number,
   cycles: number,
   params: SpiralParams,
-  sampleCount: number
+  sampleCount: number,
+  radiusOffset = 0
 ): string {
   const rawSpan = rawT1 - rawT0;
   const points: { x: number; y: number }[] = [];
 
   for (let i = 0; i <= sampleCount; i++) {
     const t = t0 + ((t1 - t0) * i) / sampleCount;
-    const center = spiralPoint(t, params);
-    const normal = spiralOutwardNormal(t, params, 0, center);
+    const center = spiralPoint(t, params, radiusOffset);
+    const normal = spiralOutwardNormal(t, params, radiusOffset, center);
     const phase = rawSpan === 0 ? 0 : (t - rawT0) / rawSpan;
     const offset = amplitude * Math.sin(2 * Math.PI * cycles * phase);
     points.push({
@@ -1352,11 +1392,35 @@ function buildOrbitWavePath(
   return buildPolylinePath(points);
 }
 
+/** The dotted connector from a skipped mark back to its spot on the curve - see SKIPPED SPUR. */
+function SkippedSpur({
+  spur,
+  color,
+}: {
+  spur: { from: { x: number; y: number }; to: { x: number; y: number } };
+  color: string;
+}) {
+  return (
+    <line
+      x1={spur.from.x}
+      y1={spur.from.y}
+      x2={spur.to.x}
+      y2={spur.to.y}
+      stroke={color}
+      strokeWidth={SKIPPED_SPUR_WIDTH}
+      strokeDasharray={SKIPPED_SPUR_DASH_ARRAY}
+      strokeLinecap="round"
+      className="pointer-events-none"
+    />
+  );
+}
+
 export default function SpiralTimeline({
   entries,
   categories,
   hasAnyEntries,
   filterCategories,
+  showUnrealized,
   onEntryClick,
   openedEntryIds,
   expandedEntryId,
@@ -1692,6 +1756,33 @@ export default function SpiralTimeline({
     [spiralSamples]
   );
 
+  /**
+   * PAST / FUTURE SPLIT: planned entries (see utils/entryStatus.ts) can
+   * be dated after today, and TimeRangeContext's fullRange already spans
+   * them - so whenever one exists, the domain (and its tween, RANGE
+   * TRANSITION below) reaches past `now` on its own, with no extension
+   * logic here. The curve is then drawn solid up to `now` and dotted
+   * beyond it, the "not (yet) happened" stretch the planned entries sit
+   * on. When nothing is planned, `now` is the rim (t = 1) and the whole
+   * curve stays solid, exactly as before.
+   */
+  const nowT = reachesNow ? clampT(normalize(now)) : 1;
+  const { pastPathD, futurePathD } = useMemo(() => {
+    if (nowT >= 1) return { pastPathD: spiralPathD, futurePathD: null };
+    const splitIndex = nowT * spiralSampleCount;
+    const nowPoint = spiralPoint(nowT, spiralParams);
+    return {
+      pastPathD: buildPolylinePath([
+        ...spiralSamples.slice(0, Math.floor(splitIndex) + 1),
+        nowPoint,
+      ]),
+      futurePathD: buildPolylinePath([
+        nowPoint,
+        ...spiralSamples.slice(Math.ceil(splitIndex)),
+      ]),
+    };
+  }, [nowT, spiralPathD, spiralSamples, spiralSampleCount, spiralParams]);
+
   // Cumulative Euclidean distance up to each sample - since every
   // segment is straight, this sum IS the path's exact length at that
   // sample, the same units `tToArcLength`/`arcLengthToT` both work in.
@@ -1828,6 +1919,10 @@ export default function SpiralTimeline({
     () => new Set<string>(filterCategories),
     [filterCategories]
   );
+  /** Dimmed by the category filter, or by the "Planned & skipped" status filter. */
+  const isEntryFilteredOut = (entry: Entry): boolean =>
+    !activeCategorySet.has(entry.activityType) ||
+    (!showUnrealized && isUnrealized(entry));
 
   // Whether there's anything actually visible to plot right now - see
   // StarMap.tsx's identical `isEmpty` comment and VizEmptyState.tsx's own
@@ -1884,6 +1979,33 @@ export default function SpiralTimeline({
    * fields, so they automatically target where the band visually IS.
    */
   const { ranges, points, orbitRanges, orbitPoints } = useMemo(() => {
+    /**
+     * SKIPPED SPUR: a skipped entry's mark (see utils/entryStatus.ts) sits
+     * SKIPPED_SPUR_LENGTH_PX off its normal spot, along the curve's
+     * outward normal - i.e. perpendicular to the curve - and `spur` is
+     * the dotted connector drawn back to that spot at its planned date.
+     * Everything else passes through unchanged.
+     */
+    const skippedPosition = (
+      entry: Entry,
+      base: { x: number; y: number },
+      t: number,
+      radiusOffset: number
+    ) => {
+      if (!isSkipped(entry)) return { position: base, spur: null };
+      const normal = spiralOutwardNormal(
+        Math.min(1, t),
+        spiralParams,
+        radiusOffset,
+        base
+      );
+      const position = {
+        x: base.x + normal.x * SKIPPED_SPUR_LENGTH_PX,
+        y: base.y + normal.y * SKIPPED_SPUR_LENGTH_PX,
+      };
+      return { position, spur: { from: base, to: position } };
+    };
+
     // ORBIT ENTRIES are split off before any lane assignment - see the
     // "ORBIT ENTRIES" comment. The split is
     // by VISUAL STYLE, not domain: getVisualStyle honors an entry's
@@ -1968,7 +2090,11 @@ export default function SpiralTimeline({
 
     const ranges = lanedRanges.map(
       ({ entry, tStart, tEnd, color, lane, edge }) => {
-        const radiusOffset = lane * bandThickness;
+        const laneOffset = lane * bandThickness;
+        // SKIPPED: the band moves a spur's length further out from its
+        // lane, perpendicular to the curve - see SKIPPED SPUR.
+        const radiusOffset =
+          laneOffset + (isSkipped(entry) ? SKIPPED_SPUR_LENGTH_PX : 0);
         const t0 = Math.min(tStart, tEnd);
         const t1 = Math.max(tStart, tEnd);
         const tMid = (t0 + t1) / 2;
@@ -1993,6 +2119,25 @@ export default function SpiralTimeline({
         return {
           entry,
           pathD,
+          // PLANNED / SKIPPED: the same band inflated by the outline gap
+          // all round, stroked dashed - see utils/entryStatus.ts.
+          outlinePathD: isUnrealized(entry)
+            ? buildRangeBandPath(
+                t0,
+                t1,
+                radiusOffset,
+                ARC_BAND_HALF_THICKNESS + UNREALIZED_OUTLINE_GAP_PX,
+                spiralParams,
+                RANGE_BAND_SAMPLE_COUNT,
+                true
+              )
+            : null,
+          spur: isSkipped(entry)
+            ? {
+                from: spiralPoint(t0, spiralParams, laneOffset),
+                to: spiralPoint(t0, spiralParams, radiusOffset),
+              }
+            : null,
           start: spiralPoint(t0, spiralParams, radiusOffset),
           end: spiralPoint(t1, spiralParams, radiusOffset),
           midpoint: spiralPoint(tMid, spiralParams, radiusOffset),
@@ -2005,12 +2150,13 @@ export default function SpiralTimeline({
 
     const points = lanedPoints.map(({ entry, t, lane, color, edge }) => {
       const radiusOffset = lane * bandThickness;
-      return {
+      const { position, spur } = skippedPosition(
         entry,
-        ...spiralPoint(t, spiralParams, radiusOffset),
-        color,
-        edge,
-      };
+        spiralPoint(t, spiralParams, radiusOffset),
+        t,
+        radiusOffset
+      );
+      return { entry, ...position, spur, color, edge };
     });
 
     // ─── Orbit entries: always on the true curve, no lanes ───
@@ -2030,6 +2176,8 @@ export default function SpiralTimeline({
         const t1 = clampT(rawEnd);
         const cycles = hollowWaveCycles(Math.abs(endMs - startMs));
         const sampleCount = hollowWaveSampleCount(cycles);
+        // SKIPPED: shifted a spur's length off the curve - see SKIPPED SPUR.
+        const skipOffset = isSkipped(entry) ? SKIPPED_SPUR_LENGTH_PX : 0;
         return {
           entry,
           pathD: buildOrbitWavePath(
@@ -2040,8 +2188,15 @@ export default function SpiralTimeline({
             orbitAmplitude,
             cycles,
             spiralParams,
-            sampleCount
+            sampleCount,
+            skipOffset
           ),
+          spur: skipOffset
+            ? {
+                from: spiralPoint(t0, spiralParams),
+                to: spiralPoint(t0, spiralParams, skipOffset),
+              }
+            : null,
           start: spiralPoint(t0, spiralParams),
           end: spiralPoint(t1, spiralParams),
           midpoint: spiralPoint((t0 + t1) / 2, spiralParams),
@@ -2061,9 +2216,17 @@ export default function SpiralTimeline({
       .filter(entry => !entry.endTimestamp)
       .map(entry => {
         const rawT = normalize(new Date(entry.timestamp));
+        const t = Math.max(0, rawT);
+        const { position, spur } = skippedPosition(
+          entry,
+          spiralPoint(t, spiralParams),
+          t,
+          0
+        );
         return {
           entry,
-          ...spiralPoint(Math.max(0, rawT), spiralParams),
+          ...position,
+          spur,
           color: getActivityColor(entry.activityType),
           edge: edgeOpacity(rawT),
         };
@@ -2174,19 +2337,26 @@ export default function SpiralTimeline({
   // when present, else its plain `timestamp`), NOT reused from
   // `domainRange.end` - see the top-of-file comment's "THE DOTTED LINE +
   // GLYPH" section for why.
+  //
+  // Only entries that have STARTED by `now` count, each capped at `now`:
+  // planned entries can sit further out (see PAST / FUTURE SPLIT), and
+  // the marker's line runs from the last real entry up to today.
   const latestEntryDate = useMemo(() => {
-    if (displayedEntries.length === 0) return null;
-
-    return displayedEntries.reduce(
-      (latest, entry) => {
-        const entryEnd = new Date(entry.endTimestamp ?? entry.timestamp);
-        return entryEnd.getTime() > latest.getTime() ? entryEnd : latest;
-      },
-      new Date(
-        displayedEntries[0].endTimestamp ?? displayedEntries[0].timestamp
-      )
+    const pastEntries = displayedEntries.filter(
+      entry => new Date(entry.timestamp).getTime() <= now.getTime()
     );
-  }, [displayedEntries]);
+    if (pastEntries.length === 0) return null;
+
+    return pastEntries.reduce((latest, entry) => {
+      const entryEnd = new Date(
+        Math.min(
+          new Date(entry.endTimestamp ?? entry.timestamp).getTime(),
+          now.getTime()
+        )
+      );
+      return entryEnd.getTime() > latest.getTime() ? entryEnd : latest;
+    }, new Date(0));
+  }, [displayedEntries, now]);
 
   // Mid-transition the marker stays drawn if EITHER end of the glide
   // reaches today, cross-fading like an entry when only one does.
@@ -2271,9 +2441,115 @@ export default function SpiralTimeline({
       );
     }
 
+    // ─── TODAY LABEL ───
+    // Follows the arc instead of sitting horizontally: set along a curve
+    // parallel to the spiral on the OUTER side of the line (away from the
+    // spiral's center), centered on the glyph.
+    //
+    // The tangent comes from the same `spiralPoint` the line is drawn
+    // with, sampled just either side of `glyphT` - deliberately NOT
+    // clamped to [0, 1] (unlike spiralTangent/spiralOutwardNormal), since
+    // the glyph may be nudged slightly past t=1 (see COLLISION AVOIDANCE
+    // above) and `spiralPoint` extrapolates the same curve there. Its
+    // direction is that of increasing time, toward the future.
+    //
+    // Everything here is in the zoom layer's own coordinate space, and
+    // d3-zoom only ever applies a uniform translate + scale to that layer,
+    // which preserves angles - so pan/zoom never need this recomputed, and
+    // the label scales with zoom like the glyph itself. Anything that DOES
+    // move the curve (domain tween, year zoom, planned entries extending
+    // the domain, resize) changes `spiralParams`/the domain, which reruns
+    // this memo each frame - so the rotation tracks the curve with no CSS
+    // transition, and nothing for reduced motion to switch off.
+    const glyphPosition = samples[samples.length - 1];
+    const before = spiralPoint(
+      glyphT - NOW_LABEL_TANGENT_EPSILON_T,
+      spiralParams
+    );
+    const after = spiralPoint(
+      glyphT + NOW_LABEL_TANGENT_EPSILON_T,
+      spiralParams
+    );
+    const tangentLength =
+      Math.hypot(after.x - before.x, after.y - before.y) || 1;
+    const tangent = {
+      x: (after.x - before.x) / tangentLength,
+      y: (after.y - before.y) / tangentLength,
+    };
+    // Perpendicular, flipped if needed to point away from the center.
+    let normal = { x: -tangent.y, y: tangent.x };
+    if (
+      normal.x * (glyphPosition.x - spiralParams.centerX) +
+        normal.y * (glyphPosition.y - spiralParams.centerY) <
+      0
+    ) {
+      normal = { x: -normal.x, y: -normal.y };
+    }
+
+    const labelOffset = NOW_GLYPH_FONT_SIZE_PX / 2 + NOW_LABEL_GAP_PX;
+
+    // The word follows the arc: it's set along a short curve running
+    // parallel to the spiral, `labelOffset` out along each sample's own
+    // outward normal (same unclamped tangent estimate as above), spanning
+    // NOW_LABEL_PATH_HALF_SPAN_PX of arc either side of the glyph. The
+    // <textPath> centers on that curve's midpoint - i.e. on the glyph.
+    // Skipped if the curve has no measurable length here (degenerate size).
+    if (!(pxPerT > 0)) {
+      return { pathD: buildPolylinePath(samples), glyphPosition, label: null };
+    }
+    const halfSpanT = NOW_LABEL_PATH_HALF_SPAN_PX / pxPerT;
+    const labelSamples: { x: number; y: number }[] = [];
+    for (let i = 0; i <= NOW_LABEL_PATH_SAMPLES; i++) {
+      const t =
+        glyphT - halfSpanT + (2 * halfSpanT * i) / NOW_LABEL_PATH_SAMPLES;
+      const point = spiralPoint(t, spiralParams);
+      const b = spiralPoint(t - NOW_LABEL_TANGENT_EPSILON_T, spiralParams);
+      const a = spiralPoint(t + NOW_LABEL_TANGENT_EPSILON_T, spiralParams);
+      const length = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      let nx = -(a.y - b.y) / length;
+      let ny = (a.x - b.x) / length;
+      if (
+        nx * (point.x - spiralParams.centerX) +
+          ny * (point.y - spiralParams.centerY) <
+        0
+      ) {
+        nx = -nx;
+        ny = -ny;
+      }
+      labelSamples.push({
+        x: point.x + nx * labelOffset,
+        y: point.y + ny * labelOffset,
+      });
+    }
+
+    // Upright: run the curve toward the future (time direction) while that
+    // heads within (-90°, 90°] of rightward, otherwise reversed - the word
+    // then reads against time, but never upside down.
+    const tangentAngle = (Math.atan2(tangent.y, tangent.x) * 180) / Math.PI;
+    const readsWithTime = tangentAngle > -90 && tangentAngle <= 90;
+    if (!readsWithTime) labelSamples.reverse();
+    const direction = readsWithTime
+      ? tangent
+      : { x: -tangent.x, y: -tangent.y };
+
+    // A <textPath>'s glyphs stand on the LEFT of the path's direction
+    // (SVG y-down: up = (dy, -dx)). When that's outward, the baseline sits
+    // on the curve facing the line (the target look) and the word grows
+    // outward; when the reversal makes "up" point inward, the word hangs
+    // from the curve instead, so it still grows outward - cap tops facing
+    // the line at the same gap.
+    const baselineFacesLine =
+      direction.y * normal.x - direction.x * normal.y > 0;
+
     return {
       pathD: buildPolylinePath(samples),
-      glyphPosition: samples[samples.length - 1],
+      glyphPosition,
+      label: {
+        pathD: buildPolylinePath(labelSamples),
+        dominantBaseline: baselineFacesLine
+          ? ('alphabetic' as const)
+          : ('hanging' as const),
+      },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `normalize` closes over minDate/maxDate and `glyphCollidesAt` over entryMarkerPositions, all listed directly below (same pattern `points`/`ranges` use above)
   }, [
@@ -2541,7 +2817,7 @@ export default function SpiralTimeline({
     edge: number
   ): React.CSSProperties => ({
     opacity:
-      (activeCategorySet.has(entry.activityType) ? 1 : FILTERED_OUT_OPACITY) *
+      (isEntryFilteredOut(entry) ? FILTERED_OUT_OPACITY : 1) *
       presenceOpacity(entry.id) *
       edge,
     pointerEvents: transition?.exitingIds.has(entry.id) ? 'none' : undefined,
@@ -2641,12 +2917,23 @@ export default function SpiralTimeline({
           {isReady && (
             <>
               <path
-                d={spiralPathD}
+                d={pastPathD}
                 fill="none"
                 stroke="currentColor"
                 strokeOpacity={0.35}
                 strokeWidth={1.5}
               />
+              {/* The curve beyond today - see PAST / FUTURE SPLIT. */}
+              {futurePathD && (
+                <path
+                  d={futurePathD}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeOpacity={0.35}
+                  strokeWidth={1.5}
+                  strokeDasharray={NOW_LINE_DASH}
+                />
+              )}
 
               {/*
                * YEAR HOVER HIGHLIGHT - rendered here, BEFORE `ranges`/
@@ -2737,6 +3024,30 @@ export default function SpiralTimeline({
                   >
                     {isDaytime ? '☀' : '☾'}
                   </text>
+                  {nowMarker.label && (
+                    <>
+                      <defs>
+                        <path
+                          id={NOW_LABEL_PATH_ID}
+                          d={nowMarker.label.pathD}
+                        />
+                      </defs>
+                      <text
+                        dominantBaseline={nowMarker.label.dominantBaseline}
+                        fill="currentColor"
+                        className="pointer-events-none select-none text-[10px] uppercase tracking-wide"
+                        style={{ fontFamily: 'var(--font-body)' }}
+                      >
+                        <textPath
+                          href={`#${NOW_LABEL_PATH_ID}`}
+                          startOffset="50%"
+                          textAnchor="middle"
+                        >
+                          Today
+                        </textPath>
+                      </text>
+                    </>
+                  )}
                 </g>
               )}
 
@@ -2751,7 +3062,7 @@ export default function SpiralTimeline({
                * colored shape" approach as the arc bands below, applied to
                * the wave's line.
                */}
-              {orbitRanges.map(({ entry, pathD, color, edge }) => {
+              {orbitRanges.map(({ entry, pathD, color, edge, spur }) => {
                 const isOpened = openedEntryIdSet.has(entry.id);
                 const isFocused = entry.id === expandedEntryId;
                 return (
@@ -2761,6 +3072,7 @@ export default function SpiralTimeline({
                     className={`cursor-pointer ${transition ? '' : 'transition-opacity duration-200'}`}
                     {...orbitEntryHandlers(entry)}
                   >
+                    {spur && <SkippedSpur spur={spur} color={color} />}
                     {/* Invisible, wider hit stroke - a 1.75px line is too thin to hover comfortably. */}
                     <path
                       d={pathD}
@@ -2813,22 +3125,30 @@ export default function SpiralTimeline({
                       opacity={HOLLOW_WAVE_OPACITY}
                       className="pointer-events-none"
                     >
-                      <path
-                        d={pathD}
-                        fill="none"
-                        stroke={color}
-                        strokeWidth={HOLLOW_WAVE_GLOW_STROKE_WIDTH}
-                        strokeOpacity={HOLLOW_WAVE_GLOW_OPACITY}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        filter="url(#orbit-wave-glow)"
-                      />
+                      {/* PLANNED / SKIPPED: the wave's own line goes dashed (no glow, which would blur the dashes) - see utils/entryStatus.ts. */}
+                      {!isUnrealized(entry) && (
+                        <path
+                          d={pathD}
+                          fill="none"
+                          stroke={color}
+                          strokeWidth={HOLLOW_WAVE_GLOW_STROKE_WIDTH}
+                          strokeOpacity={HOLLOW_WAVE_GLOW_OPACITY}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          filter="url(#orbit-wave-glow)"
+                        />
+                      )}
                       <path
                         d={pathD}
                         fill="none"
                         stroke={color}
                         strokeWidth={HOLLOW_WAVE_STROKE_WIDTH}
-                        strokeLinecap="round"
+                        strokeDasharray={
+                          isUnrealized(entry)
+                            ? UNREALIZED_DASH_ARRAY
+                            : undefined
+                        }
+                        strokeLinecap={isUnrealized(entry) ? 'butt' : 'round'}
                         strokeLinejoin="round"
                       />
                     </g>
@@ -2836,157 +3156,169 @@ export default function SpiralTimeline({
                 );
               })}
 
-              {ranges.map(({ entry, pathD, color, edge }) => {
-                const isOpened = openedEntryIdSet.has(entry.id);
-                // FOCUSED ENTRY: the one the sidebar's FocusedEntryView is
-                // showing gets a brighter opened highlight - see
-                // utils/focusHighlight.ts.
-                const isFocused = entry.id === expandedEntryId;
-                const isFilteredOut = !activeCategorySet.has(
-                  entry.activityType
-                );
-                return (
-                  // OPENED-ENTRY HIGHLIGHT: one group per range, opacity
-                  // applied once to the whole group (glow + band + ring)
-                  // so a filtered-out arc's highlight dims along with it -
-                  // same structure as StarMap.tsx's per-star <g>/
-                  // LinearTimeline.tsx's per-range <g>. No `transform`
-                  // here (unlike the earlier `d3.arc()`-based version):
-                  // `pathD` is now built from `spiralPoint`, which already
-                  // returns absolute canvas coordinates (`centerX`/
-                  // `centerY` baked in), the same coordinate space
-                  // `points` below render directly into - see the
-                  // top-of-file "RANGE ENTRIES" comment.
-                  // RANGE TRANSITION: `presenceOpacity`/`edge` fade
-                  // entering/exiting arcs frame by frame, so the CSS
-                  // opacity transition is dropped mid-glide (it'd just
-                  // lag behind them); an exiting arc also stops taking
-                  // hover/clicks since it's on its way out.
-                  <g
-                    key={entry.id}
-                    style={{
-                      opacity:
-                        (isFilteredOut ? FILTERED_OUT_OPACITY : 1) *
-                        presenceOpacity(entry.id) *
-                        edge,
-                      pointerEvents: transition?.exitingIds.has(entry.id)
-                        ? 'none'
-                        : undefined,
-                    }}
-                    className={`cursor-pointer ${transition ? '' : 'transition-opacity duration-200'}`}
-                    onMouseEnter={event =>
-                      setHovered({
-                        kind: 'entry',
-                        entry,
-                        x: event.clientX,
-                        y: event.clientY,
-                      })
-                    }
-                    onMouseMove={event =>
-                      setHovered(current =>
-                        current &&
-                        current.kind === 'entry' &&
-                        current.entry.id === entry.id
-                          ? { ...current, x: event.clientX, y: event.clientY }
-                          : current
-                      )
-                    }
-                    onMouseLeave={() => setHovered(null)}
-                    onClick={() => onEntryClick(entry)}
-                  >
-                    {isOpened && (
-                      // OPENED-ENTRY HIGHLIGHT (band glow + ring) -
-                      // STROKING THE SAME CLOSED PATH, NOT TWO SEPARATE
-                      // OFFSET SHAPES:
-                      //
-                      // An earlier version (back when `pathD` was a
-                      // `d3.arc()` sector) generated a second, WIDER
-                      // `d3.arc()` shape for the glow (different
-                      // innerRadius/outerRadius/cornerRadius from
-                      // `pathD`) and a THIRD, entirely-outside-outerRadius
-                      // shape for the ring. Resizing an annulus segment's
-                      // radii like that does NOT uniformly "grow" it the
-                      // way offsetting a rounded rectangle's own edges
-                      // does (LinearTimeline.tsx's `capsuleOutlineRect`) -
-                      // a wider/narrower arc's rounded corners land at a
-                      // DIFFERENT position than the original's, so the
-                      // result reads as extra arcs parallel to the two
-                      // long curved edges that never wrap around the
-                      // rounded end caps at all.
-                      //
-                      // `pathD` is now already a single CLOSED path built
-                      // by `buildRangeBandPath` (outer edge samples, then
-                      // inner edge samples in reverse, back to the first
-                      // outer point) - stroking it directly, with
-                      // `fill="none"`, makes SVG trace that entire closed
-                      // boundary as one continuous line, both cut ends
-                      // included, for free - no separate geometry needed.
-                      // The stroke straddles
-                      // the boundary (half in, half out); both are drawn
-                      // BEHIND the opaque colored band below, which
-                      // covers the inward half, leaving only a clean
-                      // outward halo/ring - the same "glow circle, then
-                      // solid shape" layering StarMap.tsx's per-star <g>
-                      // uses, just both glow AND ring behind the fill
-                      // here (unlike a plain point's ring, which sits at
-                      // an already-larger radius with no overlap to hide,
-                      // this ring traces the SAME boundary the fill does,
-                      // so it also needs the fill drawn after it).
-                      // `strokeWidth` is doubled from the visually-tuned
-                      // "how much should show" value, since only half of
-                      // a straddling stroke ends up visible.
-                      <>
+              {ranges.map(
+                ({ entry, pathD, outlinePathD, spur, color, edge }) => {
+                  const isOpened = openedEntryIdSet.has(entry.id);
+                  // FOCUSED ENTRY: the one the sidebar's FocusedEntryView is
+                  // showing gets a brighter opened highlight - see
+                  // utils/focusHighlight.ts.
+                  const isFocused = entry.id === expandedEntryId;
+                  const isFilteredOut = isEntryFilteredOut(entry);
+                  return (
+                    // OPENED-ENTRY HIGHLIGHT: one group per range, opacity
+                    // applied once to the whole group (glow + band + ring)
+                    // so a filtered-out arc's highlight dims along with it -
+                    // same structure as StarMap.tsx's per-star <g>/
+                    // LinearTimeline.tsx's per-range <g>. No `transform`
+                    // here (unlike the earlier `d3.arc()`-based version):
+                    // `pathD` is now built from `spiralPoint`, which already
+                    // returns absolute canvas coordinates (`centerX`/
+                    // `centerY` baked in), the same coordinate space
+                    // `points` below render directly into - see the
+                    // top-of-file "RANGE ENTRIES" comment.
+                    // RANGE TRANSITION: `presenceOpacity`/`edge` fade
+                    // entering/exiting arcs frame by frame, so the CSS
+                    // opacity transition is dropped mid-glide (it'd just
+                    // lag behind them); an exiting arc also stops taking
+                    // hover/clicks since it's on its way out.
+                    <g
+                      key={entry.id}
+                      style={{
+                        opacity:
+                          (isFilteredOut ? FILTERED_OUT_OPACITY : 1) *
+                          presenceOpacity(entry.id) *
+                          edge,
+                        pointerEvents: transition?.exitingIds.has(entry.id)
+                          ? 'none'
+                          : undefined,
+                      }}
+                      className={`cursor-pointer ${transition ? '' : 'transition-opacity duration-200'}`}
+                      onMouseEnter={event =>
+                        setHovered({
+                          kind: 'entry',
+                          entry,
+                          x: event.clientX,
+                          y: event.clientY,
+                        })
+                      }
+                      onMouseMove={event =>
+                        setHovered(current =>
+                          current &&
+                          current.kind === 'entry' &&
+                          current.entry.id === entry.id
+                            ? { ...current, x: event.clientX, y: event.clientY }
+                            : current
+                        )
+                      }
+                      onMouseLeave={() => setHovered(null)}
+                      onClick={() => onEntryClick(entry)}
+                    >
+                      {isOpened && (
+                        // OPENED-ENTRY HIGHLIGHT (band glow + ring) -
+                        // STROKING THE SAME CLOSED PATH, NOT TWO SEPARATE
+                        // OFFSET SHAPES:
+                        //
+                        // An earlier version (back when `pathD` was a
+                        // `d3.arc()` sector) generated a second, WIDER
+                        // `d3.arc()` shape for the glow (different
+                        // innerRadius/outerRadius/cornerRadius from
+                        // `pathD`) and a THIRD, entirely-outside-outerRadius
+                        // shape for the ring. Resizing an annulus segment's
+                        // radii like that does NOT uniformly "grow" it the
+                        // way offsetting a rounded rectangle's own edges
+                        // does (LinearTimeline.tsx's `capsuleOutlineRect`) -
+                        // a wider/narrower arc's rounded corners land at a
+                        // DIFFERENT position than the original's, so the
+                        // result reads as extra arcs parallel to the two
+                        // long curved edges that never wrap around the
+                        // rounded end caps at all.
+                        //
+                        // `pathD` is now already a single CLOSED path built
+                        // by `buildRangeBandPath` (outer edge samples, then
+                        // inner edge samples in reverse, back to the first
+                        // outer point) - stroking it directly, with
+                        // `fill="none"`, makes SVG trace that entire closed
+                        // boundary as one continuous line, both cut ends
+                        // included, for free - no separate geometry needed.
+                        // The stroke straddles
+                        // the boundary (half in, half out); both are drawn
+                        // BEHIND the opaque colored band below, which
+                        // covers the inward half, leaving only a clean
+                        // outward halo/ring - the same "glow circle, then
+                        // solid shape" layering StarMap.tsx's per-star <g>
+                        // uses, just both glow AND ring behind the fill
+                        // here (unlike a plain point's ring, which sits at
+                        // an already-larger radius with no overlap to hide,
+                        // this ring traces the SAME boundary the fill does,
+                        // so it also needs the fill drawn after it).
+                        // `strokeWidth` is doubled from the visually-tuned
+                        // "how much should show" value, since only half of
+                        // a straddling stroke ends up visible.
+                        <>
+                          <path
+                            d={pathD}
+                            fill="none"
+                            stroke={OPENED_HIGHLIGHT_COLOR}
+                            strokeWidth={
+                              (isFocused
+                                ? FOCUSED_GLOW_STROKE_WIDTH
+                                : OPENED_ARC_GLOW_EXTRA_RADIUS) * 2
+                            }
+                            strokeOpacity={
+                              isFocused
+                                ? FOCUSED_GLOW_OPACITY
+                                : OPENED_ARC_GLOW_OPACITY
+                            }
+                            filter="url(#opened-arc-glow)"
+                            className="pointer-events-none"
+                          />
+                          <path
+                            d={pathD}
+                            fill="none"
+                            stroke={OPENED_HIGHLIGHT_COLOR}
+                            strokeWidth={
+                              (isFocused
+                                ? FOCUSED_RING_STROKE_WIDTH
+                                : ARC_RING_WIDTH) * 2
+                            }
+                            className="pointer-events-none"
+                          />
+                        </>
+                      )}
+                      {/*
+                       * LANE EDGE STROKE - see `LANE_EDGE_STROKE_COLOR`'s own
+                       * comment: now that contiguous lanes can sit directly
+                       * against a same-colored neighbor with no gap, this
+                       * very thin, low-opacity outline (traced along `pathD`,
+                       * the exact same closed boundary the fill uses - both
+                       * long curved edges AND the two cut ends) keeps this
+                       * band's own edges legible even against an identically
+                       * colored band in the next lane over or the base
+                       * gridline underneath.
+                       */}
+                      <path
+                        d={pathD}
+                        fill={color}
+                        stroke={LANE_EDGE_STROKE_COLOR}
+                        strokeOpacity={LANE_EDGE_STROKE_OPACITY}
+                        strokeWidth={LANE_EDGE_STROKE_WIDTH}
+                      />
+                      {spur && <SkippedSpur spur={spur} color={color} />}
+                      {/* PLANNED / SKIPPED: dashed outline just outside the band - see `outlinePathD`. */}
+                      {outlinePathD && (
                         <path
-                          d={pathD}
+                          d={outlinePathD}
                           fill="none"
-                          stroke={OPENED_HIGHLIGHT_COLOR}
-                          strokeWidth={
-                            (isFocused
-                              ? FOCUSED_GLOW_STROKE_WIDTH
-                              : OPENED_ARC_GLOW_EXTRA_RADIUS) * 2
-                          }
-                          strokeOpacity={
-                            isFocused
-                              ? FOCUSED_GLOW_OPACITY
-                              : OPENED_ARC_GLOW_OPACITY
-                          }
-                          filter="url(#opened-arc-glow)"
+                          stroke={color}
+                          strokeWidth={UNREALIZED_OUTLINE_WIDTH}
+                          strokeDasharray={UNREALIZED_DASH_ARRAY}
                           className="pointer-events-none"
                         />
-                        <path
-                          d={pathD}
-                          fill="none"
-                          stroke={OPENED_HIGHLIGHT_COLOR}
-                          strokeWidth={
-                            (isFocused
-                              ? FOCUSED_RING_STROKE_WIDTH
-                              : ARC_RING_WIDTH) * 2
-                          }
-                          className="pointer-events-none"
-                        />
-                      </>
-                    )}
-                    {/*
-                     * LANE EDGE STROKE - see `LANE_EDGE_STROKE_COLOR`'s own
-                     * comment: now that contiguous lanes can sit directly
-                     * against a same-colored neighbor with no gap, this
-                     * very thin, low-opacity outline (traced along `pathD`,
-                     * the exact same closed boundary the fill uses - both
-                     * long curved edges AND the two cut ends) keeps this
-                     * band's own edges legible even against an identically
-                     * colored band in the next lane over or the base
-                     * gridline underneath.
-                     */}
-                    <path
-                      d={pathD}
-                      fill={color}
-                      stroke={LANE_EDGE_STROKE_COLOR}
-                      strokeOpacity={LANE_EDGE_STROKE_OPACITY}
-                      strokeWidth={LANE_EDGE_STROKE_WIDTH}
-                    />
-                  </g>
-                );
-              })}
+                      )}
+                    </g>
+                  );
+                }
+              )}
 
               {/*
                * ORBIT POINTS - drawn AFTER the movement range bands (unlike
@@ -2996,7 +3328,7 @@ export default function SpiralTimeline({
                * and unclickable. Still drawn before movement points, so a
                * movement point on top keeps its click.
                */}
-              {orbitPoints.map(({ entry, x, y, color, edge }) => {
+              {orbitPoints.map(({ entry, x, y, color, edge, spur }) => {
                 const isOpened = openedEntryIdSet.has(entry.id);
                 const isFocused = entry.id === expandedEntryId;
                 return (
@@ -3023,7 +3355,8 @@ export default function SpiralTimeline({
                         className="pointer-events-none"
                       />
                     )}
-                    {/* Hollow marker: a background-colored "cutout" with a category-colored border. Its opaque fill is also the hover/click target. */}
+                    {spur && <SkippedSpur spur={spur} color={color} />}
+                    {/* Hollow marker: a background-colored "cutout" with a category-colored border. Its opaque fill is also the hover/click target. Dashed when planned/skipped - see utils/entryStatus.ts. */}
                     <circle
                       cx={x}
                       cy={y}
@@ -3031,6 +3364,9 @@ export default function SpiralTimeline({
                       fill="var(--bg-color)"
                       stroke={color}
                       strokeWidth={HOLLOW_POINT_STROKE_WIDTH}
+                      strokeDasharray={
+                        isUnrealized(entry) ? UNREALIZED_DASH_ARRAY : undefined
+                      }
                     />
                     {isOpened && (
                       <circle
@@ -3049,12 +3385,10 @@ export default function SpiralTimeline({
                 );
               })}
 
-              {points.map(({ entry, x, y, color, edge }) => {
+              {points.map(({ entry, x, y, color, edge, spur }) => {
                 const isOpened = openedEntryIdSet.has(entry.id);
                 const isFocused = entry.id === expandedEntryId;
-                const isFilteredOut = !activeCategorySet.has(
-                  entry.activityType
-                );
+                const isFilteredOut = isEntryFilteredOut(entry);
                 return (
                   // OPENED-ENTRY HIGHLIGHT: same per-entry <g> + opacity
                   // + glow/ring structure as StarMap.tsx's stars.map().
@@ -3089,13 +3423,27 @@ export default function SpiralTimeline({
                         className="pointer-events-none"
                       />
                     )}
+                    {spur && <SkippedSpur spur={spur} color={color} />}
+                    {/* PLANNED / SKIPPED: the dot keeps its fill, with a dashed ring just outside it - see utils/entryStatus.ts. */}
+                    {isUnrealized(entry) && (
+                      <circle
+                        cx={x}
+                        cy={y}
+                        r={POINT_RADIUS + UNREALIZED_OUTLINE_GAP_PX}
+                        fill="none"
+                        stroke={color}
+                        strokeWidth={UNREALIZED_OUTLINE_WIDTH}
+                        strokeDasharray={UNREALIZED_DASH_ARRAY}
+                        className="pointer-events-none"
+                      />
+                    )}
                     <circle
                       cx={x}
                       cy={y}
                       r={POINT_RADIUS}
                       fill={color}
                       stroke={color}
-                      strokeOpacity={0.35}
+                      strokeOpacity={isUnrealized(entry) ? 0 : 0.35}
                       strokeWidth={4}
                       className="cursor-pointer"
                       onMouseEnter={event =>

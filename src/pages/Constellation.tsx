@@ -214,6 +214,7 @@ export default function Constellation({
     handleSortModeChange,
     categoryGroups,
     filterCategories,
+    showUnrealized,
     handleToggleFilterCategory,
     handleResetFilters,
     hasSelection,
@@ -619,6 +620,7 @@ export default function Constellation({
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}
         filterCategories={filterCategories}
+        showUnrealized={showUnrealized}
         sidebarWidth={sidebarWidth}
         sidebarSide={sidebarSide}
         resetViewSignal={resetViewSignal}
