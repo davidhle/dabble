@@ -168,6 +168,14 @@ export interface EntrySelectionContextValue {
    */
   showUnrealized: boolean;
   handleToggleShowUnrealized: () => void;
+  /**
+   * The entry whose row is hovered in the focused entry's Related list
+   * (see RelatedEntries.tsx), or null - the canvases preview that one
+   * link's highlight while it's set (see hooks/useRelationHighlight.ts).
+   * Cleared whenever the focused entry changes.
+   */
+  relationPreviewEntryId: string | null;
+  setRelationPreviewEntryId: (entryId: string | null) => void;
   handleResetFilters: () => void;
   hasSelection: boolean;
   resetPending: boolean;
@@ -364,6 +372,9 @@ export function EntrySelectionProvider({
   }, [categories]);
 
   const [showUnrealized, setShowUnrealized] = useState(true);
+  const [relationPreviewEntryId, setRelationPreviewEntryId] = useState<
+    string | null
+  >(null);
 
   const [resetPending, setResetPending] = useState(false);
   const resetPendingTimeoutRef = useRef<number | null>(null);
@@ -512,6 +523,11 @@ export function EntrySelectionProvider({
     () => selectedEntries.find(selected => selected.expanded)?.entry.id ?? null,
     [selectedEntries]
   );
+
+  // A Related-row hover preview belongs to the entry it was shown for.
+  useEffect(() => {
+    setRelationPreviewEntryId(null);
+  }, [expandedEntryId]);
 
   // ──────────────────────────────────────────────────────────────────────
   // FOCUSED MODE: HISTORY STACK
@@ -680,6 +696,8 @@ export function EntrySelectionProvider({
       handleToggleFilterCategory,
       showUnrealized,
       handleToggleShowUnrealized,
+      relationPreviewEntryId,
+      setRelationPreviewEntryId,
       handleResetFilters,
       hasSelection,
       resetPending,
@@ -710,6 +728,7 @@ export function EntrySelectionProvider({
       handleToggleFilterCategory,
       showUnrealized,
       handleToggleShowUnrealized,
+      relationPreviewEntryId,
       handleResetFilters,
       hasSelection,
       resetPending,

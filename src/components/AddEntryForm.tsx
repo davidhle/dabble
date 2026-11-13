@@ -96,9 +96,10 @@
  * primary-action one, so they don't follow --accent-color either.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Entry,
+  EntryConnection,
   EntryPhoto,
   MediaLink,
   SUGGESTED_TAGS,
@@ -128,6 +129,8 @@ import CategoryColorPicker from './CategoryColorPicker';
 import MoodPicker from './MoodPicker';
 import MediaLinksInput from './MediaLinksInput';
 import PhotoPicker from './PhotoPicker';
+import ConnectionsInput from './ConnectionsInput';
+import { getAllTags } from '../utils/entryRelations';
 import { useMotionEnabled } from '../hooks/useMotionEnabled';
 import { toLocalDateString } from '../utils/entryStatus';
 
@@ -287,6 +290,8 @@ export default function AddEntryForm({
   const [notes, setNotes] = useState('');
   const [mediaLinks, setMediaLinks] = useState<MediaLink[]>([]);
   const [photos, setPhotos] = useState<EntryPhoto[]>([]);
+  // Authored links to other entries - see ConnectionsInput.tsx.
+  const [connections, setConnections] = useState<EntryConnection[]>([]);
 
   // ─── Form State ───
   const [errors, setErrors] = useState<FormErrors>({});
@@ -340,6 +345,7 @@ export default function AddEntryForm({
       setNotes(editingEntry.notes);
       setMediaLinks(editingEntry.mediaLinks);
       setPhotos(editingEntry.photos ?? []);
+      setConnections(editingEntry.connections ?? []);
       setDuration(
         editingEntry.duration != null ? String(editingEntry.duration) : ''
       );
@@ -402,6 +408,7 @@ export default function AddEntryForm({
       setMoods([]);
       setMediaLinks([]);
       setPhotos([]);
+      setConnections([]);
       setCountry('');
       setCity('');
       setPlace('');
@@ -424,6 +431,28 @@ export default function AddEntryForm({
   }, [isOpen, editingEntry]);
 
   const suggestedTags = SUGGESTED_TAGS[activityType] || [];
+
+  // ─── Tag autocomplete ───
+  // Every tag already used on any entry, so spelling stays consistent
+  // across entries (and the Related section's "Shared tag" groups - see
+  // utils/entryRelations.ts - actually find each other). Matches show as
+  // a short list under the input while typing: prefix matches first,
+  // ArrowUp/Down to highlight one, Enter to add it (Enter with nothing
+  // highlighted still adds exactly what was typed).
+  const allTags = useMemo(() => getAllTags(entries), [entries]);
+  const [tagMatchIndex, setTagMatchIndex] = useState(-1);
+  const tagMatches = useMemo(() => {
+    const query = tagInput.trim().toLowerCase();
+    if (!query) return [];
+    return allTags
+      .filter(tag => !tags.includes(tag) && tag.includes(query))
+      .sort(
+        (a, b) =>
+          Number(b.startsWith(query)) - Number(a.startsWith(query)) ||
+          a.localeCompare(b)
+      )
+      .slice(0, 6);
+  }, [allTags, tagInput, tags]);
 
   const isEndDateBeforeStart =
     isMultiDay && endDate !== '' && endDate < dateOnly;
@@ -615,6 +644,11 @@ export default function AddEntryForm({
               caption?.trim() ? { ...photo, caption: caption.trim() } : photo
             )
           : undefined,
+      // Notes trimmed, like every other text field here.
+      connections:
+        connections.length > 0
+          ? connections.map(c => ({ ...c, note: c.note.trim() }))
+          : undefined,
       location: hasLocation
         ? {
             ...(trimmedCountry ? { country: trimmedCountry } : {}),
@@ -706,6 +740,7 @@ export default function AddEntryForm({
     setMoods([]);
     setMediaLinks([]);
     setPhotos([]);
+    setConnections([]);
     setCountry('');
     setCity('');
     setPlace('');
@@ -850,9 +885,22 @@ export default function AddEntryForm({
   };
 
   const handleTagInputKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ',') {
+    if (e.key === 'ArrowDown' && tagMatches.length > 0) {
       e.preventDefault();
-      addTag(tagInput);
+      setTagMatchIndex(index => (index + 1) % tagMatches.length);
+    } else if (e.key === 'ArrowUp' && tagMatches.length > 0) {
+      e.preventDefault();
+      setTagMatchIndex(index =>
+        index <= 0 ? tagMatches.length - 1 : index - 1
+      );
+    } else if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addTag(
+        e.key === 'Enter' && tagMatches[tagMatchIndex]
+          ? tagMatches[tagMatchIndex]
+          : tagInput
+      );
+      setTagMatchIndex(-1);
     }
   };
 
@@ -1356,8 +1404,15 @@ export default function AddEntryForm({
                             <input
                               type="text"
                               value={tagInput}
-                              onChange={e => setTagInput(e.target.value)}
+                              onChange={e => {
+                                setTagInput(e.target.value);
+                                setTagMatchIndex(-1);
+                              }}
                               onKeyDown={handleTagInputKeyDown}
+                              role="combobox"
+                              aria-expanded={tagMatches.length > 0}
+                              aria-controls="tag-autocomplete"
+                              aria-autocomplete="list"
                               placeholder="Add tags (press Enter)"
                               className="block flex-1 rounded-md border border-[var(--panel-border-color)] bg-[var(--field-tint-1)] px-3 py-2 text-[var(--text-color)] shadow-sm focus:border-[var(--accent-color)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-color)]"
                             />
@@ -1369,6 +1424,38 @@ export default function AddEntryForm({
                               Add
                             </button>
                           </div>
+
+                          {/* Tag autocomplete - see `tagMatches`. Inline, not a floating dropdown, so the modal's own scroll area can't clip it. */}
+                          {tagMatches.length > 0 && (
+                            <ul
+                              id="tag-autocomplete"
+                              role="listbox"
+                              className="mt-1 flex flex-wrap gap-1"
+                            >
+                              {tagMatches.map((tag, index) => (
+                                <li
+                                  key={tag}
+                                  role="option"
+                                  aria-selected={index === tagMatchIndex}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      addTag(tag);
+                                      setTagMatchIndex(-1);
+                                    }}
+                                    className={`rounded-full border px-2 py-0.5 text-xs ${
+                                      index === tagMatchIndex
+                                        ? 'border-[var(--accent-color)] bg-[var(--field-tint-3)] text-[var(--text-color)]'
+                                        : 'border-[var(--field-border-strong)] text-[var(--text-muted-color)] hover:bg-[var(--field-tint-2)]'
+                                    }`}
+                                  >
+                                    {tag}
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
 
                           {tags.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-2">
@@ -1699,6 +1786,13 @@ export default function AddEntryForm({
                       <MediaLinksInput
                         mediaLinks={mediaLinks}
                         onChange={setMediaLinks}
+                      />
+
+                      <ConnectionsInput
+                        entryId={editingEntry?.id ?? null}
+                        entries={entries}
+                        connections={connections}
+                        onChange={setConnections}
                       />
 
                       <PhotoPicker

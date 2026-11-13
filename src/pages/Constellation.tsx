@@ -137,6 +137,7 @@
  * work on Timeline.
  */
 
+import { useRelationHighlight } from '../hooks/useRelationHighlight';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BookmarkRail from '../components/BookmarkRail';
 import EditModeBanner from '../components/EditModeBanner';
@@ -264,6 +265,10 @@ export default function Constellation({
   );
 
   const { isEditMode } = useEditMode();
+
+  // The focused entry's related entries, for the canvas to highlight -
+  // see hooks/useRelationHighlight.ts.
+  const relationHighlight = useRelationHighlight(entries);
 
   // `containerRef` is the unified `.bullet-journal-surface` box below
   // (title/subtitle/FilterBar/sidebar panel stack, all ONE container now -
@@ -514,6 +519,8 @@ export default function Constellation({
               onClose={handleClosePanel}
               onUpdateEntry={onUpdateEntry}
               collapsed={sidebarCollapsed}
+              allEntries={entries}
+              onFocusEntry={handleEntryClick}
             />
           ) : (
             <>
@@ -621,6 +628,7 @@ export default function Constellation({
         expandedEntryId={expandedEntryId}
         filterCategories={filterCategories}
         showUnrealized={showUnrealized}
+        relationHighlight={relationHighlight}
         sidebarWidth={sidebarWidth}
         sidebarSide={sidebarSide}
         resetViewSignal={resetViewSignal}

@@ -26,7 +26,7 @@
  */
 
 import { Category, getCategoryDomain, isDomain } from '../types/Category';
-import { Entry } from '../types/Entry';
+import { Entry, EntryConnection } from '../types/Entry';
 import { loadCategories, saveCategories } from './categories';
 import { loadEntries, saveEntries } from './entriesStorage';
 import { sanitizePhotos } from './photos';
@@ -160,6 +160,18 @@ export function parseImportFile(file: File): Promise<DabbleExportData> {
   });
 }
 
+/** Well-formed connections from untrusted data, or undefined if none - see applyImportedData. */
+function sanitizeConnections(value: unknown): EntryConnection[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const connections = value.flatMap((item): EntryConnection[] => {
+    if (typeof item !== 'object' || item === null) return [];
+    const { id, entryId, note } = item as Record<string, unknown>;
+    if (typeof id !== 'string' || typeof entryId !== 'string') return [];
+    return [{ id, entryId, note: typeof note === 'string' ? note : '' }];
+  });
+  return connections.length > 0 ? connections : undefined;
+}
+
 /**
  * Overwrites localStorage's entries and categories with `data` - see the
  * "REPLACE, NOT MERGE" comment at the top of this file for why this is a
@@ -177,12 +189,22 @@ export function applyImportedData(data: DabbleExportData): void {
   // (or a non-string createdAt) is dropped rather than stored, so a bad
   // value can't make an entry render as something it isn't - absent
   // status means "happened", exactly like every pre-status export.
+  //
+  // `connections` likewise keeps only well-formed links (string id and
+  // entryId, string note), dropping the field if none survive.
   const entries = data.entries.map(rawEntry => {
-    const { status, createdAt, ...entry } = rawEntry;
+    const {
+      status,
+      createdAt,
+      connections: rawConnections,
+      ...entry
+    } = rawEntry;
+    const connections = sanitizeConnections(rawConnections);
     const normalized: Entry = {
       ...entry,
       ...(isEntryStatus(status) ? { status } : {}),
       ...(typeof createdAt === 'string' ? { createdAt } : {}),
+      ...(connections ? { connections } : {}),
     };
     if (normalized.photos === undefined) return normalized;
     const { photos: rawPhotos, ...rest } = normalized;

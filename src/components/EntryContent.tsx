@@ -43,11 +43,21 @@ import AddReflectionForm from './AddReflectionForm';
 import IconButton from './IconButton';
 import MediaLinkList from './MediaLinkList';
 import PhotoGallery from './PhotoGallery';
+import RelatedEntries from './RelatedEntries';
 
 const SECTION_LABEL_CLASSNAME =
   'text-xs font-medium uppercase tracking-wide text-[var(--text-muted-color)]';
 
-export function EntryOriginalContent({ entry }: { entry: Entry }) {
+export function EntryOriginalContent({
+  entry,
+  allEntries,
+  onFocusEntry,
+}: {
+  entry: Entry;
+  /** Every entry - for the Related section (see RelatedEntries.tsx). */
+  allEntries: Entry[];
+  onFocusEntry: (entry: Entry) => void;
+}) {
   return (
     <div className="space-y-3">
       {entry.tags.length > 0 && (
@@ -121,6 +131,13 @@ export function EntryOriginalContent({ entry }: { entry: Entry }) {
           </div>
         </div>
       )}
+
+      <RelatedEntries
+        entry={entry}
+        allEntries={allEntries}
+        onFocusEntry={onFocusEntry}
+        labelClassName={SECTION_LABEL_CLASSNAME}
+      />
     </div>
   );
 }

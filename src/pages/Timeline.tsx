@@ -97,6 +97,7 @@
  * change just because the visible time window did.
  */
 
+import { useRelationHighlight } from '../hooks/useRelationHighlight';
 import {
   useCallback,
   useEffect,
@@ -214,6 +215,10 @@ export default function Timeline({
   );
 
   const { isEditMode } = useEditMode();
+
+  // The focused entry's related entries, for the canvas to highlight -
+  // see hooks/useRelationHighlight.ts.
+  const relationHighlight = useRelationHighlight(entries);
 
   // `containerRef`/`headerContentRef`/`containerLayout`/`topOffset` -
   // identical to Constellation.tsx's own measurement setup; see its
@@ -423,6 +428,8 @@ export default function Timeline({
               onClose={handleClosePanel}
               onUpdateEntry={onUpdateEntry}
               collapsed={sidebarCollapsed}
+              allEntries={entries}
+              onFocusEntry={handleEntryClick}
             />
           ) : (
             <>
@@ -498,6 +505,7 @@ export default function Timeline({
         hasAnyEntries={entries.length > 0}
         filterCategories={filterCategories}
         showUnrealized={showUnrealized}
+        relationHighlight={relationHighlight}
         onEntryClick={handleCanvasEntryClick}
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}

@@ -89,8 +89,8 @@ export default function Home() {
       </div>
 
       <p className="mt-8 text-sm text-[var(--text-muted-color)]">
-        Learn more about the story of this project, version history, and
-        upcoming plans for it in the About tab.
+        Learn more about the story of this project, what it can do so far, and
+        what I'm planning next in the About tab.
       </p>
     </div>
   );

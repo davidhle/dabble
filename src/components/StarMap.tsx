@@ -140,6 +140,7 @@ import {
 // activity's color) always matches a star's color in this view - see the
 // comment in colors.ts for why that mapping isn't duplicated per-component.
 import { getActivityColor } from '../utils/colors';
+import type { RelationHighlight } from '../hooks/useRelationHighlight';
 import {
   isUnrealized,
   UNREALIZED_DASH_ARRAY,
@@ -233,6 +234,12 @@ interface StarMapProps {
    */
   showUnrealized: boolean;
   /**
+   * The focused entry's relations - see hooks/useRelationHighlight.ts.
+   * Null when nothing is focused. While set, faint curved lines run
+   * from its star to each related one - see RELATION LINES.
+   */
+  relationHighlight: RelationHighlight | null;
+  /**
    * The sidebar overlay's current rendered width in pixels (0 when it
    * isn't rendered, i.e. `selectedEntries` is empty) - see the
    * "FULL-BLEED CANVAS" comment above and the CLICK-TO-CENTER comment
@@ -316,6 +323,18 @@ const OPENED_HIGHLIGHT_COLOR = 'var(--star-highlight-color)';
  * Spiral/Linear (utils/hollowGlyphs.ts).
  */
 const RING_RADIUS = 4.5;
+
+/** RELATION LINES (see that comment): how far each curve bows sideways, as a fraction of its length. */
+const RELATION_LINE_BOW = 0.18;
+/** Inferred (shared tag/place/mood) lines: the faintest. */
+const RELATION_LINE_INFERRED_OPACITY = 0.22;
+const RELATION_LINE_INFERRED_WIDTH = 1;
+/** Authored links: slightly stronger than inferred. */
+const RELATION_LINE_AUTHORED_OPACITY = 0.5;
+const RELATION_LINE_AUTHORED_WIDTH = 1.5;
+/** The line to the entry whose Related row is hovered. */
+const RELATION_LINE_PREVIEW_OPACITY = 0.9;
+const RELATION_LINE_PREVIEW_WIDTH = 2;
 
 /**
  * ──────────────────────────────────────────────────────────────────────
@@ -594,6 +613,7 @@ export default function StarMap({
   expandedEntryId,
   filterCategories,
   showUnrealized,
+  relationHighlight,
   sidebarWidth,
   sidebarSide,
   resetViewSignal,
@@ -1328,6 +1348,42 @@ export default function StarMap({
 
   const isReady = size.width > 0 && size.height > 0;
 
+  /**
+   * RELATION LINES: while an entry is focused, a faint curve from its
+   * star (or ribbon midpoint) to each related entry's - authored links a
+   * little stronger than inferred ones, and the one whose Related row is
+   * hovered stronger still. Only entries actually drawn (inside the time
+   * window) get a line. Each curve bows to one side by a fixed fraction of
+   * its length, so lines between the same clusters fan apart rather than
+   * stacking.
+   */
+  const relationLines = useMemo(() => {
+    if (!relationHighlight) return [];
+    const positions = new Map<string, { x: number; y: number }>([
+      ...stars.map(star => [star.entry.id, { x: star.x, y: star.y }] as const),
+      ...auroras.map(aurora => [aurora.entry.id, aurora.midpoint] as const),
+    ]);
+    const from = positions.get(relationHighlight.focusedEntryId);
+    if (!from) return [];
+
+    const { authoredIds, inferredIds } = relationHighlight;
+    return [...authoredIds, ...inferredIds].flatMap(entryId => {
+      const to = positions.get(entryId);
+      if (!to) return [];
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const controlX = (from.x + to.x) / 2 - dy * RELATION_LINE_BOW;
+      const controlY = (from.y + to.y) / 2 + dx * RELATION_LINE_BOW;
+      return [
+        {
+          entryId,
+          authored: authoredIds.has(entryId),
+          pathD: `M${from.x.toFixed(2)},${from.y.toFixed(2)} Q${controlX.toFixed(2)},${controlY.toFixed(2)} ${to.x.toFixed(2)},${to.y.toFixed(2)}`,
+        },
+      ];
+    });
+  }, [relationHighlight, stars, auroras]);
+
   // Set for O(1) membership checks per star, rebuilt only when the prop
   // itself changes.
   const openedEntryIdSet = useMemo(
@@ -1713,6 +1769,39 @@ export default function StarMap({
                 </text>
               );
             })}
+
+          {/* RELATION LINES - see that comment above. Under the stars, never clickable. */}
+          {relationLines.length > 0 && (
+            <g className="pointer-events-none" fill="none">
+              {relationLines.map(({ entryId, authored, pathD }) => {
+                const isPreviewed =
+                  relationHighlight?.previewEntryId === entryId;
+                return (
+                  <path
+                    key={entryId}
+                    d={pathD}
+                    stroke={OPENED_HIGHLIGHT_COLOR}
+                    strokeLinecap="round"
+                    strokeWidth={
+                      isPreviewed
+                        ? RELATION_LINE_PREVIEW_WIDTH
+                        : authored
+                          ? RELATION_LINE_AUTHORED_WIDTH
+                          : RELATION_LINE_INFERRED_WIDTH
+                    }
+                    strokeOpacity={
+                      isPreviewed
+                        ? RELATION_LINE_PREVIEW_OPACITY
+                        : authored
+                          ? RELATION_LINE_AUTHORED_OPACITY
+                          : RELATION_LINE_INFERRED_OPACITY
+                    }
+                    className="transition-[stroke-opacity,stroke-width] duration-150"
+                  />
+                );
+              })}
+            </g>
+          )}
 
           {stars.map(({ entry, x, y, radius: starRadius, color, hollow }) => {
             // A hollow single-date entry is a ring (see RING_RADIUS) at

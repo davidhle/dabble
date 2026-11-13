@@ -168,6 +168,7 @@ import {
 } from '../utils/hollowGlyphs';
 import { DateRange, useTimeRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
+import type { RelationHighlight } from '../hooks/useRelationHighlight';
 import {
   isSkipped,
   isUnrealized,
@@ -226,6 +227,12 @@ interface LinearTimelineProps {
    * `filterCategories`.
    */
   showUnrealized: boolean;
+  /**
+   * The focused entry's relations - see hooks/useRelationHighlight.ts.
+   * Null when nothing is focused. While set, entries that aren't related
+   * to it get the same dimming the category filter uses.
+   */
+  relationHighlight: RelationHighlight | null;
   /**
    * Called with the clicked entry when a point or range is clicked -
    * wired by Timeline.tsx to useEntrySelection's `handleEntryClick`, the
@@ -550,6 +557,7 @@ export default function LinearTimeline({
   hasAnyEntries,
   filterCategories,
   showUnrealized,
+  relationHighlight,
   onEntryClick,
   openedEntryIds,
   expandedEntryId,
@@ -663,10 +671,16 @@ export default function LinearTimeline({
     () => new Set<string>(filterCategories),
     [filterCategories]
   );
-  /** Dimmed by the category filter, or by the "Planned & skipped" status filter. */
+  /**
+   * Dimmed by the category filter, the "Planned & skipped" status filter,
+   * or - while an entry is focused - by not being related to it (see
+   * hooks/useRelationHighlight.ts).
+   */
   const isEntryFilteredOut = (entry: Entry): boolean =>
     !activeCategorySet.has(entry.activityType) ||
-    (!showUnrealized && isUnrealized(entry));
+    (!showUnrealized && isUnrealized(entry)) ||
+    (relationHighlight !== null &&
+      !relationHighlight.highlightedIds.has(entry.id));
 
   /**
    * NOW LINE: a dashed vertical line at today's date, so planned entries

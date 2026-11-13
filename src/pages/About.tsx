@@ -139,9 +139,49 @@ export default function About() {
                   "Time coils outward from a center point — the earliest entry at the core, the most recent at the outer edge — inspired directly by my original master's thesis prototype, ChoreoMapper.",
               },
               {
-                name: 'Time range brush selector',
+                name: 'Linked views',
                 description:
-                  'Narrow any visualization down to a specific window of time, shared consistently across all three views.',
+                  'One time range brush narrows all three views to the same window, and whatever entries are open stay open as you switch between them.',
+              },
+              {
+                name: 'Movement & Orbit',
+                description:
+                  'Every category belongs to one of two domains: Movement, the things you practice, drawn as solid marks; and Orbit, the life and culture around them, drawn hollow. In the constellation, Orbit periods run as aurora ribbons through the practices they overlapped with.',
+              },
+              {
+                name: 'Flexible date precision',
+                description:
+                  'Entries don\'t need an exact date. Log something as vague as "October - November 2021," attach a real date range for multi-day events, or skip the time of day entirely if you only remember the day. Locations can be just as partial: a country, a city, a specific place, or any mix.',
+              },
+              {
+                name: 'Dynamic categories',
+                description:
+                  "Categories aren't fixed in advance. Add a new one the moment you pick up a new hobby, and it's woven into the visualizations right away. Rename or recolor any of them later from a curated palette, colors already in use, or a full custom picker.",
+              },
+              {
+                name: 'Edit entries',
+                description:
+                  'Update any entry after the fact — correct a date, add a location, reclassify its category — or switch on Edit Mode to jump straight from any star, point, or arc into its editor.',
+              },
+              {
+                name: 'Reflections',
+                description:
+                  'Add dated, backdatable follow-up notes to any entry — capture how you feel about it in hindsight, with its own mood, text, and media, while staying linked to the original. A reflection written ahead of the event is marked "Before."',
+              },
+              {
+                name: 'Photos & video',
+                description:
+                  'Attach photos with captions and open them full-size in a lightbox. YouTube links play right in the sidebar, loading only once you press play.',
+              },
+              {
+                name: 'Planned & skipped',
+                description:
+                  'Log something before it happens. Plans are drawn dashed, and the spiral carries on as a dotted line past today. Once the date passes, the entry asks "Did this happen?" — and the ones that didn\'t stay as skipped, a record of what I meant to do.',
+              },
+              {
+                name: 'Connections',
+                description:
+                  'Entries that share a tag, place, or mood show up as related, and you can link two entries yourself with a note on why. Focusing an entry draws faint lines to its connections in the constellation and dims everything unrelated in the timeline and spiral.',
               },
               {
                 name: 'Light & dark themes',
@@ -154,34 +194,9 @@ export default function About() {
                   'Export your entries as a portable JSON file, or import one to pick up where you left off. Anyone visiting can also reset to a blank slate and start their own constellation from scratch.',
               },
               {
-                name: 'Flexible date precision',
-                description:
-                  'Entries don\'t need an exact date. Log something as vague as "October - November 2021," attach a real date range for multi-day events, or skip the time of day entirely if you only remember the day.',
-              },
-              {
-                name: 'Dynamic categories',
-                description:
-                  "Categories aren't fixed in advance. Add a new one the moment you pick up a new hobby, and it's woven into the visualizations right away with its own color.",
-              },
-              {
-                name: 'Edit entries',
-                description:
-                  'Update any entry after the fact — correct a date, add a location, reclassify its category — or switch on Edit Mode to jump straight from any star, point, or arc into its editor.',
-              },
-              {
-                name: 'Reflections',
-                description:
-                  'Add dated, backdatable follow-up notes to any past entry — capture how you feel about it in hindsight, with its own mood, text, and media, while staying linked to the original. Navigate between multiple open entries via small bookmark tabs, complete with a full undo history.',
-              },
-              {
                 name: 'Customizable sidebar',
                 description:
-                  'Resize the sidebar by dragging its edge, or flip it to either side of the screen — useful on a wide monitor, or if a right-anchored layout simply suits you better.',
-              },
-              {
-                name: 'Category management',
-                description:
-                  'Rename any category, or recolor it from a curated palette, a set of colors already in use, or a full custom color picker — all from one place.',
+                  'Resize the sidebar by dragging its edge, or flip it to either side of the screen. Several open entries sit in small bookmark tabs, with a full undo history.',
               },
             ]}
           />
@@ -193,17 +208,13 @@ export default function About() {
           </h2>
           <FeatureList
             items={[
-              'Visualizing connections between events (e.g., locations, feelings, life events)',
-              'Custom positioning of the points in the constellation view',
-              'Media attachments (photos, voice notes, ...)',
-              'Robust location input — attach a real, mappable location to an entry (via a geocoding-based location search) rather than just plain text, while still supporting simple free-text location entries. This lays the groundwork for future connections between entries based on shared geographic location.',
-              'List/table view — browse all entries as a sortable, filterable table or database-style list, with a toggle to switch between a compact table view and a card/block-based view (similar to Notion), as an alternative way to explore entries outside of the visualizations.',
-              'Video thumbnails and previews from linked media (YouTube, Instagram, etc.)',
-              '3D renderings of the visualizations using Three.js',
-              'Backend development for real cross-device sync (likely via Cloudflare Workers)',
-              'User authentication, potentially replacing the current JSON import/export as the primary way to save and restore your data',
-              "Multi-category entries — associate an entry with more than one category (e.g. a trip that involved both shuffle dancing and pole dance & calisthenics training), represented visually maybe with a gradient blending each category's color.",
-              'Material artifacts — objects tied to a practice or era rather than a single date (a pair of shoes, a song, a video that shaped a style), shown as a small gallery rather than a dated entry, with visual connection lines linking them to the events and orbit moments they relate to across the visualizations.',
+              'Connection lines in the timeline and spiral too, not just the constellation',
+              'Suggested connections, and gentle prompts to revisit older entries',
+              "Multi-category entries — a trip that involved both shuffle and pole, for example, maybe shown as a blend of each category's color",
+              'Material artifacts — objects, songs, or videos tied to a practice or era rather than a single date',
+              'Richer media: voice notes, photos in reflections, previews for more providers than YouTube, and real, mappable locations',
+              'A list/table view for browsing entries outside the visualizations',
+              'Accounts and cross-device sync, replacing export/import and getting past browser storage limits (which photos make matter more)',
             ]}
           />
         </div>

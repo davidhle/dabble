@@ -473,6 +473,7 @@ import {
 } from '../utils/hollowGlyphs';
 import { DateRange, useTimeRange } from '../context/TimeRangeContext';
 import { getActivityColor } from '../utils/colors';
+import type { RelationHighlight } from '../hooks/useRelationHighlight';
 import {
   isSkipped,
   isUnrealized,
@@ -537,6 +538,12 @@ interface SpiralTimelineProps {
    * `filterCategories`.
    */
   showUnrealized: boolean;
+  /**
+   * The focused entry's relations - see hooks/useRelationHighlight.ts.
+   * Null when nothing is focused. While set, entries that aren't related
+   * to it get the same dimming the category filter uses.
+   */
+  relationHighlight: RelationHighlight | null;
   /**
    * Called with the clicked entry when a point or arc is clicked - wired
    * by Spiral.tsx to useEntrySelection's `handleEntryClick`, the same
@@ -1421,6 +1428,7 @@ export default function SpiralTimeline({
   hasAnyEntries,
   filterCategories,
   showUnrealized,
+  relationHighlight,
   onEntryClick,
   openedEntryIds,
   expandedEntryId,
@@ -1919,10 +1927,16 @@ export default function SpiralTimeline({
     () => new Set<string>(filterCategories),
     [filterCategories]
   );
-  /** Dimmed by the category filter, or by the "Planned & skipped" status filter. */
+  /**
+   * Dimmed by the category filter, the "Planned & skipped" status filter,
+   * or - while an entry is focused - by not being related to it (see
+   * hooks/useRelationHighlight.ts).
+   */
   const isEntryFilteredOut = (entry: Entry): boolean =>
     !activeCategorySet.has(entry.activityType) ||
-    (!showUnrealized && isUnrealized(entry));
+    (!showUnrealized && isUnrealized(entry)) ||
+    (relationHighlight !== null &&
+      !relationHighlight.highlightedIds.has(entry.id));
 
   // Whether there's anything actually visible to plot right now - see
   // StarMap.tsx's identical `isEmpty` comment and VizEmptyState.tsx's own

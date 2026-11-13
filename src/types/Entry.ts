@@ -313,6 +313,29 @@ export interface Entry {
    * happened. Absent on entries created before this field existed.
    */
   createdAt?: string;
+
+  /**
+   * Links to other entries the user drew by hand, each with a short note
+   * on why - see EntryConnection below and utils/entryRelations.ts.
+   * Stored on one side only, but shown on both: if A links to B, B's
+   * Related section lists A too. Deleting an entry removes every
+   * connection pointing at it (see App.tsx's deleteEntry).
+   *
+   * OPTIONAL & BACKWARD-COMPATIBLE: absent means no authored links.
+   */
+  connections?: EntryConnection[];
+}
+
+/** One authored link from an entry to another - see Entry.connections. */
+export interface EntryConnection {
+  /** Generated with crypto.randomUUID(), like Entry.id. */
+  id: string;
+
+  /** The id of the entry this one links to. */
+  entryId: string;
+
+  /** "Why are these linked?" - may be empty. */
+  note: string;
 }
 
 /** See Entry.visualStyle. */

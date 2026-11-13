@@ -67,6 +67,7 @@
  * not in how selecting, filtering, or time-windowing them works.
  */
 
+import { useRelationHighlight } from '../hooks/useRelationHighlight';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BookmarkRail from '../components/BookmarkRail';
 import EditModeBanner from '../components/EditModeBanner';
@@ -176,6 +177,10 @@ export default function Spiral({
   );
 
   const { isEditMode } = useEditMode();
+
+  // The focused entry's related entries, for the canvas to highlight -
+  // see hooks/useRelationHighlight.ts.
+  const relationHighlight = useRelationHighlight(entries);
 
   // `containerRef`/`headerContentRef`/`containerLayout`/`topOffset` -
   // identical to Constellation.tsx's/Timeline.tsx's own measurement setup
@@ -366,6 +371,8 @@ export default function Spiral({
               onClose={handleClosePanel}
               onUpdateEntry={onUpdateEntry}
               collapsed={sidebarCollapsed}
+              allEntries={entries}
+              onFocusEntry={handleEntryClick}
             />
           ) : (
             <>
@@ -441,6 +448,7 @@ export default function Spiral({
         hasAnyEntries={entries.length > 0}
         filterCategories={filterCategories}
         showUnrealized={showUnrealized}
+        relationHighlight={relationHighlight}
         onEntryClick={handleCanvasEntryClick}
         openedEntryIds={openedEntryIds}
         expandedEntryId={expandedEntryId}

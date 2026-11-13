@@ -20,6 +20,7 @@
 
 import {
   Entry,
+  EntryConnection,
   EntryLocation,
   EntryPhoto,
   EntryStatus,
@@ -58,6 +59,8 @@ interface RawSeedEntry {
   status?: EntryStatus | null;
   /** Optional creation time - see Entry.createdAt. */
   createdAt?: string | null;
+  /** Optional authored links - see Entry.connections. Passed through as-is. */
+  connections?: EntryConnection[] | null;
 }
 
 /**
@@ -147,6 +150,7 @@ function toEntry(raw: RawSeedEntry): Entry {
     ...(raw.photos?.length ? { photos: raw.photos } : {}),
     ...(raw.status ? { status: raw.status } : {}),
     ...(raw.createdAt ? { createdAt: raw.createdAt } : {}),
+    ...(raw.connections?.length ? { connections: raw.connections } : {}),
   };
 }
 

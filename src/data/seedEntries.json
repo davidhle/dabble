@@ -271,8 +271,8 @@
   {
     "id": "e0db107f-6399-4fa7-95a3-d355aa251765",
     "activityType": "Health",
-    "title": "Rough NDPH Period",
-    "description": "Got a daily headache, later to be diagnosed as NDPH.\n\nEnded the range for when I began a medication that brought the headache to the lowest pain threshold thusfar.",
+    "title": "Rough Health Period",
+    "description": "A long stretch of ongoing health issues that affected my practice.\n\nThe range ends when I began a treatment that finally brought things to their most manageable point so far.",
     "notes": "",
     "tags": [],
     "mediaLinks": [],
@@ -665,7 +665,7 @@
       {
         "id": "b62b5e98-f7a8-441d-b425-11688b617acb",
         "writtenDate": "2026-09-23T00:00:00.000Z",
-        "text": "Especially with recent news about Xhufflis having had inappropriate communications with female minors in the community, and also I recently saw Lianet post on her story about women in the scene, I remembered this talk that Shuffle Well-Being hosted to talk about women in the battle scene in Europe.\n\nI'd already for some time felt a bit disconnected from the scene for several reasons, but attending this talk was nice to hear how others also have been feeling a bit estranged--I felt connected with those sharing their thoughts, as I often do as a gay man in a cis male dominated & heternormative space.\n\nI especially remember this mention of certain styles \"naturally leaning\" more feminine and masculine in their energies, and Théo coming up to me that he felt seen in what I'd commented, bringing up how he thinks it's cool that I'm also dabbling in pole dance which is female dominant, and that he agreed with me that having a gender binary framework on dance and dance styles can be limiting to dancers and the community.",
+        "text": "Especially with recent news about misconduct in the community, and also I recently saw a friend post on her story about women in the scene, I remembered this talk that Shuffle Well-Being hosted to talk about women in the battle scene in Europe.\n\nI'd already for some time felt a bit disconnected from the scene for several reasons, but attending this talk was nice to hear how others also have been feeling a bit estranged--I felt connected with those sharing their thoughts, as I often do as a gay man in a cis male dominated & heternormative space.\n\nI especially remember this mention of certain styles \"naturally leaning\" more feminine and masculine in their energies, and Théo coming up to me that he felt seen in what I'd commented, bringing up how he thinks it's cool that I'm also dabbling in pole dance which is female dominant, and that he agreed with me that having a gender binary framework on dance and dance styles can be limiting to dancers and the community.",
         "mood": [
           "Seen",
           "Detached"
@@ -855,7 +855,7 @@
     ],
     "mediaLinks": [
       {
-        "type": "Video",
+        "type": "Link",
         "url": "https://www.youtube.com/watch?v=oOeBGT2mU90"
       }
     ],
@@ -876,8 +876,58 @@
       "Safe",
       "Seen"
     ],
-    "timestamp": "2026-10-17T00:00:00.000Z",
+    "timestamp": "2026-10-17T00:00:00.000Z"
+  },
+  {
+    "id": "394bc124-a47a-4a58-997b-e941e687af00",
+    "activityType": "ContemporaryDance",
+    "title": "Queer/Gay men contemporary workshop",
+    "description": "\"Contemporary dance through Latin American and queer perspectives\" - Roque Vargas\n\nSaw We Are Village was hosting this contemporary class, and chose to go because I'd been craving to explore contemporary more, and to potentially make queer and gay male friends.\n\nPracticed some moves which were similar ish to yoga and (straddle) handstand movements which I'd practiced in other contexts, and then tied them together into a lil choreo at the end. Connected with the instructor and the organizer of the event Munir, who also works at the community center :)",
+    "notes": "It was cool and inspiring to see the similarities specifically to movements I'd been practicing in pole and yoga classes, makes me want to work further on the connections between events on this tool",
+    "tags": [
+      "floorwork",
+      "community",
+      "belonging",
+      "queer"
+    ],
+    "mediaLinks": [],
+    "location": {
+      "country": "Germany",
+      "city": "Berlin",
+      "place": "We Are Village"
+    },
+    "mood": [
+      "Happy",
+      "Connected",
+      "Inspired"
+    ],
+    "timestamp": "2026-11-09T00:00:00.000Z",
+    "hasTime": false
+  },
+  {
+    "id": "8f0346cb-0a9b-4c24-b248-5bfb337f5241",
+    "activityType": "ShuffleDance",
+    "title": "Her Aura Summit",
+    "description": "An event organized by and for women with a top 32 women's/flinta bracket and a top 16 mixed one",
+    "notes": "I think this'll be the first shuffle event I'll go to after a while... I haven't fully figured out myself the concrete reason(s) why I've become inactive with shuffling as a practice and the community, but the thought of a space like this motivates me to go and get back into shuffling--spaces for FLINTA that deprioritize the male gaze and other patriarchal characteristics align well with my values and lived experiences as a gay BIPOC man\n\nthe biases that favor cishet men are and have been there in shuffle space, even if unconscious, implicit or unintentional",
+    "tags": [],
+    "mediaLinks": [
+      {
+        "type": "Video",
+        "url": "https://www.instagram.com/heraurasummit/"
+      }
+    ],
+    "location": {
+      "country": "Spain",
+      "city": "Barcelona"
+    },
+    "mood": [
+      "Curious"
+    ],
+    "timestamp": "2027-03-12T00:00:00.000Z",
     "hasTime": false,
-    "visualStyle": "hollow"
+    "endTimestamp": "2027-03-13T23:00:00.000Z",
+    "status": "planned",
+    "createdAt": "2026-11-13T13:37:34.545Z"
   }
 ]

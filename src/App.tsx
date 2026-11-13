@@ -57,6 +57,7 @@ import {
   recordDeletedEntryId,
 } from './utils/entriesStorage';
 import { initializeDefaultDataForFirstVisit } from './utils/initializeFirstVisit';
+import { removeConnectionsTo } from './utils/entryRelations';
 import { TimeRangeProvider } from './context/TimeRangeContext';
 import { EntrySelectionProvider } from './context/EntrySelectionContext';
 import { EditModeProvider } from './context/EditModeContext';
@@ -267,7 +268,14 @@ function App() {
    */
   const deleteEntry = (entryId: string) => {
     recordDeletedEntryId(entryId);
-    commitEntries(entries.filter(entry => entry.id !== entryId));
+    // Also strips any other entry's connection pointing at this one - see
+    // Entry.connections.
+    commitEntries(
+      removeConnectionsTo(
+        entries.filter(entry => entry.id !== entryId),
+        entryId
+      )
+    );
   };
 
   /**

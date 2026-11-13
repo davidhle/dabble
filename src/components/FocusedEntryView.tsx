@@ -85,6 +85,10 @@ interface FocusedEntryViewProps {
   onUpdateEntry: (entry: Entry) => boolean;
   /** Whether the sidebar is collapsed - stops any playing video, see ActivePlayerProvider. */
   collapsed: boolean;
+  /** Every entry (not just the selection) - for the Related section, see RelatedEntries.tsx. */
+  allEntries: Entry[];
+  /** Focuses another entry from the Related section - EntrySelectionContext's `handleEntryClick`. */
+  onFocusEntry: (entry: Entry) => void;
 }
 
 export default function FocusedEntryView({
@@ -100,6 +104,8 @@ export default function FocusedEntryView({
   onClose,
   onUpdateEntry,
   collapsed,
+  allEntries,
+  onFocusEntry,
 }: FocusedEntryViewProps) {
   const entry = selectedEntries.find(
     selected => selected.entry.id === focusedEntryId
@@ -295,7 +301,11 @@ export default function FocusedEntryView({
             resetKey={`${entry.id}|${view}|${collapsed ? 'collapsed' : 'open'}`}
           >
             {view === 'original' ? (
-              <EntryOriginalContent entry={entry} />
+              <EntryOriginalContent
+                entry={entry}
+                allEntries={allEntries}
+                onFocusEntry={onFocusEntry}
+              />
             ) : (
               <EntryReflections
                 // Remounted on each skip so its add form opens - see
